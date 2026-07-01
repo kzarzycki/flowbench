@@ -1,5 +1,9 @@
 # flowbench
 
+> [!WARNING]
+> **🚧 WORK IN PROGRESS — DO NOT USE YET. 🚧**
+> This project is early and unstable: APIs, vocabulary, and results will change without notice, and nothing here is validated for real use. Not ready for adoption, dependency, or citation. Watch/star if you're curious, but don't build on it.
+
 A benchmark that compares agentic **flows** — different ways of driving a coding agent at a goal
 (vanilla, superpowers, or any bundle of skills/MCPs) — on a fixed **case**, all driven through
 [omnigent](https://github.com/) as the meta-harness. Flows differ only by their bundle, so a
