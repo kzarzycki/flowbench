@@ -1,0 +1,19 @@
+[tools]
+python = "3.13"
+uv = "latest"
+pre-commit = "latest"
+
+[tasks.test]
+run = "uv run pytest"
+
+[tasks.lint]
+run = "uv run ruff check ."
+
+[tasks.fmt]
+run = "uv run ruff format ."
+
+[tasks.bootstrap]
+run = "uv sync && pre-commit install --install-hooks"
+
+[hooks]
+postinstall = "pre-commit install --install-hooks"

@@ -1,0 +1,34 @@
+# Secrets / local env
+.env
+.env.*
+!.env.example
+
+# OS / editor
+.DS_Store
+*.swp
+.idea/
+.vscode/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+dist/
+build/
+*.egg-info/
+.coverage
+coverage.xml
+htmlcov/
+
+# cross-session memory + logs (local only)
+.memsearch/
+/logs/
+/runs/
+/reports/
+
+# safety net: run-dirs belong in a sibling ../flowbench-runs/, never in the repo
+flowbench-runs/
