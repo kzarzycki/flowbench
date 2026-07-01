@@ -800,7 +800,7 @@ spike = [
 requires-dist = [
     { name = "diff-cover", marker = "extra == 'dev'", specifier = ">=9" },
     { name = "inspect-ai", marker = "extra == 'spike'", specifier = ">=0.3.240" },
-    { name = "omnigent-client", marker = "extra == 'spike'", specifier = "==0.1.1" },
+    { name = "omnigent-client", marker = "extra == 'spike'", specifier = "==0.2.0" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
     { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.23" },
     { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=5" },
@@ -1881,14 +1881,14 @@ wheels = [
 
 [[package]]
 name = "omnigent"
-version = "0.1.1"
+version = "0.2.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "alembic" },
     { name = "anyio" },
     { name = "argon2-cffi" },
     { name = "cachetools" },
-    { name = "cel-expr-python" },
+    { name = "cel-expr-python", marker = "(platform_machine != 'aarch64' and platform_machine != 'x86_64') or (platform_machine != 'aarch64' and sys_platform != 'darwin')" },
     { name = "claude-agent-sdk" },
     { name = "click" },
     { name = "fastapi" },
@@ -1919,28 +1919,28 @@ dependencies = [
     { name = "tomlkit" },
     { name = "uvicorn", extra = ["standard"] },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/a8/d7/b13b8180fbae210d65adcaddd0841d80acf5db55ebaccd16944b7bcab6f3/omnigent-0.1.1.tar.gz", hash = "sha256:efde6d77485a6de133de29213e1ad7ff29c54d05425b55460cad580b81884269", size = 8386875, upload-time = "2026-06-16T09:44:06.666Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/0d/8e/0ac178a3747da1b888c0bf57bfecf85ab93075331936c659fef4d88cd079/omnigent-0.2.0.tar.gz", hash = "sha256:c7638d1f8c7e2f75967a343520a090a87abfe76e42d02c606985e98ea5f5f2f6", size = 8620174, upload-time = "2026-06-19T03:45:19.609Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/f3/04/2a43ebb71159fb5a4693aa8c074c130cf7f6a162b5d75e7cb9236814ee48/omnigent-0.1.1-py3-none-any.whl", hash = "sha256:f2cd2989dc4062400139d93c580e249735f55a6ef4b1b4ffcbb764dd881bdc3c", size = 9219223, upload-time = "2026-06-16T09:44:03.967Z" },
+    { url = "https://files.pythonhosted.org/packages/ba/16/1954d39836b648bd23f1dbd964f2c48fe0697a7e8b3cac6bc2fc83b79514/omnigent-0.2.0-py3-none-any.whl", hash = "sha256:27cce458403cb3ed539e86a54facb3d82d04bd3bfea54f37884d6380a8e72713", size = 9446243, upload-time = "2026-06-19T03:45:16.859Z" },
 ]
 
 [[package]]
 name = "omnigent-client"
-version = "0.1.1"
+version = "0.2.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "httpx" },
     { name = "omnigent" },
     { name = "pydantic" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/74/d8/7d56f8729d70399ace2864c9a1cec56d5f347d89b7ecb21f6b8178d3da36/omnigent_client-0.1.1.tar.gz", hash = "sha256:4102b617dae976637d8f8ef3a089255ed9e4a85b8af63fb169fe88114def6d4b", size = 80127, upload-time = "2026-06-16T09:42:40.168Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/f4/ab/895be231dd207081cddfa8149a2178bb6b5978208193d86814cbb31afd5c/omnigent_client-0.2.0.tar.gz", hash = "sha256:7f26f5dd995615147c144c61345c4edceddeccaf13c8181f3c8394f1363902bc", size = 83452, upload-time = "2026-06-19T03:46:29.806Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/00/7b/a5095fd5dd18d367018aa85757d794f93992a2f2f83499b3c4f80eb5857c/omnigent_client-0.1.1-py3-none-any.whl", hash = "sha256:15ed3b50daa894bf7604e0ceb8457178549560cf6ef33ca994356caeb2f019ed", size = 94310, upload-time = "2026-06-16T09:42:39.095Z" },
+    { url = "https://files.pythonhosted.org/packages/0a/c1/662c7664dad64311c4088f7def1e52bb4e6e4476e90f33a5832eda06202d/omnigent_client-0.2.0-py3-none-any.whl", hash = "sha256:7002e24cfc35b2593124f8f4b963c95803671da709912104ed3d877db11f0271", size = 97562, upload-time = "2026-06-19T03:46:28.639Z" },
 ]
 
 [[package]]
 name = "omnigent-ui-sdk"
-version = "0.1.1"
+version = "0.2.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "omnigent-client" },
@@ -1948,9 +1948,9 @@ dependencies = [
     { name = "pyyaml" },
     { name = "rich" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/bb/5c/b29c62d638747af2f0ea147d6861b905b83b63a795e0086c6a15d92e64b9/omnigent_ui_sdk-0.1.1.tar.gz", hash = "sha256:0db176f78597f25ae60049853d9fcbe01d87bf479f3019b0a032cc367612ab50", size = 68944, upload-time = "2026-06-16T09:43:55.472Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/47/40/997a3204bac20ad5d40050d90d6ea15f6163f055841fc3686ab25599e25f/omnigent_ui_sdk-0.2.0.tar.gz", hash = "sha256:e3ffe9c3150d73f4a8a5375ce86c8eea1b2ffbcd59e48ac36a6beb66b6b97ea6", size = 69052, upload-time = "2026-06-19T03:46:24.453Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/29/af/2a5c9d068f11ea1074c07604fe651dafd950f1a720e70fe2cd90ec924d3f/omnigent_ui_sdk-0.1.1-py3-none-any.whl", hash = "sha256:0a73378acaced448c090a392e2d297ef4541a252c276b2db087e948567b95a48", size = 72982, upload-time = "2026-06-16T09:43:54.437Z" },
+    { url = "https://files.pythonhosted.org/packages/7f/03/bb322e70aed11389313de9b646487d189f1908690f578606b58c796d06c5/omnigent_ui_sdk-0.2.0-py3-none-any.whl", hash = "sha256:3d5dc76cd5e0afdfae7eef1bfac0dfa33652708340ceedd8a87d51ee9241f10e", size = 72978, upload-time = "2026-06-19T03:46:23.268Z" },
 ]
 
 [[package]]
@@ -2781,15 +2781,15 @@ wheels = [
 
 [[package]]
 name = "rich"
-version = "13.9.4"
+version = "14.3.4"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "markdown-it-py" },
     { name = "pygments" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/ab/3a/0316b28d0761c6734d6bc14e770d85506c986c85ffb239e688eeaab2c2bc/rich-13.9.4.tar.gz", hash = "sha256:439594978a49a09530cff7ebc4b5c7103ef57baf48d5ea3184f21d9a2befa098", size = 223149, upload-time = "2024-11-01T16:43:57.873Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/e9/67/cae617f1351490c25a4b8ac3b8b63a4dda609295d8222bad12242dfdc629/rich-14.3.4.tar.gz", hash = "sha256:817e02727f2b25b40ef56f5aa2217f400c8489f79ca8f46ea2b70dd5e14558a9", size = 230524, upload-time = "2026-04-11T02:57:45.419Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/19/71/39c7c0d87f8d4e6c020a393182060eaefeeae6c01dab6a84ec346f2567df/rich-13.9.4-py3-none-any.whl", hash = "sha256:6049d5e6ec054bf2779ab3358186963bac2ea89175919d699e378b99738c2a90", size = 242424, upload-time = "2024-11-01T16:43:55.817Z" },
+    { url = "https://files.pythonhosted.org/packages/b3/76/6d163cfac87b632216f71879e6b2cf17163f773ff59c00b5ff4900a80fa3/rich-14.3.4-py3-none-any.whl", hash = "sha256:07e7adb4690f68864777b1450859253bed81a99a31ac321ac1817b2313558952", size = 310480, upload-time = "2026-04-11T02:57:47.484Z" },
 ]
 
 [[package]]
@@ -2944,8 +2944,8 @@ name = "secretstorage"
 version = "3.5.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "cryptography" },
-    { name = "jeepney" },
+    { name = "cryptography", marker = "sys_platform != 'win32'" },
+    { name = "jeepney", marker = "sys_platform != 'win32'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/1c/03/e834bcd866f2f8a49a85eaff47340affa3bfa391ee9912a952a1faa68c7b/secretstorage-3.5.0.tar.gz", hash = "sha256:f04b8e4689cbce351744d5537bf6b1329c6fc68f91fa666f60a380edddcd11be", size = 19884, upload-time = "2025-11-23T19:02:53.191Z" }
 wheels = [
@@ -3565,7 +3565,7 @@ name = "zipfile-zstd"
 version = "0.0.4"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "zstandard" },
+    { name = "zstandard", marker = "python_full_version < '3.14'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/f7/2a/2e0941bc0058d10ab37d8c578b94a19f611f6ae54f124140f2fb451f0932/zipfile-zstd-0.0.4.tar.gz", hash = "sha256:c1498e15b7922a3d1af0ea55df8b11b2af4e8f7e0e80e414e25d66899f7def89", size = 4603, upload-time = "2021-12-08T07:38:16.245Z" }
 wheels = [
