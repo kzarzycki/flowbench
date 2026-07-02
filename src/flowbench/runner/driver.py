@@ -205,6 +205,7 @@ class OmnigentDriver(AgentDriver):
         default_factory=lambda: os.environ.get("OMNIGENT_SERVER", "http://127.0.0.1:6767")
     )
     model: str = field(default_factory=lambda: os.environ.get("OMNIGENT_PROBE_MODEL", "sonnet"))
+    reasoning_effort: str | None = None
     agent_name: str = "claude_code"
     agent_prompt: str | None = None
     agent_description: str = (
@@ -316,6 +317,11 @@ class OmnigentDriver(AgentDriver):
             model_override=self.model,
             silent=True,
         )
+        if self.reasoning_effort:
+            await self._client.sessions.set_reasoning_effort(
+                session_id,
+                reasoning_effort=self.reasoning_effort,
+            )
         self._runner_id = await launch_or_reuse_daemon_runner(
             self._http,
             host_id=host_id,
