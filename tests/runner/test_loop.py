@@ -229,7 +229,7 @@ async def test_loop_bails_on_failed_status():
     turns = [TurnResult("failed", "", False)]
     driver = _FakeDriver(turns, {"items": []})
     user = _StubModel(["unused"])
-    await run_agent_session(
+    session = await run_agent_session(
         driver,
         user,
         first_prompt=task.FIRST_PROMPT,
@@ -240,3 +240,6 @@ async def test_loop_bails_on_failed_status():
     )
     assert user.seen == []  # never simulated
     assert driver.closed
+    # the non-idle exit is recorded, not silent (live-001 shipped a timeout invisibly)
+    assert session["exit_status"] == "failed"
+    assert session["turns"] == 0

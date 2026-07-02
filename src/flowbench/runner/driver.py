@@ -85,6 +85,14 @@ def last_assistant_text(items: list[dict]) -> str:
     return ""
 
 
+def n_assistant_messages(items: list[dict]) -> int:
+    return sum(
+        1
+        for it in items
+        if isinstance(it, dict) and it.get("type") == "message" and it.get("role") == "assistant"
+    )
+
+
 # Harness control injections that are NOT part of the user/agent conversation —
 # Claude Code surfaces sub-agent completions as role=user `<task-notification>`
 # messages. They must not pollute the transcript or be read as conversation.
@@ -213,6 +221,11 @@ class OmnigentDriver(AgentDriver):
     )
     git_init: bool = False
     turn_timeout_s: float = 240.0
+    # `idle` can be observed before the runner picks the turn up (fresh session)
+    # or before the reply item persists — wait up to this long for a NEW assistant
+    # message before trusting an idle turn (see send()).
+    settle_timeout_s: float = 60.0
+    settle_poll_s: float = 2.0
     # Per-flow bundle inputs (see runner.flow.Flow). Defaults reproduce the vanilla
     # baseline: claude-native, host skills visible, nothing added to the bundle.
     harness: str = "claude-native"
@@ -341,18 +354,32 @@ class OmnigentDriver(AgentDriver):
         raise RuntimeError("no online host with claude-native configured")
 
     async def send(self, text: str) -> TurnResult:
+        n_before = n_assistant_messages(await self._list_items())
         async for ev in self._chat.send(text):  # inject; envelope completes fast
             self._captured.append(_to_jsonable(ev))
         status = await self._wait_idle()
-        items = await self._client.sessions.list_items(
-            self._chat.session_id, order="asc", limit=200
-        )
+        items = await self._list_items()
+        # Settle: an idle status with no NEW assistant message is the pickup/persist
+        # race (a live judge run returned an empty verdict this way) — keep polling
+        # until the reply lands or the settle cap expires.
+        settle = time.monotonic() + self.settle_timeout_s
+        while (
+            status == "idle"
+            and n_assistant_messages(items) <= n_before
+            and time.monotonic() < settle
+        ):
+            await asyncio.sleep(self.settle_poll_s)
+            status = await self._wait_idle()
+            items = await self._list_items()
         return TurnResult(
             status=status,
             assistant_text=last_assistant_text(items),
             artifact_exists=self.artifact_path() is not None,
             child_busy=any_child_busy(self._captured),
         )
+
+    async def _list_items(self) -> list[dict]:
+        return await self._client.sessions.list_items(self._chat.session_id, order="asc", limit=200)
 
     async def _wait_idle(self, min_wait: float = 4.0) -> str:
         start, seen_running = time.monotonic(), False
@@ -390,9 +417,7 @@ class OmnigentDriver(AgentDriver):
         return f"{self.server_url}/c/{cid}" if cid else None
 
     async def capture_session(self) -> dict[str, Any]:
-        items = await self._client.sessions.list_items(
-            self._chat.session_id, order="asc", limit=200
-        )
+        items = await self._list_items()
         items = dedup_items(items)  # clean: drop capture-doubles + control injections
         artifact = self.artifact_path()
         return {

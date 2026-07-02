@@ -96,6 +96,11 @@ async def run_agent_session(
             if result.assistant_text:
                 convo.append(("assistant", result.assistant_text))
             turns += 1
-        return await driver.capture_session()
+        session = await driver.capture_session()
+        # Why the loop stopped — a timeout here is otherwise invisible in the
+        # captured session (live-001 shipped an unfinished plan silently).
+        session["exit_status"] = result.status
+        session["turns"] = turns
+        return session
     finally:
         await driver.close()
