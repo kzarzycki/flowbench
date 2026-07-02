@@ -1,0 +1,11 @@
+{
+  "enabledPlugins": {
+    "pdlc@xebia-ai-skills": false,
+    "powerpoint-mcp@powerpoint-mcp": false,
+    "document-skills@anthropic-agent-skills": false,
+    "comms-personal@kzarzycki-agent-skills-private": false,
+    "research@dev": false,
+    "xebia-personal@dev": false,
+    "playwright@dev": false
+  }
+}
