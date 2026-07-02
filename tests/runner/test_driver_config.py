@@ -40,3 +40,12 @@ def test_git_init_repo_creates_repo(tmp_path):
         ["git", "-C", str(tmp_path), "log", "--oneline"], capture_output=True, text=True
     )
     assert out.returncode == 0 and out.stdout.strip()
+
+
+def test_driver_accepts_reasoning_effort():
+    from pathlib import Path
+
+    d = OmnigentDriver(run_dir=Path("/tmp/x"), artifact_name="plan.md")
+    assert d.reasoning_effort is None  # default: unset, base behavior unchanged
+    d2 = OmnigentDriver(run_dir=Path("/tmp/x"), artifact_name="plan.md", reasoning_effort="xhigh")
+    assert d2.reasoning_effort == "xhigh"

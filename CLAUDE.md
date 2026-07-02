@@ -28,6 +28,8 @@ RUN_LIVE_AGENT=1 TODO_RUN_ID=first uv run inspect eval \
   skills/MCP, subscription guard), `flow.py` (`Flow` = one approach as omnigent-bundle data),
   `loop.py` (`run_agent_session` DONE-token loop), `judge.py`, `run_dir.py`,
   `subscription_model.py` (the `claudesub` Inspect provider).
+  Touching `src/flowbench/runner/`? Read `docs/design/runner.md` first (driver/loop
+  contracts, one-execution-model decision).
 - `src/flowbench/report/compare.py` — side-by-side flow comparison; a scoreless flow renders as a
   FAILED column, never an abort.
 - `src/flowbench/cli.py` — typer: `compare`.

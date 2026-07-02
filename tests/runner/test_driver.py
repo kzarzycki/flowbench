@@ -150,3 +150,82 @@ def _text(it):
     if isinstance(c, str):
         return c
     return "".join(p.get("text", "") for p in c if isinstance(p, dict))
+
+
+# --- send() settle: idle observed before the reply item lands ---------------
+
+
+class _FakeChat:
+    """Status sequence pops once per refresh(), then stays on the last value."""
+
+    session_id = "conv_test"
+
+    def __init__(self, statuses):
+        self._statuses = list(statuses)
+        self.status = None
+
+    async def refresh(self):
+        if len(self._statuses) > 1:
+            self.status = self._statuses.pop(0)
+        else:
+            self.status = self._statuses[0]
+
+    def send(self, text):
+        async def _gen():
+            return
+            yield  # pragma: no cover
+
+        return _gen()
+
+
+class _FakeSessions:
+    """Item batches pop once per list_items(), then stay on the last batch."""
+
+    def __init__(self, batches):
+        self._batches = list(batches)
+
+    async def list_items(self, session_id, order, limit):
+        if len(self._batches) > 1:
+            return self._batches.pop(0)
+        return self._batches[0]
+
+
+def _settle_driver(tmp_path, chat, batches):
+    from types import SimpleNamespace
+
+    d = OmnigentDriver(run_dir=tmp_path, artifact_name="plan.md")
+    d.settle_timeout_s = 1.0
+    d.settle_poll_s = 0.01
+    d._chat = chat
+    d._client = SimpleNamespace(sessions=_FakeSessions(batches))
+    return d
+
+
+_USER = {"type": "message", "role": "user", "content": "grade these plans"}
+_REPLY = {"type": "message", "role": "assistant", "content": "WINNER: B"}
+
+
+async def test_send_settles_until_new_assistant_message(tmp_path, monkeypatch):
+    # live-001: judge status read idle before the runner picked the turn up ->
+    # empty verdict. send() must keep polling until a NEW assistant message lands.
+    monkeypatch.setattr("flowbench.runner.driver.asyncio.sleep", _instant_sleep)
+    chat = _FakeChat(["running", "idle"] * 10)  # every _wait_idle sees running->idle (fast path)
+    # batches consumed in call order: n_before probe, post-wait fetch, settle polls
+    d = _settle_driver(tmp_path, chat, [[], [_USER], [_USER], [_USER, _REPLY]])
+    result = await d.send("grade these plans")
+    assert result.status == "idle"
+    assert result.assistant_text == "WINNER: B"
+
+
+async def test_send_settle_cap_returns_idle_with_what_it_has(tmp_path, monkeypatch):
+    monkeypatch.setattr("flowbench.runner.driver.asyncio.sleep", _instant_sleep)
+    chat = _FakeChat(["running", "idle"] * 10)  # every _wait_idle sees running->idle (fast path)
+    d = _settle_driver(tmp_path, chat, [[], [_USER]])  # reply never lands
+    d.settle_timeout_s = 0.05
+    result = await d.send("grade these plans")
+    assert result.status == "idle"
+    assert result.assistant_text == ""
+
+
+async def _instant_sleep(_secs):
+    return None
