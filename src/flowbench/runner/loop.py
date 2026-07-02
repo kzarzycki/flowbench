@@ -18,13 +18,21 @@ def render_tail(convo: list[tuple[str, str]], *, n: int = 8) -> str:
     return "\n".join(f"[{role}] {text}" for role, text in convo[-n:])
 
 
-async def next_user_message(convo_tail: str, simulator_system: str, user_model) -> str:
-    prompt = (
-        f"{simulator_system}\n\n--- RECENT CONVERSATION (you are [user]) ---\n"
-        f"{convo_tail}\n\n--- YOUR REPLY (as the user) ---"
+def prime_prompt(simulator_system: str, convo: list[tuple[str, str]]) -> str:
+    """The simulator's FIRST prompt: persona + conversation so far. Sent once —
+    the simulator is a stateful session, so later turns relay only the delta
+    (relay_prompt). Re-sending system+tail every turn cost quadratic tokens."""
+    return (
+        f"{simulator_system}\n\n--- CONVERSATION SO FAR (you are [user]) ---\n"
+        f"{render_tail(convo)}\n\n--- YOUR REPLY (as the user) ---"
     )
-    out = await user_model.generate(prompt)
-    return (out.completion or "").strip()
+
+
+def relay_prompt(convo: list[tuple[str, str]], since: int) -> str:
+    """Every later prompt: just what happened since the simulator's last reply,
+    labelled like the prime. Usually a single [assistant] message."""
+    delta = "\n".join(f"[{role}] {text}" for role, text in convo[since:])
+    return delta or "(the agent went idle without saying anything — reply as the user)"
 
 
 _NUDGE = "Continue."
@@ -73,6 +81,7 @@ async def run_agent_session(
             convo.append(("assistant", result.assistant_text))
         turns = 0
         consec_nudges = 0
+        sim_seen = 0  # convo index up to which the simulator has been relayed
         while turns < max_turns and (time.monotonic() - start) < deadline_s:
             # Only an `idle` turn is a clean boundary where the agent awaits the
             # user. `failed`/`timeout`/`running` (per-turn cap hit) -> stop and
@@ -87,12 +96,22 @@ async def run_agent_session(
                 reply = _NUDGE
                 consec_nudges += 1
             else:
-                reply = await next_user_message(render_tail(convo), simulator_system, user_model)
+                # Stateful simulator: prime once with persona+context, then relay
+                # only the delta — a normal dialog, not a re-sent transcript.
+                prompt = (
+                    prime_prompt(simulator_system, convo)
+                    if sim_seen == 0
+                    else relay_prompt(convo, sim_seen)
+                )
+                out = await user_model.generate(prompt)
+                reply = (out.completion or "").strip()
                 consec_nudges = 0
                 if _is_done(reply, done_token):
                     break
             result = await driver.send(reply)
             convo.append(("user", reply))
+            if reply != _NUDGE:
+                sim_seen = len(convo)  # the sim knows everything incl. its own reply
             if result.assistant_text:
                 convo.append(("assistant", result.assistant_text))
             turns += 1
