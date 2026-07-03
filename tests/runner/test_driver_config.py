@@ -3,7 +3,7 @@ vanilla-Claude-Code prompt with NO behavioural steering (bug-3 fix)."""
 
 import subprocess
 
-from flowbench.runner.driver import OmnigentDriver, git_init_repo
+from flowbench.runner.driver import ALLOWED_TOOLS, OmnigentDriver, git_init_repo
 
 
 def test_render_config_embeds_custom_prompt(tmp_path):
@@ -95,6 +95,11 @@ def test_create_metadata_claude_native_flags_unchanged(tmp_path):
     # Byte-identical to the pre-change list — comparability of past runs holds.
     d = OmnigentDriver(run_dir=tmp_path, artifact_name="plan.md", harness="claude-native")
     args = d._create_metadata()["terminal_launch_args"]
-    assert args[:2] == ["--disallowedTools", "AskUserQuestion"]
-    assert args[2:4] == ["--permission-mode", "acceptEdits"]
-    assert args[4] == "--allowedTools"
+    assert args == [
+        "--disallowedTools",
+        "AskUserQuestion",
+        "--permission-mode",
+        "acceptEdits",
+        "--allowedTools",
+        ",".join(ALLOWED_TOOLS),
+    ]
