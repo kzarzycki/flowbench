@@ -5,6 +5,7 @@ regression the live run caught. This guards against re-aliasing."""
 
 from pathlib import Path
 
+import pytest
 from inspect_ai._util.decorator import parse_decorators
 
 EVAL_FILE = Path(__file__).resolve().parents[3] / "scenarios/coding_workflow/cases/todo_app/eval.py"
@@ -19,6 +20,13 @@ def test_eval_task_is_discoverable_by_inspect_cli():
     )
 
 
+_SUPERPOWERS_CACHE = Path.home() / ".claude/plugins/cache/claude-plugins-official/superpowers"
+
+
+@pytest.mark.skipif(
+    not any(_SUPERPOWERS_CACHE.glob("*/skills")),
+    reason="importing eval.py resolves superpowers skill dirs from the host plugin cache",
+)
 def test_default_run_base_anchors_outside_the_repo(monkeypatch):
     # Inspect chdir's into the eval file's directory before the task constructs, so
     # a cwd-relative default base lands run-dirs INSIDE the repo. The default must
