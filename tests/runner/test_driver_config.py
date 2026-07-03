@@ -55,7 +55,9 @@ def test_create_metadata_omits_title_and_project_by_default(tmp_path):
     # Defaults unset -> only launch args, no title / labels (server default kept).
     d = OmnigentDriver(run_dir=tmp_path, artifact_name="plan.md")
     meta = d._create_metadata()
-    assert meta["terminal_launch_args"] == ["--disallowedTools", "AskUserQuestion"]
+    args = meta["terminal_launch_args"]
+    assert args[:2] == ["--disallowedTools", "AskUserQuestion"]
+    assert "--permission-mode" in args and "--allowedTools" in args
     assert "title" not in meta
     assert "labels" not in meta
 
@@ -69,7 +71,7 @@ def test_create_metadata_includes_title_and_project_when_set(tmp_path):
     )
     meta = d._create_metadata()
     # launch args always present
-    assert meta["terminal_launch_args"] == ["--disallowedTools", "AskUserQuestion"]
+    assert meta["terminal_launch_args"][:2] == ["--disallowedTools", "AskUserQuestion"]
     assert meta["title"] == "flow: superpowers"
     # project groups sessions via the `omni_project` label the web UI reads
     assert meta["labels"] == {"omni_project": "swe_planning/todo-004"}

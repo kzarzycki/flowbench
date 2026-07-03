@@ -27,6 +27,29 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+# Unattended file work inside the run workspace: read tools + file-work bash.
+# Passed as --allowedTools (with --permission-mode acceptEdits) on every flow.
+ALLOWED_TOOLS = [
+    "Read",
+    "Glob",
+    "Grep",
+    "Bash(ls:*)",
+    "Bash(cat:*)",
+    "Bash(head:*)",
+    "Bash(tail:*)",
+    "Bash(wc:*)",
+    "Bash(find:*)",
+    "Bash(grep:*)",
+    "Bash(rg:*)",
+    "Bash(tree:*)",
+    "Bash(pwd)",
+    "Bash(mkdir:*)",
+    "Bash(touch:*)",
+    "Bash(cp:*)",
+    "Bash(mv:*)",
+    "Bash(git:*)",
+]
+
 
 @dataclass
 class TurnResult:
@@ -303,7 +326,22 @@ class OmnigentDriver(AgentDriver):
         args (the `--disallowedTools AskUserQuestion` deadlock fix); adds a short
         `title` and an `omni_project` label — the field the web UI groups sessions
         on — only when set, so an unset field leaves the server default untouched."""
-        meta: dict[str, Any] = {"terminal_launch_args": ["--disallowedTools", "AskUserQuestion"]}
+        meta: dict[str, Any] = {
+            "terminal_launch_args": [
+                "--disallowedTools",
+                "AskUserQuestion",
+                # Permission config MUST ride CLI flags, not the workspace
+                # .claude/settings.json: a flow with skills "none" launches with
+                # --setting-sources "" (the bridge's host-skill filter), which
+                # drops ALL settings files — todo-010's plain flow prompted for
+                # Write while superpowers (skills "all") sailed. Flags survive
+                # that and are identical for every flow, so comparability holds.
+                "--permission-mode",
+                "acceptEdits",
+                "--allowedTools",
+                ",".join(ALLOWED_TOOLS),
+            ]
+        }
         if self.session_title is not None:
             meta["title"] = self.session_title
         if self.project is not None:
@@ -322,7 +360,6 @@ class OmnigentDriver(AgentDriver):
         from omnigent_client._sessions_chat import SessionsChat
 
         self.run_dir.mkdir(parents=True, exist_ok=True)
-        self._seed_workspace_permissions()
         if self.git_init and not (self.run_dir / ".git").exists():
             git_init_repo(self.run_dir)
         self._started = time.monotonic()
@@ -365,48 +402,6 @@ class OmnigentDriver(AgentDriver):
             workspace=str(self.run_dir),
         )
         await wait_for_runner_online(self._http, self._runner_id, timeout_s=90)
-
-    def _seed_workspace_permissions(self) -> None:
-        """A benchmark run must not block on file-write approval: the bridge
-        routes permission prompts to the UI with a 24h timeout, so one
-        unapproved Write stalls the flow until the turn budget kills it
-        (todo-007: the agent sat on the plan.md prompt; the file landed only
-        after manual approval, post-capture). acceptEdits auto-approves
-        Write/Edit in the workspace only; every flow gets the same file, so
-        comparability holds."""
-        settings = self.run_dir / ".claude" / "settings.json"
-        if settings.exists():
-            return
-        settings.parent.mkdir(parents=True, exist_ok=True)
-        # acceptEdits auto-approves Write/Edit only; reads outside cwd and any
-        # Bash still prompt (todo-008 stalled on a read). The agent must work
-        # the workspace files unattended, so allow read tools + file-work bash.
-        allowed = [
-            "Read",
-            "Glob",
-            "Grep",
-            "Bash(ls:*)",
-            "Bash(cat:*)",
-            "Bash(head:*)",
-            "Bash(tail:*)",
-            "Bash(wc:*)",
-            "Bash(find:*)",
-            "Bash(grep:*)",
-            "Bash(rg:*)",
-            "Bash(tree:*)",
-            "Bash(pwd)",
-            "Bash(mkdir:*)",
-            "Bash(touch:*)",
-            "Bash(cp:*)",
-            "Bash(mv:*)",
-            "Bash(git:*)",
-        ]
-        settings.write_text(
-            json.dumps(
-                {"permissions": {"defaultMode": "acceptEdits", "allow": allowed}},
-                indent=2,
-            )
-        )
 
     async def _resolve_claude_host(self) -> str:
         resp = await self._http.get(f"{self.server_url}/v1/hosts")
