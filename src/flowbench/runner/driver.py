@@ -322,12 +322,13 @@ class OmnigentDriver(AgentDriver):
         return buf.getvalue()
 
     def _create_metadata(self) -> dict[str, Any]:
-        """Metadata form part for `POST /v1/sessions`. Always carries the launch
-        args (the `--disallowedTools AskUserQuestion` deadlock fix); adds a short
-        `title` and an `omni_project` label — the field the web UI groups sessions
-        on — only when set, so an unset field leaves the server default untouched."""
-        meta: dict[str, Any] = {
-            "terminal_launch_args": [
+        """Metadata form part for `POST /v1/sessions`. Launch args are gated on
+        the harness — omnigent passes them verbatim to the native CLI, and codex
+        rejects claude-only flags (exit 2). Adds a short `title` and an
+        `omni_project` label — the field the web UI groups sessions on — only
+        when set, so an unset field leaves the server default untouched."""
+        if self.harness == "claude-native":
+            launch_args = [
                 "--disallowedTools",
                 "AskUserQuestion",
                 # Permission config MUST ride CLI flags, not the workspace
@@ -341,7 +342,12 @@ class OmnigentDriver(AgentDriver):
                 "--allowedTools",
                 ",".join(ALLOWED_TOOLS),
             ]
-        }
+        elif self.harness == "codex-native":
+            # Codex's unattended stance: never prompt, sandboxed to the workspace.
+            launch_args = ["--ask-for-approval", "never", "--sandbox", "workspace-write"]
+        else:
+            launch_args = []
+        meta: dict[str, Any] = {"terminal_launch_args": launch_args}
         if self.session_title is not None:
             meta["title"] = self.session_title
         if self.project is not None:
