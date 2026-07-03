@@ -12,8 +12,9 @@ Vocabulary → **`docs/GLOSSARY.md`** (Scenario → Case → Flow → Run → Sc
 All changes follow `../xebia/flowbench-scenarios/.claude/loop.md` (interactive
 sessions too): branch → spec/plan sized to the change → tests green → PR → merge
 (standing approval) → live-run validation via `scenarios.swe_planning.watch` →
-journal. Cross-session knowledge: `../xebia/flowbench-scenarios/.superpowers/sdd/progress.md`
-— read it first when resuming work. Engine PRs here merge BEFORE the paired
+journal. Cross-session knowledge: the ledger at
+`../xebia/flowbench-scenarios/.claude/engineering-loop/LOG.md` — read it first
+when resuming work. Engine PRs here merge BEFORE the paired
 scenarios PR; the live run validates both.
 
 ## Run it
