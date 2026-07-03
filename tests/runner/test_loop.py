@@ -3,7 +3,7 @@ the user. Asserts the loop answers, stops on the DONE token, respects max_turns,
 and bails on a failed status. The @solver wrapper is exercised live (Task 7)."""
 
 from flowbench.runner.driver import AgentDriver, TurnResult
-from flowbench.runner.loop import _is_done, next_user_message, render_tail, run_agent_session
+from flowbench.runner.loop import _is_done, render_tail, run_agent_session
 from scenarios.coding_workflow.cases.todo_app import task
 
 
@@ -71,15 +71,17 @@ def test_render_tail_caps_to_last_n():
     assert tail == "[user] 17\n[user] 18\n[user] 19"
 
 
-async def test_loop_feeds_growing_context_to_simulator():
-    # the simulator's prompt on turn 2 must contain BOTH the first prompt and the
-    # agent's first answer — proving accumulated context, not just the latest line.
+async def test_loop_primes_simulator_once_then_relays_deltas():
+    # The simulator is a stateful session: its FIRST prompt carries the persona +
+    # conversation so far; every later prompt is ONLY the delta since its last
+    # reply. Re-sending system+tail each turn cost quadratic tokens (seen live).
     turns = [
         TurnResult("idle", "what storage should I use?", False),
+        TurnResult("idle", "and what file name?", False),
         TurnResult("idle", "done, tests pass", True),
     ]
     driver = _FakeDriver(turns, {"items": []})
-    user = _StubModel(["a JSON file", task.DONE_TOKEN])
+    user = _StubModel(["a JSON file", "tasks.json", task.DONE_TOKEN])
     await run_agent_session(
         driver,
         user,
@@ -89,19 +91,18 @@ async def test_loop_feeds_growing_context_to_simulator():
         max_turns=10,
         deadline_s=999,
     )
-    # second simulator call sees the full conversation tail
-    second = user.seen[1]
-    assert task.FIRST_PROMPT in second
-    assert "what storage should I use?" in second
-    assert "a JSON file" in second  # its own prior reply, in context
-
-
-async def test_next_user_message_passes_system_and_transcript():
-    stub = _StubModel(["What storage should I use?"])
-    msg = await next_user_message("agent asked: storage?", task.simulator_system(), stub)
-    assert msg == "What storage should I use?"
-    assert "ENVISIONED SHAPE" in stub.seen[0]  # simulator system embedded
-    assert "agent asked: storage?" in stub.seen[0]  # transcript tail passed
+    first, second, third = user.seen
+    # prime: persona + context
+    assert "ENVISIONED SHAPE" in first
+    assert task.FIRST_PROMPT in first
+    assert "what storage should I use?" in first
+    # relays: delta only — no persona, no re-sent history
+    for later in (second, third):
+        assert "ENVISIONED SHAPE" not in later
+        assert task.FIRST_PROMPT not in later
+    assert "and what file name?" in second
+    assert "a JSON file" not in second  # its own prior reply is not re-relayed
+    assert "done, tests pass" in third
 
 
 def test_is_done_tolerates_wrapped_token():
