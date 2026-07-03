@@ -529,11 +529,25 @@ class OmnigentDriver(AgentDriver):
         cid = self._conversation_id()
         return f"{self.server_url}/c/{cid}" if cid else None
 
+    async def _context_tokens(self) -> int | None:
+        """Final context size from the session labels — the cost signal a
+        comparison needs next to the verdict (a win at 2x the tokens is a
+        different result). None when the label is absent/unreadable."""
+        if self._chat is None:
+            return None
+        try:
+            resp = await self._http.get(f"/v1/sessions/{self._chat.session_id}")
+            raw = (resp.json().get("labels") or {}).get("omnigent.last_context_tokens")
+            return int(raw) if raw else None
+        except Exception:
+            return None
+
     async def capture_session(self) -> dict[str, Any]:
         items = await self._list_items()
         items = dedup_items(items)  # clean: drop capture-doubles + control injections
         artifact = self.artifact_path()
         return {
+            "context_tokens": await self._context_tokens(),
             "items": items,
             "events": self._captured,
             "duration_s": round(time.monotonic() - self._started, 1),

@@ -322,3 +322,34 @@ async def test_seed_does_not_clobber_existing_settings(tmp_path):
     d = OmnigentDriver(run_dir=ws, artifact_name="plan.md")
     d._seed_workspace_permissions()
     assert "Bash" in (ws / ".claude" / "settings.json").read_text()
+
+
+async def test_capture_session_includes_context_tokens(tmp_path):
+    # cost signal: final context size from session labels lands in the capture
+    class _FakeResp:
+        def json(self):
+            return {"labels": {"omnigent.last_context_tokens": "42072"}}
+
+    class _FakeHttp:
+        async def get(self, _url):
+            return _FakeResp()
+
+    d = OmnigentDriver(run_dir=tmp_path, artifact_name="plan.md")
+    d._chat = _FakeChat(["idle"])
+    d._http = _FakeHttp()
+    assert await d._context_tokens() == 42072
+
+
+async def test_context_tokens_none_when_label_missing(tmp_path):
+    class _FakeResp:
+        def json(self):
+            return {"labels": {}}
+
+    class _FakeHttp:
+        async def get(self, _url):
+            return _FakeResp()
+
+    d = OmnigentDriver(run_dir=tmp_path, artifact_name="plan.md")
+    d._chat = _FakeChat(["idle"])
+    d._http = _FakeHttp()
+    assert await d._context_tokens() is None
