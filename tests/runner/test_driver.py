@@ -257,3 +257,47 @@ async def test_read_retry_survives_transient_errors(tmp_path, monkeypatch):
 
     with _pytest.raises(httpx.ReadError):
         await d._read_retry(always_fails)
+
+
+async def test_send_retries_undelivered_injection(tmp_path, monkeypatch):
+    # runner_error "message was not delivered" = the inject never reached the
+    # agent (busy terminal behind a lying idle) — re-sending is safe and required
+    monkeypatch.setattr("flowbench.runner.driver.asyncio.sleep", _instant_sleep)
+    d = OmnigentDriver(run_dir=tmp_path, artifact_name="plan.md")
+    outcomes = [
+        TurnResult("failed", "", False),
+        TurnResult("idle", "the plan is complete", False),
+    ]
+    sent = []
+
+    async def fake_send_once(text):
+        sent.append(text)
+        return outcomes.pop(0)
+
+    async def undelivered():
+        return True
+
+    d._send_once = fake_send_once
+    d._injection_undelivered = undelivered
+    result = await d.send("go on")
+    assert result.status == "idle"
+    assert sent == ["go on", "go on"]  # same text re-sent once
+
+
+async def test_send_does_not_retry_delivered_failure(tmp_path, monkeypatch):
+    monkeypatch.setattr("flowbench.runner.driver.asyncio.sleep", _instant_sleep)
+    d = OmnigentDriver(run_dir=tmp_path, artifact_name="plan.md")
+    sent = []
+
+    async def fake_send_once(text):
+        sent.append(text)
+        return TurnResult("failed", "", False)
+
+    async def delivered():
+        return False  # a real failure, not an undelivered inject
+
+    d._send_once = fake_send_once
+    d._injection_undelivered = delivered
+    result = await d.send("go on")
+    assert result.status == "failed"
+    assert sent == ["go on"]  # no blind retry

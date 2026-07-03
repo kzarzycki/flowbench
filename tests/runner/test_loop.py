@@ -90,6 +90,7 @@ async def test_loop_primes_simulator_once_then_relays_deltas():
         done_token=task.DONE_TOKEN,
         max_turns=10,
         deadline_s=999,
+        artifact_grace_s=0,
     )
     first, second, third = user.seen
     # prime: persona + context
@@ -130,6 +131,7 @@ async def test_loop_answers_then_stops_on_done_token():
         done_token=task.DONE_TOKEN,
         max_turns=10,
         deadline_s=999,
+        artifact_grace_s=0,
     )
     assert driver.started and driver.closed
     assert driver.sent[0] == task.FIRST_PROMPT
@@ -157,6 +159,7 @@ async def test_loop_canned_nudges_self_wait_without_simulator():
         done_token=task.DONE_TOKEN,
         max_turns=10,
         deadline_s=999,
+        artifact_grace_s=0,
     )
     assert driver.sent == [task.FIRST_PROMPT, "Continue.", "Continue."]
     assert len(user.seen) == 1  # simulator NOT burned on the 2 self-waits
@@ -180,6 +183,7 @@ async def test_loop_forces_simulator_when_child_looks_stuck_busy():
         done_token=task.DONE_TOKEN,
         max_turns=50,
         deadline_s=999,
+        artifact_grace_s=0,
     )
     # first_prompt + exactly _MAX_CONSEC_NUDGES canned nudges, then simulator -> DONE
     assert driver.sent == [task.FIRST_PROMPT] + ["Continue."] * _MAX_CONSEC_NUDGES
@@ -204,6 +208,7 @@ async def test_loop_simulates_when_agent_asks_even_if_child_busy():
         done_token=task.DONE_TOKEN,
         max_turns=10,
         deadline_s=999,
+        artifact_grace_s=0,
     )
     assert "json" in driver.sent[1].lower()  # the simulator's answer, not a canned nudge
     assert len(user.seen) == 2
@@ -221,6 +226,7 @@ async def test_loop_stops_at_max_turns():
         done_token=task.DONE_TOKEN,
         max_turns=3,
         deadline_s=999,
+        artifact_grace_s=0,
     )
     assert len(driver.sent) == 1 + 3  # first prompt + 3 simulated turns
     assert driver.closed
@@ -238,9 +244,42 @@ async def test_loop_bails_on_failed_status():
         done_token=task.DONE_TOKEN,
         max_turns=5,
         deadline_s=999,
+        artifact_grace_s=0,
     )
     assert user.seen == []  # never simulated
     assert driver.closed
     # the non-idle exit is recorded, not silent (live-001 shipped a timeout invisibly)
     assert session["exit_status"] == "failed"
     assert session["turns"] == 0
+
+
+async def test_done_waits_for_pending_artifact(monkeypatch):
+    # the agent may claim DONE while its Write is still flushing — the loop
+    # grace-polls artifact_path() before capturing (plan.md landed post-capture live)
+    class _LateArtifactDriver(_FakeDriver):
+        def __init__(self, *a):
+            super().__init__(*a)
+            self.polls = 0
+
+        def artifact_path(self):
+            self.polls += 1
+            return "plan.md" if self.polls >= 3 else None
+
+    async def _nosleep(_s):
+        return None
+
+    monkeypatch.setattr("flowbench.runner.loop.asyncio.sleep", _nosleep)
+    driver = _LateArtifactDriver([TurnResult("idle", "the plan is complete", False)], {"items": []})
+    user = _StubModel([task.DONE_TOKEN])
+    await run_agent_session(
+        driver,
+        user,
+        first_prompt=task.FIRST_PROMPT,
+        simulator_system=task.simulator_system(),
+        done_token=task.DONE_TOKEN,
+        max_turns=5,
+        deadline_s=999,
+        artifact_grace_s=10,
+    )
+    assert driver.polls >= 3  # kept polling until the artifact appeared
+    assert driver.closed

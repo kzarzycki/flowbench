@@ -228,6 +228,12 @@ class OmnigentDriver(AgentDriver):
     # settle for the full turn budget. Expiry -> "timeout", never a stale reply.
     settle_timeout_s: float | None = None
     settle_poll_s: float = 2.0
+    # An injection into a terminal whose input prompt hasn't rendered fails with
+    # runner_error "The message was not delivered" — the agent was still mid-turn
+    # behind a lying idle (seen live twice). Undelivered means retrying is
+    # double-delivery-safe: wait for the terminal to finish, re-send.
+    send_retry_attempts: int = 3
+    send_retry_wait_s: float = 30.0
     # Per-flow bundle inputs (see runner.flow.Flow). Defaults reproduce the vanilla
     # baseline: claude-native, host skills visible, nothing added to the bundle.
     harness: str = "claude-native"
@@ -370,6 +376,29 @@ class OmnigentDriver(AgentDriver):
         raise RuntimeError("no online host with claude-native configured")
 
     async def send(self, text: str) -> TurnResult:
+        result = await self._send_once(text)
+        for _ in range(self.send_retry_attempts):
+            if result.status != "failed" or not await self._injection_undelivered():
+                return result
+            # The terminal was busy and the message never landed — give the agent
+            # time to finish its in-flight work, then re-send the SAME text.
+            await asyncio.sleep(self.send_retry_wait_s)
+            result = await self._send_once(text)
+        return result
+
+    async def _injection_undelivered(self) -> bool:
+        """True when the last failure was the runner refusing the inject because
+        the input prompt never rendered — the message did NOT reach the agent."""
+        try:
+            resp = await self._http.get(f"/v1/sessions/{self._chat.session_id}")
+            labels = resp.json().get("labels") or {}
+        except Exception:
+            return False
+        return labels.get("omnigent.last_task_error_code") == "runner_error" and (
+            "not delivered" in labels.get("omnigent.last_task_error_message", "")
+        )
+
+    async def _send_once(self, text: str) -> TurnResult:
         n_before = n_assistant_messages(await self._list_items())
         async for ev in self._chat.send(text):  # inject; envelope completes fast
             self._captured.append(_to_jsonable(ev))

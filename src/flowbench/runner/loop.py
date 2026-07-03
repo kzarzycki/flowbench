@@ -5,6 +5,7 @@ the DONE token. Wall-clock deadline + max-turns are backstops."""
 
 from __future__ import annotations
 
+import asyncio
 import time
 from typing import Any
 
@@ -70,6 +71,7 @@ async def run_agent_session(
     done_token: str,
     max_turns: int = 80,
     deadline_s: float = 1800.0,
+    artifact_grace_s: float = 60.0,
 ) -> dict[str, Any]:
     start = time.monotonic()
     convo: list[tuple[str, str]] = []
@@ -107,6 +109,13 @@ async def run_agent_session(
                 reply = (out.completion or "").strip()
                 consec_nudges = 0
                 if _is_done(reply, done_token):
+                    # DONE claimed with no artifact on disk: the agent may have
+                    # announced completion while its Write was still flushing
+                    # (seen live: plan.md landed a minute after capture). Grace-
+                    # poll before capturing.
+                    grace = time.monotonic() + artifact_grace_s
+                    while driver.artifact_path() is None and time.monotonic() < grace:
+                        await asyncio.sleep(2.0)
                     break
             result = await driver.send(reply)
             convo.append(("user", reply))
