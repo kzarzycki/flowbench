@@ -234,6 +234,12 @@ class OmnigentDriver(AgentDriver):
     skills: str | list[str] = "all"  # -> config.yaml top-level skills:
     skill_dirs: list[Path] = field(default_factory=list)
     mcp_files: list[Path] = field(default_factory=list)
+    # Web-UI grouping/labelling (both optional; unset leaves the server default).
+    # `session_title` is a short human title (e.g. "flow: superpowers", "judge")
+    # instead of the kickoff-text default; `project` groups a run's sessions into
+    # one sidebar folder via the `omni_project` label the UI groups on.
+    session_title: str | None = None
+    project: str | None = None
 
     # internal state
     _started: float = 0.0
@@ -286,6 +292,18 @@ class OmnigentDriver(AgentDriver):
             tar.add(agent_dir, arcname=".")
         return buf.getvalue()
 
+    def _create_metadata(self) -> dict[str, Any]:
+        """Metadata form part for `POST /v1/sessions`. Always carries the launch
+        args (the `--disallowedTools AskUserQuestion` deadlock fix); adds a short
+        `title` and an `omni_project` label — the field the web UI groups sessions
+        on — only when set, so an unset field leaves the server default untouched."""
+        meta: dict[str, Any] = {"terminal_launch_args": ["--disallowedTools", "AskUserQuestion"]}
+        if self.session_title is not None:
+            meta["title"] = self.session_title
+        if self.project is not None:
+            meta["labels"] = {"omni_project": self.project}
+        return meta
+
     async def start(self) -> None:
         if os.environ.get("ANTHROPIC_API_KEY"):
             raise RuntimeError("ANTHROPIC_API_KEY is set — would defeat subscription billing.")
@@ -311,11 +329,7 @@ class OmnigentDriver(AgentDriver):
         # otherwise blocks the tmux prompt and deadlocks turn 2+).
         resp = await self._client.sessions._http.post(
             f"{self._client.sessions._base}/v1/sessions",
-            data={
-                "metadata": json.dumps(
-                    {"terminal_launch_args": ["--disallowedTools", "AskUserQuestion"]}
-                )
-            },
+            data={"metadata": json.dumps(self._create_metadata())},
             files={"bundle": ("agent.tar.gz", bundle, "application/gzip")},
         )
         resp.raise_for_status()
