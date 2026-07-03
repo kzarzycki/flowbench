@@ -378,7 +378,35 @@ class OmnigentDriver(AgentDriver):
         if settings.exists():
             return
         settings.parent.mkdir(parents=True, exist_ok=True)
-        settings.write_text(json.dumps({"permissions": {"defaultMode": "acceptEdits"}}, indent=2))
+        # acceptEdits auto-approves Write/Edit only; reads outside cwd and any
+        # Bash still prompt (todo-008 stalled on a read). The agent must work
+        # the workspace files unattended, so allow read tools + file-work bash.
+        allowed = [
+            "Read",
+            "Glob",
+            "Grep",
+            "Bash(ls:*)",
+            "Bash(cat:*)",
+            "Bash(head:*)",
+            "Bash(tail:*)",
+            "Bash(wc:*)",
+            "Bash(find:*)",
+            "Bash(grep:*)",
+            "Bash(rg:*)",
+            "Bash(tree:*)",
+            "Bash(pwd)",
+            "Bash(mkdir:*)",
+            "Bash(touch:*)",
+            "Bash(cp:*)",
+            "Bash(mv:*)",
+            "Bash(git:*)",
+        ]
+        settings.write_text(
+            json.dumps(
+                {"permissions": {"defaultMode": "acceptEdits", "allow": allowed}},
+                indent=2,
+            )
+        )
 
     async def _resolve_claude_host(self) -> str:
         resp = await self._http.get(f"{self.server_url}/v1/hosts")
