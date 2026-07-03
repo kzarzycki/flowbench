@@ -3,7 +3,7 @@ vanilla-Claude-Code prompt with NO behavioural steering (bug-3 fix)."""
 
 import subprocess
 
-from flowbench.runner.driver import OmnigentDriver, git_init_repo
+from flowbench.runner.driver import ALLOWED_TOOLS, OmnigentDriver, git_init_repo
 
 
 def test_render_config_embeds_custom_prompt(tmp_path):
@@ -75,3 +75,31 @@ def test_create_metadata_includes_title_and_project_when_set(tmp_path):
     assert meta["title"] == "flow: superpowers"
     # project groups sessions via the `omni_project` label the web UI reads
     assert meta["labels"] == {"omni_project": "swe_planning/todo-004"}
+
+
+def test_create_metadata_codex_native_gets_codex_flags(tmp_path):
+    # codex rejects claude-only flags (--disallowedTools etc.) with exit 2,
+    # so codex-native sessions get codex's own unattended stance instead.
+    d = OmnigentDriver(run_dir=tmp_path, artifact_name="plan.md", harness="codex-native")
+    args = d._create_metadata()["terminal_launch_args"]
+    assert args == ["--ask-for-approval", "never", "--sandbox", "workspace-write"]
+
+
+def test_create_metadata_unknown_harness_gets_no_flags(tmp_path):
+    # No foreign flags for harnesses we haven't mapped: empty is the safe default.
+    d = OmnigentDriver(run_dir=tmp_path, artifact_name="plan.md", harness="qwen-native")
+    assert d._create_metadata()["terminal_launch_args"] == []
+
+
+def test_create_metadata_claude_native_flags_unchanged(tmp_path):
+    # Byte-identical to the pre-change list — comparability of past runs holds.
+    d = OmnigentDriver(run_dir=tmp_path, artifact_name="plan.md", harness="claude-native")
+    args = d._create_metadata()["terminal_launch_args"]
+    assert args == [
+        "--disallowedTools",
+        "AskUserQuestion",
+        "--permission-mode",
+        "acceptEdits",
+        "--allowedTools",
+        ",".join(ALLOWED_TOOLS),
+    ]

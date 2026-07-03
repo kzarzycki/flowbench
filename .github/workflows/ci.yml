@@ -33,7 +33,7 @@ jobs:
       - uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
         with:
           enable-cache: true
-      - run: uv sync
+      - run: uv sync --extra dev --extra spike
       - run: uv run pytest --cov --cov-report=xml
       # Diff coverage gates PRs only. On a push to main, github.base_ref is empty
       # and origin/main == HEAD, so the diff would be empty and the gate a no-op —
