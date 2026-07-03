@@ -7,6 +7,15 @@ differ only by their bundle, never by harness-level steering, so a comparison is
 
 Vocabulary → **`docs/GLOSSARY.md`** (Scenario → Case → Flow → Run → Scorecard → Comparison).
 
+## Engineering loop
+
+All changes follow `../xebia/flowbench-scenarios/.claude/loop.md` (interactive
+sessions too): branch → spec/plan sized to the change → tests green → PR → merge
+(standing approval) → live-run validation via `scenarios.swe_planning.watch` →
+journal. Cross-session knowledge: `../xebia/flowbench-scenarios/.superpowers/sdd/progress.md`
+— read it first when resuming work. Engine PRs here merge BEFORE the paired
+scenarios PR; the live run validates both.
+
 ## Run it
 
 ```bash
