@@ -388,13 +388,30 @@ class OmnigentDriver(AgentDriver):
             child_busy=any_child_busy(self._captured),
         )
 
+    async def _read_retry(self, op, attempts: int = 4):
+        """Retry a READ-ONLY server call through transient transport failures.
+        A single httpx.ReadError during status/items polling killed a whole live
+        run; polls are idempotent so retrying is always safe. Sends are NEVER
+        retried here — a lost-then-retried inject could double-deliver."""
+        import httpx
+
+        for i in range(attempts):
+            try:
+                return await op()
+            except httpx.HTTPError:
+                if i == attempts - 1:
+                    raise
+                await asyncio.sleep(2.0 * (i + 1))
+
     async def _list_items(self) -> list[dict]:
-        return await self._client.sessions.list_items(self._chat.session_id, order="asc", limit=200)
+        return await self._read_retry(
+            lambda: self._client.sessions.list_items(self._chat.session_id, order="asc", limit=200)
+        )
 
     async def _wait_idle(self, min_wait: float = 4.0) -> str:
         start, seen_running = time.monotonic(), False
         while time.monotonic() - start < self.turn_timeout_s:
-            await self._chat.refresh()
+            await self._read_retry(self._chat.refresh)
             st = self._chat.status
             if st == "running":
                 seen_running = True
