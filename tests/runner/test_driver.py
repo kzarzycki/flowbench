@@ -312,6 +312,7 @@ async def test_start_seeds_accept_edits_settings(tmp_path):
 
     cfg = _json.loads((tmp_path / "flow" / ".claude" / "settings.json").read_text())
     assert cfg["permissions"]["defaultMode"] == "acceptEdits"
+    assert "Read" in cfg["permissions"]["allow"]  # reads outside cwd must not prompt
 
 
 async def test_seed_does_not_clobber_existing_settings(tmp_path):
