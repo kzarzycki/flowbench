@@ -221,10 +221,12 @@ class OmnigentDriver(AgentDriver):
     )
     git_init: bool = False
     turn_timeout_s: float = 240.0
-    # `idle` can be observed before the runner picks the turn up (fresh session)
-    # or before the reply item persists — wait up to this long for a NEW assistant
-    # message before trusting an idle turn (see send()).
-    settle_timeout_s: float = 60.0
+    # `idle` can be observed before the runner picks the turn up (fresh session),
+    # before the reply item persists, or while the agent is still MID-TURN (bridge
+    # race seen live: injecting then hits a busy terminal and the run dies). An
+    # idle turn is trusted only once a NEW assistant message has landed; None =
+    # settle for the full turn budget. Expiry -> "timeout", never a stale reply.
+    settle_timeout_s: float | None = None
     settle_poll_s: float = 2.0
     # Per-flow bundle inputs (see runner.flow.Flow). Defaults reproduce the vanilla
     # baseline: claude-native, host skills visible, nothing added to the bundle.
@@ -359,10 +361,13 @@ class OmnigentDriver(AgentDriver):
             self._captured.append(_to_jsonable(ev))
         status = await self._wait_idle()
         items = await self._list_items()
-        # Settle: an idle status with no NEW assistant message is the pickup/persist
-        # race (a live judge run returned an empty verdict this way) — keep polling
-        # until the reply lands or the settle cap expires.
-        settle = time.monotonic() + self.settle_timeout_s
+        # Settle: an idle status with no NEW assistant message is either the
+        # pickup/persist race (a live judge returned an empty verdict this way) or
+        # the agent still mid-turn behind a lying idle (todo-003: plan being
+        # written) — keep polling until the reply lands or the budget expires.
+        settle = time.monotonic() + (
+            self.settle_timeout_s if self.settle_timeout_s is not None else self.turn_timeout_s
+        )
         while (
             status == "idle"
             and n_assistant_messages(items) <= n_before
@@ -371,6 +376,11 @@ class OmnigentDriver(AgentDriver):
             await asyncio.sleep(self.settle_poll_s)
             status = await self._wait_idle()
             items = await self._list_items()
+        if status == "idle" and n_assistant_messages(items) <= n_before:
+            # Idle but silent past the budget: the turn never completed. Injecting
+            # now would hit a busy terminal (message lost, session failed) — fail
+            # the turn honestly instead.
+            status = "timeout"
         return TurnResult(
             status=status,
             assistant_text=last_assistant_text(items),

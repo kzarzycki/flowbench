@@ -217,14 +217,16 @@ async def test_send_settles_until_new_assistant_message(tmp_path, monkeypatch):
     assert result.assistant_text == "WINNER: B"
 
 
-async def test_send_settle_cap_returns_idle_with_what_it_has(tmp_path, monkeypatch):
+async def test_send_settle_expiry_is_a_timeout_not_a_stale_idle(tmp_path, monkeypatch):
+    # todo-003: settle expired while the agent was still mid-turn behind a lying
+    # idle; the old code returned idle+stale text, the loop injected into a busy
+    # terminal and the run died. Expiry must read as an unfinished turn.
     monkeypatch.setattr("flowbench.runner.driver.asyncio.sleep", _instant_sleep)
     chat = _FakeChat(["running", "idle"] * 10)  # every _wait_idle sees running->idle (fast path)
     d = _settle_driver(tmp_path, chat, [[], [_USER]])  # reply never lands
     d.settle_timeout_s = 0.05
     result = await d.send("grade these plans")
-    assert result.status == "idle"
-    assert result.assistant_text == ""
+    assert result.status == "timeout"
 
 
 async def _instant_sleep(_secs):
