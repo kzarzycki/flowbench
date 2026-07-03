@@ -301,3 +301,23 @@ async def test_send_does_not_retry_delivered_failure(tmp_path, monkeypatch):
     result = await d.send("go on")
     assert result.status == "failed"
     assert sent == ["go on"]  # no blind retry
+
+
+async def test_start_seeds_accept_edits_settings(tmp_path):
+    # a Write permission prompt stalls an unattended run (bridge UI timeout 24h) —
+    # start() must seed workspace settings that auto-approve file edits
+    d = OmnigentDriver(run_dir=tmp_path / "flow", artifact_name="plan.md")
+    d._seed_workspace_permissions()  # start() calls this before any network I/O
+    import json as _json
+
+    cfg = _json.loads((tmp_path / "flow" / ".claude" / "settings.json").read_text())
+    assert cfg["permissions"]["defaultMode"] == "acceptEdits"
+
+
+async def test_seed_does_not_clobber_existing_settings(tmp_path):
+    ws = tmp_path / "flow"
+    (ws / ".claude").mkdir(parents=True)
+    (ws / ".claude" / "settings.json").write_text('{"permissions": {"allow": ["Bash"]}}')
+    d = OmnigentDriver(run_dir=ws, artifact_name="plan.md")
+    d._seed_workspace_permissions()
+    assert "Bash" in (ws / ".claude" / "settings.json").read_text()

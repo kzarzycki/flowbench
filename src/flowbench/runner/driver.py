@@ -322,6 +322,7 @@ class OmnigentDriver(AgentDriver):
         from omnigent_client._sessions_chat import SessionsChat
 
         self.run_dir.mkdir(parents=True, exist_ok=True)
+        self._seed_workspace_permissions()
         if self.git_init and not (self.run_dir / ".git").exists():
             git_init_repo(self.run_dir)
         self._started = time.monotonic()
@@ -364,6 +365,20 @@ class OmnigentDriver(AgentDriver):
             workspace=str(self.run_dir),
         )
         await wait_for_runner_online(self._http, self._runner_id, timeout_s=90)
+
+    def _seed_workspace_permissions(self) -> None:
+        """A benchmark run must not block on file-write approval: the bridge
+        routes permission prompts to the UI with a 24h timeout, so one
+        unapproved Write stalls the flow until the turn budget kills it
+        (todo-007: the agent sat on the plan.md prompt; the file landed only
+        after manual approval, post-capture). acceptEdits auto-approves
+        Write/Edit in the workspace only; every flow gets the same file, so
+        comparability holds."""
+        settings = self.run_dir / ".claude" / "settings.json"
+        if settings.exists():
+            return
+        settings.parent.mkdir(parents=True, exist_ok=True)
+        settings.write_text(json.dumps({"permissions": {"defaultMode": "acceptEdits"}}, indent=2))
 
     async def _resolve_claude_host(self) -> str:
         resp = await self._http.get(f"{self.server_url}/v1/hosts")
