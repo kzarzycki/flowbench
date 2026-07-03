@@ -231,3 +231,29 @@ async def test_send_settle_expiry_is_a_timeout_not_a_stale_idle(tmp_path, monkey
 
 async def _instant_sleep(_secs):
     return None
+
+
+async def test_read_retry_survives_transient_errors(tmp_path, monkeypatch):
+    # a single ReadError during polling killed a live run; reads are idempotent
+    import httpx
+
+    monkeypatch.setattr("flowbench.runner.driver.asyncio.sleep", _instant_sleep)
+    d = OmnigentDriver(run_dir=tmp_path, artifact_name="plan.md")
+    calls = {"n": 0}
+
+    async def flaky():
+        calls["n"] += 1
+        if calls["n"] < 3:
+            raise httpx.ReadError("boom")
+        return "ok"
+
+    assert await d._read_retry(flaky) == "ok"
+    assert calls["n"] == 3
+
+    async def always_fails():
+        raise httpx.ReadError("down")
+
+    import pytest as _pytest
+
+    with _pytest.raises(httpx.ReadError):
+        await d._read_retry(always_fails)
