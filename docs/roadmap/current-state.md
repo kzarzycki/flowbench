@@ -93,9 +93,8 @@ orchestration on top of the engine — see "Downstream duplication".
 
 ## Audited findings
 
-A 5-dimension multi-agent review (runtime, scenario, tests, surface, duplication), every
-medium/high finding adversarially verified against the code. Confirmed findings not
-already covered by the debt list above:
+Code-review findings verified against the code (2026-07-06), beyond the structural debt
+list above:
 
 **Bugs**
 
@@ -143,8 +142,8 @@ already covered by the debt list above:
   keyword heuristics; the objective anchors are `acceptance` and `skills_invoked` (real
   tool calls), which are sound.
 
-**Instructive refutations** (claims the verifiers killed, kept here so they aren't
-re-reported)
+**Non-findings** (plausible claims that do not hold — recorded so they aren't
+re-reported or "fixed" into regressions)
 
 - "Just use `omnigent_client`'s public `sessions.create()` instead of the private
   `_http` POST" — refuted: the public `create()` cannot express `terminal_launch_args`

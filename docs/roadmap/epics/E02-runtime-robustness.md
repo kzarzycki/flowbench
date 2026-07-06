@@ -42,6 +42,9 @@ pinned `==0.1.1`.
 - `transcript.py` (created in E01) absorbs anything transcript-shaped still in the
   driver.
 - `OmnigentDriver` keeps: lifecycle (`start`/`close`), send/settle, capture, URLs.
+- `runner/loop.py` relocates to `flowbench/loop.py` (the target-architecture position)
+  with a `flowbench.runner.loop` compat re-export, same one-release policy as the
+  driver's.
 - Behavior-preserving; no policy change in this story.
 - Verify: V1, V2; `driver/omnigent.py` under ~350 lines; no scenario imports break
   (grep both repos for `flowbench.runner.driver` and add a compat re-export for one

@@ -1,4 +1,4 @@
-# P02 — Reporting & scenario-author DX (proposal, milestone M5)
+# P02 — Reporting & scenario-author DX (proposal, milestone M9)
 
 Not yet an epic spec. Promote to `epics/` before starting. Everything here is a pure
 reader over run dirs — nothing wraps execution (locked seam).

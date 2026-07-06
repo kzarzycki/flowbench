@@ -1,4 +1,4 @@
-# P01 — Statistics & scale (proposal, milestone M4)
+# P01 — Statistics & scale (proposal, milestone M8)
 
 Not yet an epic spec. Promote to `epics/` (with stories and verification) before starting.
 

@@ -36,7 +36,7 @@ prompts: {prepend: ..., append: ...}   # per-case overlay, as today
 
 Comparability rule unchanged: bundle content and provisioning vary per flow; launch
 flags and harness steering never do. Provisioning runs *before* the session and is
-recorded in the manifest — it is workspace state, not steering.
+recorded in `run.json` — it is workspace state, not steering.
 
 ### Chained flows
 
@@ -56,17 +56,18 @@ stages are SKIPPED in the scorecard, not silently run on garbage).
 ## Stories
 
 - S04.1 **Flow sources + resolver.** `source:` field; resolver fetches git/path/plugin,
-  pins the sha into the run manifest, builds bundle inputs from the checkout. Replaces
-  todo_app's newest-version-in-host-plugin-cache lookup. Verify: same flow file on a
-  clean checkout produces an identical bundle hash.
+  records the resolved sha in `run.json` (the full reproducibility manifest that
+  consumes these pins arrives later, S05.1), builds bundle inputs from the checkout.
+  Replaces todo_app's newest-version-in-host-plugin-cache lookup. Verify: same flow
+  file on a clean checkout produces an identical bundle hash.
 - S04.2 **Bundle v2: agents + hooks.** Bundle builder carries `.claude/agents` and hook
   configs; verify with a fixture flow whose hook fires in a live session. (Blocked on
   checking what omnigent's bundle format supports for agents/hooks — if unsupported,
   this becomes an upstream story first.)
 - S04.3 **Provisioning.** `provision:` executes in the run workspace (python deps into a
   per-run venv, binary presence asserted); failures abort before any session spawns;
-  everything lands in the manifest. Verify: a flow requiring a missing binary fails with
-  a named error and no session is created.
+  every executed step is recorded in `run.json` (feeding S05.1's manifest). Verify: a
+  flow requiring a missing binary fails with a named error and no session is created.
 - S04.4 **Flow catalog.** `flows/` registry (open flows in-engine; private repos add
   their own); case `flows.yaml` references catalog entries + per-case overlays. Verify:
   swe_planning's two flows read from the catalog with unchanged behavior.

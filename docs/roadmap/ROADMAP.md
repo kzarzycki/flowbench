@@ -16,7 +16,7 @@ Sequencing rules:
 - Verification: stories cite the shared procedures in `verification.md` (V1 offline
   suite, V2 downstream suite, V4/V5 live runs, V6–V8 sweeps/gates) plus story-specific
   assertions.
-- Epics E00–E03 have full specs in `epics/`; later epics get their spec promoted from
+- Epics E00–E04 have full specs in `epics/`; later epics get their spec promoted from
   this file (plus `proposals/` and `research/`) before execution starts.
 - A milestone closes with a green live validation run and a ledger entry.
 - Flow-requirements research (ACE, ADF chain, OpenSpec) lives in

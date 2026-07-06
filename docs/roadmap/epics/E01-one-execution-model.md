@@ -82,7 +82,8 @@ Source of truth today: `flowbench-scenarios/scenarios/swe_planning/`. Mapping:
   `--extra spike` invocations — grep both repos).
 - Wheel ships `src/flowbench` only: drop `scenarios` from
   `[tool.hatch.build.targets.wheel].packages` (the top-level `scenarios` package would
-  collide in site-packages; in-repo imports keep working via `pythonpath = ["."]`).
+  collide in site-packages; in-repo imports keep working via
+  `pythonpath = ["src", "."]`).
 - Verify: `uv sync --extra dev --extra live` then V1; `rg -l inspect_ai src scenarios
   tests` → empty; V7 (wheel carries no `scenarios/`). Update V4/V5 in
   `../verification.md` for the extra rename in this PR.

@@ -34,6 +34,8 @@ versioned so readers can evolve safely.
   with the path in the message.
 - Move the scenario-authoring guide into `docs/design/scenario-authoring.md` here in the
   engine (the downstream repo's copy points at it) — the format belongs to the engine.
+- Update `docs/GLOSSARY.md`'s "Folder shape" section to case format v1 (it still shows
+  the pre-rework `prompt.md`/`flows.py` layout, which contradicts this story's format).
 - Verify: V1 + V2 (both scenarios' cases load); a fixture case with a missing file
   produces the documented error.
 
