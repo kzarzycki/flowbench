@@ -30,8 +30,9 @@ That is why the recorded decision is DIY with plain-file seams (see locked decis
 4. `ROADMAP.md` — milestones → epics → stories, with sizing and sequencing rules.
 5. `epics/` — full specs for the scheduled epics (E00–E04), self-contained enough to
    execute without prior conversation context.
-6. `proposals/` — lighter proposals for later milestones (statistics, reporting); promote
-   one to an epic spec before starting it.
+6. `proposals/` — lighter proposals for later milestones (statistics, reporting) and the
+   cross-cutting evaluation-quality thread (`P03`); promote one to an epic spec before
+   starting it.
 7. `research/flow-requirements.md` — what the target flows (ADF chain, OpenSpec, ACE)
    demand from the engine, from reading their sources.
 8. `verification.md` — the shared verification procedures (V1–V8) the epic stories cite.
