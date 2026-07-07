@@ -168,6 +168,20 @@ template case, fixture-capture helper; optional Inspect log exporter (only when 
 
 ---
 
+## Cross-cutting threads
+
+### Evaluation quality (`proposals/P03-evaluation-quality.md`)
+
+Not a milestone — the scoring-*content* thread the rest of the roadmap leaves scenario-side:
+five graded quality dimensions, numeric-vs-judged sources (numeric scorers run harness-side;
+a reusable grading skill the judge reads as its rubric), and anchored rubrics. Its stories
+attach to M1 (the engine judge),
+M3 (scorecard/compare schema), M7 (said-vs-did), and M8 (statistics/calibration). Phase 1
+(grading skill v1 inside the comparative judge, `swe_planning`) executes off the proposal;
+promote to `epics/E08-evaluation-quality.md` before Phase 2+.
+
+---
+
 ## Explicit non-goals
 
 - No web dashboard, database, or run-registry service — plain files until a
