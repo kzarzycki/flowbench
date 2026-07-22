@@ -11,7 +11,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8.0", "pytest-asyncio>=0.23", "ruff>=0.6", "pytest-cov>=5", "diff-cover>=9"]
+dev = ["pytest>=8.0", "pytest-asyncio>=0.23", "ruff>=0.15.21", "pytest-cov>=5", "diff-cover>=9"]
 # agent-eval runner: drive a real coding agent (omnigent) under the Inspect spine.
 # Optional + heavy (omnigent pulls ~64 deps, needs Node>=22, tmux). The runner and
 # the todo_app demo import inspect_ai, so the full suite needs this extra:
