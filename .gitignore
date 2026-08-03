@@ -32,3 +32,6 @@ htmlcov/
 
 # safety net: run-dirs belong in a sibling ../flowbench-runs/, never in the repo
 flowbench-runs/
+
+# APM dependencies
+apm_modules/

@@ -1,0 +1,14 @@
+name: flowbench
+version: 0.1.0
+description: Development agent configuration for the flowbench repository.
+author: kzarzycki
+targets:
+- claude
+- codex
+dependencies:
+  apm:
+  - git: kzarzycki/agent-skills/engineering
+    ref: ^0.2.0
+  mcp: []
+includes: auto
+scripts: {}

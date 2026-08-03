@@ -2,6 +2,99 @@
 python = "3.13"
 uv = "latest"
 pre-commit = "latest"
+"github:microsoft/apm" = "0.26.0"
+
+[tasks.agent-sync]
+description = "Converge project-owned coding agent configuration."
+usage = '''
+flag "--refresh" help="Resolve available dependency releases before convergence"
+flag "--frozen" help="Verify the committed lock and generated coding agent state"
+'''
+run = """
+if [ "${usage_refresh:-false}" = true ] && [ "${usage_frozen:-false}" = true ]; then
+  echo "error: --refresh and --frozen cannot be combined" >&2
+  exit 2
+fi
+mode=default
+if [ "${usage_refresh:-false}" = true ]; then mode=refresh; fi
+if [ "${usage_frozen:-false}" = true ]; then mode=frozen; fi
+command -v apm >/dev/null || { echo "error: apm 0.26.0 is required; run 'mise install'" >&2; exit 127; }
+command -v python3 >/dev/null || { echo "error: python3 is required; run 'mise install'" >&2; exit 127; }
+agent_targets="$(python3 -c '
+import re
+from pathlib import Path
+
+targets = []
+in_targets = False
+for line in Path("apm.yml").read_text().splitlines():
+    if not in_targets:
+        in_targets = re.fullmatch(r"targets:\\s*(?:#.*)?", line) is not None
+        continue
+    stripped = line.strip()
+    if not stripped or stripped.startswith("#"):
+        continue
+    match = re.fullmatch(r"-\\s*([a-z0-9-]+)(?:\\s+#.*)?", stripped)
+    if match is None:
+        break
+    targets.append(match.group(1))
+print(",".join(targets))
+')"
+if [ -z "$agent_targets" ]; then
+  echo "error: apm.yml must activate at least one coding agent target" >&2
+  exit 2
+fi
+if [ "$mode" = frozen ]; then
+  frozen_changes="$(git status --porcelain=v1 --untracked-files=all -- \
+    apm.yml apm.lock.yaml .apm AGENTS.md CLAUDE.md \
+    ':(glob)**/AGENTS.md' ':(glob)**/CLAUDE.md' \
+    .agents .claude .codex .github/instructions)"
+  if [ -n "$frozen_changes" ]; then
+    echo "error: frozen agent configuration changed:" >&2
+    echo "$frozen_changes" >&2
+    echo "run 'mise run agent-sync' and commit the resulting agent configuration" >&2
+    exit 1
+  fi
+fi
+case "$mode" in
+  default) apm install --target "$agent_targets" ;;
+  refresh) apm update --yes --target "$agent_targets" ;;
+  frozen)
+    apm install --frozen --target "$agent_targets"
+    apm audit --ci --no-policy
+    ;;
+esac
+apm compile --clean
+apm compile --validate
+apm audit --ci --no-policy
+if [ -f .mcp.json ]; then python3 -m json.tool .mcp.json >/dev/null; fi
+if [ -f .codex/config.toml ]; then python3 -c 'import tomllib; tomllib.load(open(".codex/config.toml", "rb"))'; fi
+if [ "$mode" = frozen ]; then
+  frozen_changes="$(git status --porcelain=v1 --untracked-files=all -- \
+    apm.yml apm.lock.yaml .apm AGENTS.md CLAUDE.md \
+    ':(glob)**/AGENTS.md' ':(glob)**/CLAUDE.md' \
+    .agents .claude .codex .github/instructions)"
+  if [ -n "$frozen_changes" ]; then
+    echo "error: frozen agent configuration changed:" >&2
+    echo "$frozen_changes" >&2
+    echo "run 'mise run agent-sync' and commit the resulting agent configuration" >&2
+    exit 1
+  fi
+fi
+"""
+
+[tasks.agent-claude]
+description = "Launch Claude Code."
+run = """
+command -v claude >/dev/null || { echo "error: claude is required; install Claude Code and add 'claude' to PATH" >&2; exit 127; }
+claude
+"""
+
+[tasks.agent-codex]
+description = "Launch Codex."
+run = """
+command -v codex >/dev/null || { echo "error: codex is required; install Codex and add 'codex' to PATH" >&2; exit 127; }
+codex
+"""
 
 [tasks.test]
 run = "uv run pytest"
