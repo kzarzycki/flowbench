@@ -35,3 +35,6 @@ flowbench-runs/
 
 # APM dependencies
 apm_modules/
+
+# per-developer instructions (checkout paths, local env) — never tracked
+CLAUDE.local.md

@@ -9,13 +9,15 @@ Vocabulary → **`docs/GLOSSARY.md`** (Scenario → Case → Flow → Run → Sc
 
 ## Engineering loop
 
-All changes follow `../../xebia/flowbench-scenarios/.claude/loop.md` (interactive
-sessions too): branch → spec/plan sized to the change → tests green → PR → merge
-(standing approval) → live-run validation via `scenarios.swe_planning.watch` →
-journal. Cross-session knowledge: the ledger at
-`../../xebia/flowbench-scenarios/.claude/engineering-loop/LOG.md` — read it first
-when resuming work. Engine PRs here merge BEFORE the paired
-scenarios PR; the live run validates both.
+All changes follow `$SCENARIOS/.claude/loop.md` (interactive sessions too):
+branch → spec/plan sized to the change → tests green → PR → merge (standing
+approval) → live-run validation via `scenarios.swe_planning.watch` → journal.
+Cross-session knowledge: the ledger at
+`$SCENARIOS/.claude/engineering-loop/LOG.md` — read it first when resuming work.
+Engine PRs here merge BEFORE the paired scenarios PR; the live run validates both.
+
+`$SCENARIOS` is the private scenarios/cases checkout. Where it sits is per-developer,
+so the path is not tracked here — record it in `CLAUDE.local.md` (untracked).
 
 ## Run it
 

@@ -2,7 +2,8 @@
 
 Named checks the epic stories reference as `V1`…`V8`. A story's "Verify" line cites the
 procedures it needs plus its story-specific assertions. Run from the flowbench repo root
-unless stated.
+unless stated. `$SCENARIOS` is the scenarios checkout — per-developer path, recorded in
+`CLAUDE.local.md`.
 
 ## V1 — engine offline suite
 
@@ -16,7 +17,7 @@ gate for every PR.
 ## V2 — scenarios-repo offline suite
 
 ```bash
-cd ../../xebia/flowbench-scenarios && uv sync && uv run pytest -q
+cd "$SCENARIOS" && uv sync && uv run pytest -q
 ```
 
 Run after any engine change that touches modules the downstream repo imports
@@ -32,7 +33,7 @@ pre-commit run --all-files
 ## V4 — live planning run (the standard live validation)
 
 ```bash
-# from ../../xebia/flowbench-scenarios; needs a running omnigent server, ANTHROPIC_API_KEY unset
+# from $SCENARIOS; needs a running omnigent server, ANTHROPIC_API_KEY unset
 uv run --extra spike python -m scenarios.swe_planning.run --run-id <id> &
 uv run python -m scenarios.swe_planning.watch <id> --pid $!
 ```
