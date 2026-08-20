@@ -41,18 +41,25 @@ framework to that reality and lands it as reusable engine machinery.
 
 Three parts with a clean tool boundary:
 
-- A generic **grading skill** owns the *discipline the judge reads*: the five dimensions, the
-  shared 1–5 anchor scale, the groundedness/claim-classification procedure, and the
-  `judged.json` output contract. It carries no domain content and **runs no code** — it is
-  rubric text the judge session reads, replacing today's bespoke `judge.md` prose. The judge
-  session stays tool-less (no shell/file access), which keeps it compatible with the
-  judge/simulator confinement M6 S06.5 restricts to first.
+- A generic **grading skill** owns the *discipline*: the five dimensions, the shared 1–5
+  anchor scale, the groundedness/claim-classification procedure, and the `judged.json`
+  output contract. It carries no domain content. It remains a full standalone skill
+  (rubric + scripts) for interactive use outside flowbench — grading any generated
+  requirements/architecture doc, the prototype's original use. **Inside flowbench the judge
+  session receives only the rubric part** and runs no code, replacing today's bespoke
+  `judge.md` prose; the judge stays tool-less. Two reasons beyond M6 S06.5 compatibility:
+  *determinism* — numeric values computed once harness-side land identically in the
+  scorecard and the judge prompt, whereas judge-run scripts would produce unrecorded,
+  drift-prone numbers — and *injection surface* — the judge reads flow-authored artifacts;
+  shell access would amplify prompt-injection risk.
 - The **numeric scorers** are deterministic scripts that run **harness-side** — in the
   runner's scorer layer, alongside flowbench's existing pure `(manifest, output) → scorecard`
   scorers, never inside the judge session. Their outputs are injected into the judge prompt as
   text (so the judge sees the cheap signals) and written to the scorecard. Adapted from the
   prototype's `compute_metrics.py`, minus its static-doc extraction path (the input is the
-  already-captured transcript + `plan.md`).
+  already-captured transcript + `plan.md`). **One scorer library, two consumers:** the
+  standalone skill's scripts and the harness scorer module import the same package — never
+  two implementations of the same metric, or they drift.
 - Each case supplies a **`grading.yaml`**: which dimensions/sub-metrics apply, their weights,
   the expected plan sections, any declared design principles, and domain notes.
 
@@ -118,6 +125,19 @@ as it does today).
 so its epistemic status is visible; proxies are estimates, never presented as ground truth;
 report the per-dimension breakdown, not just an aggregate; a single comparison is not evidence
 (a real verdict needs many cases and a paired significance test).
+
+### Outcome gate × judged quality (from τ²-bench — `research/tau2-bench.md`)
+
+τ²-bench gates pass/fail on deterministic checks (state-hash comparison, assertions) and
+keeps its LLM-judge diagnostic-only. flowbench can't fully escape the judge — a plan has no
+DB state to hash — but adopts the layering: each case declares a **`success_basis`** of
+deterministic components (artifact present, structural checklist passed, case-declared
+assertions; the migration scenario's golden diff is the reference example) whose product is
+the **binary trial outcome**. That outcome feeds reliability statistics (P01's pass^k) and is
+computable without any LLM. Judged dimensional scores grade quality *above* the gate and
+never leak into it — a flow doesn't "pass" because the judge liked its prose, and doesn't
+"fail" the gate on a low style score. In the M3 `scorecard.json` schema this is a component
+verdict list (M3 S03.4).
 
 ### Seam into existing infrastructure — do not reinvent
 

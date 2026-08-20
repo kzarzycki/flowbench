@@ -31,6 +31,22 @@ sequential (a 3-flow trial is ~30–60 min wall clock), and nothing quantifies s
    (`flowbench history --case todo_app`) that lines up aggregate winners/scores by date
    and by skill version (the superpowers version is already in the scorecard via
    `skill_dirs` paths). Plain files in, markdown out; no database.
+7. **pass^k reliability** (from τ²-bench — `research/tau2-bench.md`). Per (case, flow),
+   over n trials with s successes, report `pass^k = comb(s, k) / comb(n, k)` for k = 1…n:
+   the probability that all k of a random k-subset of trials succeed. Decreasing in k;
+   pass^1 is the plain success rate. Prerequisite: a binary per-trial success gate — each
+   case declares a `success_basis` of deterministic components (see P03 "outcome gate");
+   judged quality scores stay out of the gate. Trials that failed on infrastructure
+   (termination reason, item 9) are excluded from n, not counted as failures.
+8. **Simulator-error rate.** The simulator is part of the instrument; measure it like one
+   (τ² reports 16% vs 40–47% for naive prompts). An audit pass over sampled transcripts —
+   unprompted leaks, contradictions of `knowledge.md`, hallucinated facts — yielding a
+   per-run sim-error rate next to the judge-calibration numbers from P03 Phase 5.
+9. **Resume + termination taxonomy.** Failure-isolated trials (item 1) get a resume mode:
+   re-run only failed/missing trials into the same run dir instead of restarting the sweep.
+   Every trial records *why* it ended (done token, deadline, turn budget, session error) as
+   a first-class scorecard field, so aggregation can split quality failures from
+   infrastructure failures instead of conflating them in one FAILED bucket.
 
 ## Open questions
 
