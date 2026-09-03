@@ -36,8 +36,9 @@ src/flowbench/
                      # how simulator and judge roles run (today: swe_planning's
                      # OmnigentModel, lifted)
   loop.py            # run_agent_session — the mediated DONE-token loop
-  flowspec.py        # Flow schema: name, harness, skills, skill_dirs, mcp_files,
-                     # model, reasoning_effort, prepend, append, turn_timeout_s;
+  flowspec.py        # Flow schema: name, harness, model, reasoning_effort,
+                     # bundle{skills, skill_dirs, mcp_files}, system_prompt,
+                     # prepend, append, budgets; flat flows + matrix: expansion;
                      # flows.yaml loader with validating errors
   case.py            # case-dir loader: task.md, simulator.md, knowledge.md, judge.md,
                      # flows.yaml (+ optional fixtures/, python hooks)

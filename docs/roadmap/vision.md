@@ -57,9 +57,9 @@ Requirements the known flows impose:
   models are invisible and unpinnable — so the flow definition carries declared
   comparability caveats that reports must render. Only the MCP-reachable surface is
   benchmarkable within the bundle model (`research/flow-requirements.md`).
-- **Cross-harness flows**: the driver already knows `codex-native`; the comparability
-  rules for cross-harness comparisons must be written down (same case, same simulator,
-  same judge — different harness is itself the variable).
+- **Cross-harness flows**: the driver already knows `codex-native`; pi/omp follows. The
+  harness is a flow field like any other; the report states when it is the knob that
+  differs (same case, same simulator, same judge).
 
 ### 4. Reproducibility (M5)
 
