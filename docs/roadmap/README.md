@@ -41,10 +41,11 @@ That is why the recorded decision is DIY with plain-file seams (see locked decis
 
 These are prior decision records, not this roadmap's inventions:
 
-- **Every flow is vanilla Claude Code under omnigent — no harness-level steering.** Flows
-  differ only by bundle (skills/MCPs) and by their per-case prompt overlay (prepend/append
-  in the kickoff message, which is legitimate user input). Never a system prompt, never
-  per-flow launch flags.
+- **A flow is the full configuration; nothing hidden.** Harness, model, effort, bundle,
+  optional system prompt, overlay, budgets — all declared, all in the manifest. Reports state
+  which fields differ; scenarios decide which fields are eligible. Decision record:
+  `docs/design/decisions/2026-09-03-flow-is-the-full-configuration.md` (supersedes the earlier
+  "bundle-only" wording).
 - **One execution model: the `run_case` orchestrator, not Inspect.** Decision record:
   flowbench-scenarios `docs/superpowers/specs/2026-07-02-swe-planning-rework-design.md`.
   Inspect, `subscription_model.py` (`claude -p`), and the eval.py/solver glue are scheduled

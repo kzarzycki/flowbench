@@ -1,9 +1,10 @@
 # flowbench
 
-A benchmark that compares **agentic flows** on a fixed **case**, all driven through **omnigent**
-as the meta-harness. A *flow* is a way of driving a coding agent at a goal — vanilla Claude Code,
-superpowers, or any bundle of skills/MCPs. Every flow is vanilla Claude Code under omnigent; flows
-differ only by their bundle, never by harness-level steering, so a comparison is apples-to-apples.
+A benchmark that compares **agentic flows** on a fixed **case**, all driven through a
+**meta-harness** (omnigent today). A *flow* is one complete configuration for driving a coding
+agent at a goal: harness (Claude Code today; Codex, pi/omp next), model, reasoning effort, and a
+bundle of skills/MCPs. Every field is declared and recorded; nothing steers the agent from hiding,
+so a comparison can state exactly which knobs differ.
 
 Vocabulary → **`docs/GLOSSARY.md`** (Scenario → Case → Flow → Run → Scorecard → Comparison).
 
@@ -37,7 +38,7 @@ RUN_LIVE_AGENT=1 TODO_RUN_ID=first uv run inspect eval \
 ## Layout
 
 - `src/flowbench/runner/` — the agent-eval runtime: `driver.py` (`OmnigentDriver`, per-flow bundle
-  skills/MCP, subscription guard), `flow.py` (`Flow` = one approach as omnigent-bundle data),
+  skills/MCP, subscription guard), `flow.py` (`Flow` = one configuration; bundle fields today, full schema in S03.1),
   `loop.py` (`run_agent_session` DONE-token loop), `judge.py`, `run_dir.py`,
   `subscription_model.py` (the `claudesub` Inspect provider).
   Touching `src/flowbench/runner/`? Read `docs/design/runner.md` first (driver/loop
@@ -54,15 +55,14 @@ RUN_LIVE_AGENT=1 TODO_RUN_ID=first uv run inspect eval \
 
 ## Scope (locked decisions — don't drift)
 
-- **Every flow is VANILLA Claude Code under omnigent — no harness-level steering; flows differ only
-  by bundle.** For the claude-native harness omnigent never passes the bundle `prompt:` to the
-  `claude` CLI (no `--system-prompt`, no initial-prompt injection). The ONLY per-flow variation is
-  the bundle's skills/MCPs + the host-skill filter (`skills:`), never a prompt — so results stay
-  comparable. "Steering" means that harness layer, NOT the case: the first user message is the
-  user's own request and MAY ask the agent to brainstorm/interview first — legitimate user input,
-  the way this user opens a build. What we measure is whether a flow's workflow FIRES on that invite
-  and how well it covers the underspecified points (ground truth = the flow's real `Skill` tool
-  calls, not its narration).
+- **A flow is the full configuration; nothing hidden.** Harness, model, reasoning effort, bundle,
+  optional system prompt, prompt overlay, budgets — every field is declared in the flow and
+  recorded in the run manifest. Reports state which fields differ between columns; scenarios
+  decide which fields are eligible (`coding_workflow` rejects system prompts because its question
+  is whether the flow's workflow FIRES on a plain user invite — ground truth = real `Skill` tool
+  calls, not narration). Today the engine `Flow` carries bundle fields only and the driver never
+  passes a system prompt; S03.1 widens it. Decision record:
+  `docs/design/decisions/2026-09-03-flow-is-the-full-configuration.md`.
 - **Baseline is not a privileged control** — it's just a flow whose bundle is empty
   (`skills="none"`). A comparison may nominate one flow as the reference to read others against, but
   that's a read-time label, not a type.
