@@ -9,50 +9,54 @@ import re
 _WINNER = re.compile(r"WINNER:\s*([a-z]|tie)\b", re.IGNORECASE)
 
 
+def _balanced_end(text: str, start: int) -> int:
+    """Index just past the `}` closing the `{` at `start`, tracking JSON string
+    and escape state so braces/quotes inside strings don't count; -1 if unbalanced."""
+    depth = 0
+    in_string = False
+    escape = False
+    for i in range(start, len(text)):
+        ch = text[i]
+        if in_string:
+            if escape:
+                escape = False
+            elif ch == "\\":
+                escape = True
+            elif ch == '"':
+                in_string = False
+        elif ch == '"':
+            in_string = True
+        elif ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                return i + 1
+    return -1
+
+
 def last_json_object(text: str) -> dict | None:
     """Return the last balanced top-level JSON object in `text`, or None.
-    Robust to a model emitting prose, fenced code, or an example object before
-    the real `{"score": …}` — first-`{`/last-`}` slicing breaks on those, and so
-    does raw brace counting when a JSON string value itself contains braces
-    (e.g. `{"a": "}"}`) — this scans string/escape state so those don't count."""
-    end = len(text)
-    while True:
-        close = text.rfind("}", 0, end)
-        if close == -1:
-            return None
-        depth = 0
-        in_string = False
-        escape = False
-        for i in range(close, -1, -1):
-            ch = text[i]
-            if in_string:
-                if escape:
-                    escape = False
-                elif ch == "\\":
-                    # Walking backwards: a preceding backslash escapes THIS char
-                    # only if that backslash is itself unescaped — approximate by
-                    # toggling; good enough for the well-formed JSON we parse here.
-                    escape = True
-                elif ch == '"':
-                    in_string = False
+    Robust to a model emitting prose, fenced code, stray braces/quotes, or an
+    example object before the real `{"score": …}`: every `{` is tried as a start,
+    its balanced end found with string/escape awareness (so `{"a": "}"}` and
+    `{"a": "\\""}` parse), and the last span that json-parses to a dict wins.
+    ponytail: O(n·k) over candidate starts; judge replies are a few KB."""
+    last: dict | None = None
+    i = text.find("{")
+    while i != -1:
+        end = _balanced_end(text, i)
+        if end != -1:
+            try:
+                obj = json.loads(text[i:end])
+            except ValueError:
+                obj = None
+            if isinstance(obj, dict):
+                last = obj
+                i = text.find("{", end)  # skip the nested starts inside a hit
                 continue
-            if ch == '"':
-                in_string = True
-                escape = False
-                continue
-            if ch == "}":
-                depth += 1
-            elif ch == "{":
-                depth -= 1
-                if depth == 0:
-                    try:
-                        obj = json.loads(text[i : close + 1])
-                        if isinstance(obj, dict):
-                            return obj
-                    except ValueError:
-                        pass
-                    break
-        end = close
+        i = text.find("{", i + 1)
+    return last
 
 
 def _line_after(label: str, text: str) -> str:

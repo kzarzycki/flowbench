@@ -192,5 +192,16 @@ def test_last_json_object_braces_in_strings():
     assert last_json_object('x {"a": "}"} y') == {"a": "}"}
 
 
+def test_last_json_object_escaped_quotes_in_strings():
+    assert last_json_object('{"a": "\\""}') == {"a": '"'}
+    assert last_json_object('{"c\\"": ""} tail') == {'c"': ""}
+    assert last_json_object('{"a": "\\\\"} {"b": "{\\"}"}') == {"b": '{"}'}
+
+
+def test_last_json_object_prose_outside_strings_with_quotes():
+    # a stray quote in prose (depth 0) must not open a string
+    assert last_json_object('he said "hi {" then {"score": 3}') == {"score": 3}
+
+
 def test_last_json_object_prose_before_object():
     assert last_json_object('some prose then {"score": 4}') == {"score": 4}

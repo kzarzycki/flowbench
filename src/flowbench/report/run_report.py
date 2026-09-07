@@ -164,13 +164,13 @@ def render_report(run_root: Path) -> Path:
     )
     cols_html = "".join(col(c, letter) for (letter, _), c in zip(ordered, cards, strict=True))
     letters_str = "/".join(letter for letter, _ in ordered)
-    scenario = meta.get("scenario", "")
+    scenario = f" · scenario {meta['scenario']}" if meta.get("scenario") else ""
     doc = f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>flowbench · {meta["case"]} · {meta["run_id"]}</title><style>{CSS}</style></head><body><main>
 <h1>flowbench run report</h1>
 <div class="sub">case <strong>{meta["case"]}</strong> · run <strong>{meta["run_id"]}</strong>
- · scenario {scenario}</div>
+{scenario}</div>
 <div class="banner">🏆 {verdict_line}</div>
 
 <h2>Flows</h2>
@@ -229,14 +229,14 @@ def render_aggregate_report(run_root: Path) -> Path:
         for t in meta["trials"]
     )
 
-    scenario = meta.get("scenario", "")
+    scenario = f" · scenario {meta['scenario']}" if meta.get("scenario") else ""
     doc = f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>flowbench · {meta["case"]} · {meta["run_id"]} · aggregate</title>
 <style>{CSS}</style></head><body><main>
 <h1>flowbench aggregate report</h1>
 <div class="sub">case <strong>{meta["case"]}</strong> · run <strong>{meta["run_id"]}</strong>
- · {meta["n"]} trials · scenario {scenario}</div>
+ · {meta["n"]} trials{scenario}</div>
 <div class="banner">{banner}</div>
 {scores_html}
 <h2>Trials</h2>

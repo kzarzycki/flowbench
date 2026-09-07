@@ -6,6 +6,7 @@ repo. Offline tests inject fakes for the three factories."""
 
 from __future__ import annotations
 
+import functools
 import json
 import string
 from pathlib import Path
@@ -57,7 +58,7 @@ async def run_case(
     judge_md = (case_dir / "judge.md").read_text()
     flows = load_flows(case_dir / "flows.yaml")
     if len(flows) < 2:
-        raise ValueError(f"swe_planning judges 2+ flows, got {len(flows)}")
+        raise ValueError(f"run_case judges 2+ flows, got {len(flows)}")
     r = rotation % len(flows)
     flows = flows[r:] + flows[:r]
 
@@ -302,7 +303,6 @@ def omni_factories(scenario: str):
     """The three real omnigent factories, bound to `scenario`, matching the
     2-arg `(flow, dir)` / 3-arg `(judge_md, entries, judge_dir)` contract
     run_case/run_case_n call."""
-    import functools
 
     return (
         functools.partial(make_flow_driver_omni, scenario=scenario),
