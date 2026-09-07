@@ -5,8 +5,8 @@ resolution-markers = [
     "python_full_version >= '3.14' and sys_platform == 'win32'",
     "python_full_version >= '3.14' and sys_platform != 'win32'",
     "python_full_version == '3.13.*' and sys_platform == 'win32'",
-    "python_full_version < '3.13' and sys_platform == 'win32'",
     "python_full_version == '3.13.*' and sys_platform != 'win32'",
+    "python_full_version < '3.13' and sys_platform == 'win32'",
     "python_full_version < '3.13' and sys_platform != 'win32'",
 ]
 
@@ -727,7 +727,7 @@ wheels = [
 
 [[package]]
 name = "diff-cover"
-version = "10.3.0"
+version = "10.5.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "chardet" },
@@ -735,9 +735,9 @@ dependencies = [
     { name = "pluggy" },
     { name = "pygments" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/35/21/057e816125c162662d2a2cc2ebcd72dd333e78e51678298d07dd3146011a/diff_cover-10.3.0.tar.gz", hash = "sha256:474dbc63e815fbb7567d7b7ca5b104123e96129f25426ebdbc9a1bdbb935b2c6", size = 106546, upload-time = "2026-05-30T14:17:14.32Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/e6/74/b71a61b2610b5866aa29a9388bc1b58738e49600345dbe0598676b436717/diff_cover-10.5.1.tar.gz", hash = "sha256:f1c9417c62111e40a81c482c692c5cdd131ff93317baa993044cb291912ebba3", size = 113297, upload-time = "2026-08-16T18:09:19.466Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/83/0a/a96e57a7a3fca419cd5ceff0d13dee2166520fa67103fb82624ad64700fb/diff_cover-10.3.0-py3-none-any.whl", hash = "sha256:2e47d5ab3868d1e92131c11f364f3f4a8583c97123d3bbc6b6cc8ce0a4cc2202", size = 58989, upload-time = "2026-05-30T14:17:12.858Z" },
+    { url = "https://files.pythonhosted.org/packages/3d/da/ac0ad341c7377e82f7d6dcb18461029579da224c3923f73ff6537d8591cf/diff_cover-10.5.1-py3-none-any.whl", hash = "sha256:67ce07494e605b5d7d7b04aeec2cf524950ed0c12f026dd176883cf33c74fba0", size = 62924, upload-time = "2026-08-16T18:09:18.387Z" },
 ]
 
 [[package]]
@@ -799,7 +799,7 @@ spike = [
 
 [package.metadata]
 requires-dist = [
-    { name = "diff-cover", marker = "extra == 'dev'", specifier = ">=9" },
+    { name = "diff-cover", marker = "extra == 'dev'", specifier = ">=10.5.1" },
     { name = "inspect-ai", marker = "extra == 'spike'", specifier = ">=0.3.249" },
     { name = "omnigent", marker = "extra == 'spike'", specifier = "==0.1.1" },
     { name = "omnigent-client", marker = "extra == 'spike'", specifier = "==0.1.1" },
@@ -2946,8 +2946,8 @@ name = "secretstorage"
 version = "3.5.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "cryptography", marker = "sys_platform != 'win32'" },
-    { name = "jeepney", marker = "sys_platform != 'win32'" },
+    { name = "cryptography" },
+    { name = "jeepney" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/1c/03/e834bcd866f2f8a49a85eaff47340affa3bfa391ee9912a952a1faa68c7b/secretstorage-3.5.0.tar.gz", hash = "sha256:f04b8e4689cbce351744d5537bf6b1329c6fc68f91fa666f60a380edddcd11be", size = 19884, upload-time = "2025-11-23T19:02:53.191Z" }
 wheels = [
@@ -3567,7 +3567,7 @@ name = "zipfile-zstd"
 version = "0.0.4"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "zstandard", marker = "python_full_version < '3.14'" },
+    { name = "zstandard" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/f7/2a/2e0941bc0058d10ab37d8c578b94a19f611f6ae54f124140f2fb451f0932/zipfile-zstd-0.0.4.tar.gz", hash = "sha256:c1498e15b7922a3d1af0ea55df8b11b2af4e8f7e0e80e414e25d66899f7def89", size = 4603, upload-time = "2021-12-08T07:38:16.245Z" }
 wheels = [
