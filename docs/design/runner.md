@@ -1,6 +1,7 @@
 # Runner design
 
-The engine's execution core is two modules; everything else is scenario-local.
+The engine's execution core is `driver.py` + `loop.py`; `run.py` orchestrates a case
+on top of them. Scenarios own content and scenario-specific scoring only.
 
 ## driver.py — the ONE module that knows omnigent exists
 
@@ -63,10 +64,36 @@ done_token, max_turns, deadline_s)`:
 - **The loop closes the driver itself** (finally). Callers close only their
   simulator.
 
+## run.py — the `run_case` orchestrator (since S01.1)
+
+`run_case(case_dir, *, run_id, runs_root, scenario, make_flow_driver, make_simulator,
+run_judge, ...)`: for each flow spawn a driver + simulator, run the loop, write
+`<run_root>/<flow>/{plan.md,transcript.md,session.json}`, then judge all flows in one
+shot and write `run.json` + `report.html`. `run_case_n` repeats it with the flow list
+rotated per trial (cancels judge position bias) under `trial-XX/` and aggregates.
+The three factories are injected so the whole pipeline runs offline against
+`flowbench.testing` doubles; `omni_factories(scenario)` returns the real ones.
+
+Supporting modules, all omnigent-free at import time:
+
+| Module | Role |
+| --- | --- |
+| `model.py` | `SessionModel`: `.generate(prompt)` shim over one persistent omnigent session (simulator + judge); freshness-retry policy for the terminal-readiness flake |
+| `flowspec.py` | `load_flows` (flows.yaml, resolves `skill_dirs`), `compose_kickoff` (prepend + task + append) |
+| `runner/judge.py` | `parse_verdict`/`parse_scores` for the prose `WINNER:`/`SCORES X:` tail, `build_judge_prompt`, `aggregate_*`, `last_json_object` for JSON judges |
+| `transcript.py` | message-item helpers shared by driver and reports (`item_text`, `dedup_items`, ...) + `render_transcript` |
+| `report/run_report.py` | run dir → self-contained `report.html` (single run and aggregate) |
+| `watch.py` | `RunWatch`: incremental anomaly scanner over a live run (omnigent log + run dir) |
+| `testing.py` | `FakeDriver`, `StubSim`, `MissingPlanDriver`, `ScriptedDriver`, `n_run_factories` |
+
+Case-shaped constants (`DONE_TOKEN`, `MISSING_PLAN`, `SIM_MODEL`, `JUDGE_MODEL`,
+artifact `plan.md`) are still module constants of `run.py`; S01.3/E03 parameterize them.
+CLI entrypoints (`main`) stay scenario-side until S03.x.
+
 ## One execution model
 
-Scenarios run through a scenario-local `run_case` orchestrator on top of these
-two modules — not through Inspect. `subscription_model.py` (`claude -p`) and
+Scenarios run through the engine's `run_case` orchestrator — not through Inspect.
+`subscription_model.py` (`claude -p`) and
 the `inspect-ai` dependency are scheduled for removal via the todo_app port.
 Decision record: flowbench-scenarios
 `docs/superpowers/specs/2026-07-02-swe-planning-rework-design.md` (execution

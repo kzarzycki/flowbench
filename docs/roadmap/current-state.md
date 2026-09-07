@@ -4,18 +4,25 @@ What exists, what works, what is debt. Line counts are `wc -l` on that date.
 
 ## Inventory
 
-**Engine** (`src/flowbench/`, ~1,060 lines):
+**Engine** (`src/flowbench/`, ~1,060 lines on 2026-07-06; ~2,100 after S01.1 on 2026-09-07):
 
 | Module | Lines | Role |
 | --- | --- | --- |
-| `runner/driver.py` | 594 | `AgentDriver` ABC, `OmnigentDriver` (session lifecycle, send/settle/retry, capture), transcript helpers, bundle building, git-init — five concerns in one file |
+| `runner/driver.py` | 538 | `AgentDriver` ABC, `OmnigentDriver` (session lifecycle, send/settle/retry, capture), bundle building, git-init — four concerns in one file (transcript helpers moved out in S01.1) |
+| `run.py` | 311 | `run_case`/`run_case_n` orchestrator + omnigent factories (S01.1, lifted from swe_planning) |
+| `report/run_report.py` | 259 | run dir → report.html, single + aggregate (S01.1) |
+| `testing.py` | 112 | offline doubles: FakeDriver, StubSim, ScriptedDriver, n_run_factories (S01.1) |
+| `watch.py` | 100 | `RunWatch` live-run anomaly scanner (S01.1) |
+| `transcript.py` | 89 | message-item helpers + `render_transcript` (S01.1) |
+| `model.py` | 78 | `SessionModel` simulator/judge shim with freshness retry (S01.1) |
+| `flowspec.py` | 36 | flows.yaml loading, kickoff composition (S01.1) |
 | `runner/loop.py` | 134 | mediated DONE-token loop; nudge policy for self-waiting agents |
 | `runner/subscription_model.py` | 98 | `claudesub` Inspect provider over `claude -p` — **scheduled for deletion** (decision 2026-07-02) |
 | `report/compare.py` | 91 | side-by-side scorecard table; metric paths hardcoded to todo_app's schema |
 | `runner/run_dir.py` | 47 | run-dir prep + JSON output writers |
 | `cli.py` | 36 | typer app; `compare` is the only command |
-| `runner/judge.py` | 32 | `last_json_object` parser |
-| `runner/flow.py` | 31 | frozen `Flow` dataclass (bundle fields only) |
+| `runner/judge.py` | 142 | `last_json_object` (string-aware) + prose verdict/scores parsing, aggregation (S01.1) |
+| `runner/flow.py` | 34 | frozen `Flow` dataclass (bundle fields only) |
 
 **Reference scenario** (`scenarios/coding_workflow/cases/todo_app/`, ~920 lines): Inspect
 `@task` + solver glue around the engine loop, keyword-based clarifying-coverage scoring,

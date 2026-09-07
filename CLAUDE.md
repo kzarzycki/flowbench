@@ -43,6 +43,10 @@ RUN_LIVE_AGENT=1 TODO_RUN_ID=first uv run inspect eval \
   `subscription_model.py` (the `claudesub` Inspect provider).
   Touching `src/flowbench/runner/`? Read `docs/design/runner.md` first (driver/loop
   contracts, one-execution-model decision).
+- `src/flowbench/run.py` — `run_case`/`run_case_n`: the one orchestrator (flows + simulator +
+  judge → run dir → `run.json`, `report.html`). Helpers: `model.py` (`SessionModel`),
+  `flowspec.py` (flows.yaml), `transcript.py`, `watch.py` (`RunWatch`), `report/run_report.py`,
+  `testing.py` (offline doubles). Factories are injected; `omni_factories(scenario)` = the real ones.
 - `src/flowbench/report/compare.py` — side-by-side flow comparison; a scoreless flow renders as a
   FAILED column, never an abort.
 - `src/flowbench/cli.py` — typer: `compare`.

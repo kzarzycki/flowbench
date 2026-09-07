@@ -1,0 +1,27 @@
+# A flow = a whole approach: which skills the agent has + how it's told to plan +
+# the omnigent model/effort. Flow order defines the judge's A/B: A = first, B = second.
+flows:
+  - name: superpowers
+    harness: claude-native
+    model: opus              # subscription alias; live-verify this pins Opus 4.8
+    reasoning_effort: xhigh
+    skills: all              # host ~/.claude skills visible (brainstorming, writing-plans, ...)
+    prepend: |
+      Use the brainstorming skill to surface ambiguities and interview the user
+      about anything genuinely unclear, then use writing-plans to write the plan.
+    append: |
+      Write the final plan to plan.md, then tell the user the plan is complete.
+      Do NOT implement the feature — no code, no scaffolding, no dependency
+      installs. plan.md is the only deliverable.
+  - name: plain
+    harness: claude-native
+    model: opus
+    reasoning_effort: xhigh
+    skills: none             # no host skills — bare Claude Code
+    prepend: |
+      Plan this feature directly. Ask the user clarifying questions only if you
+      genuinely need them.
+    append: |
+      Write the plan to plan.md, then tell the user the plan is complete.
+      Do NOT implement the feature — no code, no scaffolding, no dependency
+      installs. plan.md is the only deliverable.
