@@ -23,12 +23,19 @@ plus fixtures/seed. This is what runs. A Scenario has one or more Cases.
 **variant** *(optional)* — A sub-challenge within a Case, e.g. difficulty tiers `smoke`/`core`.
 Secondary: variants don't drive design, and most Cases have exactly one (implicit).
 
-**Flow** — The thing being compared: `baseline`, `superpowers`, or a private in-house flow. A way of driving a
-coding agent at a Case, expressed as an omnigent config — a harness plus a bundle of skills/MCPs.
-Every flow is uniform; there is no built-in "control" category. A comparison may nominate one flow
-as the reference to read the others against (call it the baseline *for that comparison*), but
-that's a label chosen at read-time, not a type. A bare/vanilla flow is just a flow whose bundle is
-empty (`skills="none"`).
+**Flow** — The thing being compared: `baseline`, `superpowers`, or a private in-house flow. One
+complete configuration for driving a coding agent at a Case: the **harness** (which agent:
+`claude-native`, `codex`, pi/omp next), the **model**, the **reasoning effort**, the **bundle** of
+skills/MCPs/agent configs, and optionally a system prompt, a prompt overlay and budgets. Every
+field is declared and recorded; a report states which fields differ between the flows it compares,
+and a scenario may declare some fields ineligible. Change one knob and you have a different flow.
+Flows are flat; a `matrix:` in `flows.yaml` expands to many. Every flow is uniform;
+there is no built-in "control" category. A comparison may nominate one flow as the reference to
+read the others against (call it the baseline *for that comparison*), but that's a label chosen at
+read-time, not a type. A bare/vanilla flow is just a flow whose bundle is empty (`skills="none"`).
+Today the engine's `Flow` dataclass carries only the bundle fields; the rest lives in the
+scenarios' `flows.yaml` until S03.1 (Flow schema v1). Decision record:
+`docs/design/decisions/2026-09-03-flow-is-the-full-configuration.md`.
 
 **subprompt** — A flow's per-Case prompt overlay: the typical user moves for that flow, e.g. the
 superpowers flow's "use the brainstorming skill first". The base prompt comes from the Case;

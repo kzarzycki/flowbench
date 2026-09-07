@@ -1,9 +1,12 @@
-"""An flow = one approach under test, expressed as omnigent-bundle data.
+"""A flow = one complete configuration under test.
 
-Omnigent is always the meta-harness; an flow is nothing but the bundle contents
-plus which harness runs them. "baseline", "superpowers", "ADF", "ACE" are all the
-same driver path carrying different bundle skills/MCPs — never a separate CLI.
-The driver (OmnigentDriver) reads these fields straight into the bundle it builds.
+Conceptually: harness, model, reasoning effort, bundle (skills/MCPs), optional
+system prompt, prompt overlay, budgets — every field declared, nothing hidden
+(docs/design/decisions/2026-09-03-flow-is-the-full-configuration.md). This
+dataclass carries the bundle fields only; S03.1 widens it to the full schema.
+"baseline", "superpowers", "Axis", "ACE" are all the same driver path carrying
+different bundle skills/MCPs — never a separate CLI. The driver reads these
+fields straight into the bundle it builds.
 """
 
 from __future__ import annotations

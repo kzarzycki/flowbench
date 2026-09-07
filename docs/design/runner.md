@@ -15,6 +15,39 @@ The engine's execution core is two modules; everything else is scenario-local.
 - `capture_session()` returns plain data: `items`, `events`, `duration_s`,
   `artifact_*`, `model`, `session_id`, `conversation_url`.
 
+### Where a flow's skills live at run time
+
+A flow's skills never load from the host `~/.claude`. `OmnigentDriver._build_bundle`
+copies them into a per-flow tarball, POSTs it to omnigent, and the agent loads them from
+there (`--plugin-dir`); with `skills: "none"` the host skills are hidden. That is what
+makes a flow identical on any machine.
+
+```mermaid
+flowchart LR
+  subgraph src[Sources on disk]
+    sp[superpowers plugin dir]
+    own[our skill dirs<br/>each with SKILL.md]
+    mcp[per-flow MCP yaml]
+  end
+  f[Flow: harness, skills filter,<br/>skill_dirs, mcp_files]
+  subgraph bundle[agent.tar.gz, built per flow]
+    cfg[config.yaml<br/>harness, skills: none]
+    sk[skills/&lt;name&gt;/SKILL.md]
+    tm[tools/mcp/*.yaml]
+  end
+  subgraph sess[omnigent session]
+    cli[claude CLI, vanilla<br/>--plugin-dir → bundle skills<br/>host ~/.claude skills hidden]
+    ws[workspace/ = run dir/&lt;flow&gt;/]
+  end
+  sp & own --> sk
+  mcp --> tm
+  f --> cfg
+  bundle -- POST --> sess
+  cli -- reads/writes --> ws
+```
+
+Baseline is the same picture with an empty `skills/`. Nothing else changes.
+
 ## loop.py — the mediated DONE-token loop
 
 `run_agent_session(driver, user_model, *, first_prompt, simulator_system,

@@ -57,17 +57,22 @@ Executes the recorded 2026-07-02 decision: `run_case`, everything omnigent, Insp
 - S02.3b Loop hygiene: keep harness nudges out of the simulator's relayed context;
   per-turn child-busy state (both audit-confirmed bugs).
 - S02.4 Artifact probe out of the driver (kill `artifact_name="__none__"`).
-- S02.5 Omnigent public-API migration + upstream the tmux-scan patch; delete
-  `scripts/patch_omnigent.py` when released.
+- S02.5 Meta-harness decision: omnigent vs herdr (is omnigent more than we need?). Record it;
+  then either the omnigent public-API migration + upstream the tmux-scan patch (delete
+  `scripts/patch_omnigent.py` when released), or a herdr driver behind the same seam.
 - S02.6 Error taxonomy: narrow the broad `except Exception` sites.
 
 ### M3 — Case format v1 and a real CLI (`epics/E03-case-format-and-cli.md`)
 
-- S03.1 Flow schema v1 (union of dataclass + downstream yaml shape; validating loader).
-- S03.2 Case format v1 (documented loader; scenario-authoring guide moves engine-side).
+- S03.1 Flow schema v1: the full configuration (harness, model, reasoning_effort, bundle,
+  system_prompt, prepend/append, budgets), flat flows + `matrix:` expansion, validating loader.
+  Decision: `docs/design/decisions/2026-09-03-flow-is-the-full-configuration.md`.
+- S03.2 Case format v1 (documented loader; scenario-authoring guide moves engine-side;
+  scenario eligibility rules for flow fields, e.g. no system prompt in `coding_workflow`).
 - S03.3 `flowbench run` / `flowbench watch`; per-scenario `__main__`s deleted.
 - S03.4 `run.json`/`scorecard.json` schema v1 (`schema_version`, reader rules).
-- S03.5 Generic compare (metric discovery replaces the hardcoded todo_app table).
+- S03.5 Generic compare (metric discovery replaces the hardcoded todo_app table; a
+  "differs in: <flow fields>" row per comparison).
 
 ---
 
@@ -92,7 +97,8 @@ source: `research/flow-requirements.md`.
 - S04.7 ACE flow via its remote MCP servers (design/planning surface only; env-injected
   API key; declared non-hermeticity caveats rendered in reports). Its server-side code
   engine is out of scope without a new decision record.
-- S04.8 Cross-harness comparability rules + a codex-native smoke through `run_case`.
+- S04.8 Cross-harness comparability rules + a codex-native smoke through `run_case`;
+  pi/omp harness after Codex.
 
 ### M5 — Reproducibility (E05, spec to write)
 
