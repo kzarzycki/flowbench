@@ -653,3 +653,52 @@ def test_run_case_n_writes_aggregate_report(tmp_path):
     assert 'href="trial-02/report.html"' in text
     # scripted judge emits no SCORES lines -> section omitted, no crash
     assert "Score means" not in text
+
+
+def test_make_simulator_omni_is_bare_claude_on_a_session_model(tmp_path):
+    sim = run_mod.make_simulator_omni(
+        {"name": "plain"}, tmp_path / "_sim_plain", scenario="swe_planning"
+    )
+    d = sim._driver
+    assert d.skills == "none" and d.model == run_mod.SIM_MODEL
+    assert d.artifact_name == "__none__"
+    assert d.session_title == "sim: plain"
+
+
+def test_run_judge_omni_generates_once_and_closes(tmp_path, monkeypatch):
+    seen = {}
+
+    class _Model:
+        def __init__(self, driver):
+            seen["driver"] = driver
+            self.closed = False
+
+        async def generate(self, prompt):
+            seen["prompt"] = prompt
+
+            class _Out:
+                completion = "WINNER: A"
+
+            return _Out()
+
+        async def close(self):
+            seen["closed"] = True
+
+    monkeypatch.setattr(run_mod, "SessionModel", _Model)
+    judge_dir = tmp_path / "todo-1" / "_judge"
+    out = asyncio.run(
+        run_mod.run_judge_omni("rubric", [("A", "t", "plan a")], judge_dir, scenario="swe_planning")
+    )
+    assert out == "WINNER: A" and seen["closed"] is True
+    assert seen["prompt"].startswith("rubric")
+    d = seen["driver"]
+    assert d.model == run_mod.JUDGE_MODEL and d.turn_timeout_s == 600
+    assert d.project == "swe_planning/todo-1" and d.session_title == "judge"
+
+
+def test_omni_factories_bind_scenario():
+    mk_flow, mk_sim, judge = run_mod.omni_factories("dwh")
+    assert mk_flow.func is run_mod.make_flow_driver_omni
+    assert mk_sim.func is run_mod.make_simulator_omni
+    assert judge.func is run_mod.run_judge_omni
+    assert all(f.keywords == {"scenario": "dwh"} for f in (mk_flow, mk_sim, judge))

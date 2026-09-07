@@ -205,3 +205,9 @@ def test_last_json_object_prose_outside_strings_with_quotes():
 
 def test_last_json_object_prose_before_object():
     assert last_json_object('some prose then {"score": 4}') == {"score": 4}
+
+
+def test_last_json_object_skips_balanced_non_json_and_non_dicts():
+    assert last_json_object('{not json} then {"ok": 1}') == {"ok": 1}
+    assert last_json_object('{"a": 1} {"b": [1, 2]} {"c": 3} {broken') == {"c": 3}
+    assert last_json_object("[1, 2]") is None

@@ -73,3 +73,20 @@ def test_generate_idle_path_single_send():
     out = asyncio.run(model.generate("x"))
     assert out.completion == "ok"
     assert len(driver.sent) == 1
+
+
+def test_close_closes_driver_only_after_start():
+    class _Drv(ScriptedDriver):
+        closed = False
+
+        async def close(self):
+            self.closed = True
+
+    d = _Drv([TurnResult("idle", "hi", False)])
+    m = SessionModel(d)
+    asyncio.run(m.close())
+    assert d.closed is False  # never started: nothing to close
+    asyncio.run(m.generate("x"))
+    asyncio.run(m.close())
+    assert d.closed is True
+    asyncio.run(ScriptedDriver([]).close())  # the plain stub's close is a no-op

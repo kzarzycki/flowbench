@@ -93,3 +93,38 @@ def test_aggregate_report_three_flows_no_keyerror(tmp_path):
     text = render_aggregate_report(root).read_text()
     assert "codex wins 2–1–0 (n=3)" in text
     assert "superpowers" in text and "plain" in text and "codex" in text
+
+
+def test_md_to_html_headers_close_lists_and_numbered_items():
+    from flowbench.report.run_report import md_to_html
+
+    out = md_to_html("- one\n- two\n## Head\n1. first\n2. second\n\ntext")
+    assert out.split("\n") == [
+        "<ul>",
+        "<li>one</li>",
+        "<li>two</li>",
+        "</ul>",
+        "<h4>Head</h4>",
+        "<ul>",
+        "<li>1. first</li>",
+        "<li>2. second</li>",
+        "</ul>",
+        "<p>text</p>",
+    ]
+
+
+def test_flow_card_falls_back_to_session_json_without_flow_stats(tmp_path):
+    from flowbench.report.run_report import flow_card
+
+    d = tmp_path / "plain"
+    d.mkdir()
+    (d / "session.json").write_text(
+        json.dumps({"exit_status": "idle", "turns": 3, "duration_s": 12.4, "context_tokens": 1500})
+    )
+    (d / "plan.md").write_text("# Plan\n\n- step\n")
+    (d / "transcript.md").write_text("# Transcript\n\n## user\n\nhi\n")
+    meta = {"models": {"plain": "opus"}, "reasoning_effort": {}}  # pre-flow_stats run.json
+    card = flow_card("plain", tmp_path, False, meta)
+    assert card["exit"] == "idle" and card["turns"] == 3 and card["duration"] == "12s"
+    assert card["tokens"] == "1,500" and card["effort"] == "?"
+    assert card["plan_lines"] == 3  # None in the fallback -> counted from plan.md

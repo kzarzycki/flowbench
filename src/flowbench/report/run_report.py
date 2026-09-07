@@ -255,5 +255,5 @@ def render_any(run_root: Path) -> Path:
     return render_aggregate_report(run_root) if "trials" in meta else render_report(run_root)
 
 
-if __name__ == "__main__":
+if __name__ == "__main__":  # pragma: no cover
     print(render_any(Path(sys.argv[1])))

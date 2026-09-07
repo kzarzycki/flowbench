@@ -13,3 +13,12 @@ def test_render_transcript_labels_roles_and_skips_empty():
     assert "## user" in md and "## assistant" in md
     assert "the kickoff" in md and "what should unknown flags return?" in md and "a 404" in md
     assert md.count("\n## ") == 3  # 3 kept messages, title uses a single "#"
+
+
+def test_item_text_content_shapes():
+    from flowbench.transcript import item_text
+
+    assert item_text({"content": "plain"}) == "plain"
+    assert item_text({"content": [{"type": "text", "text": "a"}, {"type": "image"}, "junk"]}) == "a"
+    assert item_text({"content": 42}) == ""
+    assert item_text({}) == ""
