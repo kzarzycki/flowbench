@@ -27,6 +27,16 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from flowbench.transcript import (  # noqa: F401 — re-exported until S01.2 repoints the scenarios imports
+    dedup_items,
+    is_control_message,
+    item_text,
+    last_assistant_text,
+    n_assistant_messages,
+)
+
+_item_text = item_text  # alias until S01.2
+
 # Unattended file work inside the run workspace: read tools + file-work bash.
 # Passed as --allowedTools (with --permission-mode acceptEdits) on every flow.
 ALLOWED_TOOLS = [
@@ -84,48 +94,6 @@ class AgentDriver(abc.ABC):
 # --- transcript helpers (pure; shared with the normalizer's notion of text) ---
 
 
-def _item_text(item: dict) -> str:
-    content = item.get("content")
-    if isinstance(content, str):
-        return content
-    if isinstance(content, list):
-        # Same accepted part-types as normalize._message_text so the driver's
-        # notion of "assistant text" can't diverge from the scorer's.
-        return "".join(
-            p.get("text", "")
-            for p in content
-            if isinstance(p, dict) and p.get("type") in (None, "text", "input_text", "output_text")
-        )
-    return ""
-
-
-def last_assistant_text(items: list[dict]) -> str:
-    for it in reversed(items):
-        if isinstance(it, dict) and it.get("type") == "message" and it.get("role") == "assistant":
-            txt = _item_text(it)
-            if txt.strip():
-                return txt
-    return ""
-
-
-def n_assistant_messages(items: list[dict]) -> int:
-    return sum(
-        1
-        for it in items
-        if isinstance(it, dict) and it.get("type") == "message" and it.get("role") == "assistant"
-    )
-
-
-# Harness control injections that are NOT part of the user/agent conversation —
-# Claude Code surfaces sub-agent completions as role=user `<task-notification>`
-# messages. They must not pollute the transcript or be read as conversation.
-_CONTROL_PREFIXES = ("<task-notification>",)
-
-
-def is_control_message(text: str) -> bool:
-    return text.lstrip().startswith(_CONTROL_PREFIXES)
-
-
 def any_child_busy(events: list[dict]) -> bool:
     """True when the agent has a background sub-agent still running, per the latest
     per-child `busy` state in the captured event stream. omnigent surfaces each
@@ -142,30 +110,6 @@ def any_child_busy(events: list[dict]) -> bool:
         if cid is not None:
             busy[cid] = bool(child.get("busy"))
     return any(busy.values())
-
-
-def dedup_items(items: list[dict]) -> list[dict]:
-    """Clean the captured conversation: drop (1) the consecutive duplicate message
-    omnigent records for every injected turn, and (2) harness control injections
-    (`<task-notification>`). Non-message items pass through untouched. A duplicate
-    is a message whose (role, text) equals the previous KEPT message's — real
-    turns are always separated by the other party's message, so this only ever
-    collapses the capture artifact."""
-    out: list[dict] = []
-    last_key: tuple[str, str] | None = None
-    for it in items:
-        if not (isinstance(it, dict) and it.get("type") == "message"):
-            out.append(it)
-            continue
-        text = _item_text(it)
-        if is_control_message(text):
-            continue
-        key = (it.get("role", ""), text)
-        if key == last_key:
-            continue
-        last_key = key
-        out.append(it)
-    return out
 
 
 # --- the real driver -------------------------------------------------------
