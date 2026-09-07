@@ -21,8 +21,8 @@ What exists, what works, what is debt. Line counts are `wc -l` on that date.
 | `report/compare.py` | 91 | side-by-side scorecard table; metric paths hardcoded to todo_app's schema |
 | `runner/run_dir.py` | 47 | run-dir prep + JSON output writers |
 | `cli.py` | 36 | typer app; `compare` is the only command |
-| `runner/judge.py` | 138 | `last_json_object` (string-aware) + prose verdict/scores parsing, aggregation (S01.1) |
-| `runner/flow.py` | 31 | frozen `Flow` dataclass (bundle fields only) |
+| `runner/judge.py` | 142 | `last_json_object` (string-aware) + prose verdict/scores parsing, aggregation (S01.1) |
+| `runner/flow.py` | 34 | frozen `Flow` dataclass (bundle fields only) |
 
 **Reference scenario** (`scenarios/coding_workflow/cases/todo_app/`, ~920 lines): Inspect
 `@task` + solver glue around the engine loop, keyword-based clarifying-coverage scoring,

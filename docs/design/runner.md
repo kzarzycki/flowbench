@@ -92,7 +92,8 @@ CLI entrypoints (`main`) stay scenario-side until S03.x.
 
 ## One execution model
 
-Scenarios run through the engine's `run_case` orchestrator — not through Inspect. `subscription_model.py` (`claude -p`) and
+Scenarios run through the engine's `run_case` orchestrator — not through Inspect.
+`subscription_model.py` (`claude -p`) and
 the `inspect-ai` dependency are scheduled for removal via the todo_app port.
 Decision record: flowbench-scenarios
 `docs/superpowers/specs/2026-07-02-swe-planning-rework-design.md` (execution
