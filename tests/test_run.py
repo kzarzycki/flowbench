@@ -812,6 +812,15 @@ def test_run_case_score_flow_error_is_isolated(tmp_path):
     assert meta["flow_stats"]["superpowers"]["score_error"] == "RuntimeError: boom"
     assert calls["n"] == 2
 
+    from flowbench.report.compare import compare_table, load_scorecards
+
+    cards = load_scorecards(tmp_path, "err-run")
+    table = compare_table(cards)
+    assert "FAILED (RuntimeError: boom)" in table
+    lines = table.splitlines()
+    status_line = next(line for line in lines if line.startswith("| _status_"))
+    assert "ok" in status_line
+
 
 def test_run_case_no_score_flow_judge_present_unchanged(tmp_path):
     case = CASE_DIR

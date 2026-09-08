@@ -57,3 +57,14 @@ def test_judge_error_fails_only_the_judge_rows(tmp_path):
 def test_no_scorecards_found(tmp_path):
     (tmp_path / "r").mkdir()
     assert "no flow scorecards found" in compare.render_compare(tmp_path, "r")
+
+
+def test_score_flow_error_card_is_a_failed_column(tmp_path):
+    # score_flow raised: run_case writes {"error": "..."} as the whole card
+    # (not a missing file) — compare_table must flag it FAILED with the reason,
+    # not render a column of dashes.
+    _write(tmp_path, "r", "baseline", _card(True, 0.7, {"shape_fit": 0.6}))
+    _write(tmp_path, "r", "superpowers", {"error": "RuntimeError: boom"})
+    md = compare.render_compare(tmp_path, "r")
+    assert "| _status_ | ok | FAILED (RuntimeError: boom) |" in md
+    assert "| acceptance | 0.7 | — |" in md

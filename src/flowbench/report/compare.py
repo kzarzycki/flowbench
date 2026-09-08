@@ -74,11 +74,22 @@ def compare_table(cards: dict[str, dict | None]) -> str:
     sep = "| --- | " + " | ".join("---" for _ in flows) + " |"
     lines = [header, sep]
     # a whole-flow failure gets its own banner row so the FAILED columns are read
-    # as "flow did not run", not "this one metric failed".
-    failed = [a for a, c in cards.items() if c is None]
+    # as "flow did not run", not "this one metric failed". A card is a whole-flow
+    # failure either because it's missing/unreadable (None) or because score_flow
+    # raised and run_case wrote {"error": ...} as the entire card.
+    failed = {
+        a: ("" if c is None else c.get("error"))
+        for a, c in cards.items()
+        if c is None or (isinstance(c, dict) and c.get("error"))
+    }
     if failed:
         lines.append(
-            "| _status_ | " + " | ".join("FAILED" if a in failed else "ok" for a in flows) + " |"
+            "| _status_ | "
+            + " | ".join(
+                (f"FAILED ({failed[a]})" if failed.get(a) else "FAILED") if a in failed else "ok"
+                for a in flows
+            )
+            + " |"
         )
     for label, path in _METRICS:
         row = [_cell(cards[a], path) for a in flows]
