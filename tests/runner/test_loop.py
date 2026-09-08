@@ -298,7 +298,7 @@ async def test_done_waits_for_pending_artifact(monkeypatch):
 
 async def test_loop_records_stall_reason_and_pane(monkeypatch):
     # #54: a stalled first turn stops the loop and lands what the agent waits on
-    turns = [TurnResult("stalled", "", False, stall_reason="elicitation", pane_tail="❯ y/n?")]
+    turns = [TurnResult("stalled", "", False, stall_reason="prompt", pane_tail="❯ y/n?")]
     driver = _FakeDriver(turns, {"items": []})
     user = _StubModel(["unused"])
     session = await run_agent_session(
@@ -313,5 +313,5 @@ async def test_loop_records_stall_reason_and_pane(monkeypatch):
     )
     assert user.seen == []
     assert session["exit_status"] == "stalled"
-    assert session["stall_reason"] == "elicitation"
+    assert session["stall_reason"] == "prompt"
     assert session["pane_tail"] == "❯ y/n?"

@@ -31,6 +31,9 @@ from typing import Any
 
 from flowbench.transcript import dedup_items, last_assistant_text, n_assistant_messages
 
+# raw-session fields that mean "the agent is waiting on a human"
+_PROMPT_KEYS = ("pending_elicitations", "pending_inputs", "terminal_pending")
+
 
 @dataclass
 class TurnResult:
@@ -39,7 +42,7 @@ class TurnResult:
     artifact_exists: bool
     child_busy: bool = False  # a dispatched sub-agent is still running (agent is
     # parked on its OWN work, not awaiting the user)
-    stall_reason: str | None = None  # "elicitation" | "no_progress" when stalled
+    stall_reason: str | None = None  # "prompt" | "no_progress" when stalled
     pane_tail: str | None = None  # last terminal lines at the stall, best effort
 
 
@@ -161,9 +164,9 @@ class OmnigentDriver(AgentDriver):
     )
     git_init: bool = False
     turn_timeout_s: float = 240.0
-    # Stall watchdog (#54): a `running` session with a pending elicitation (a
-    # permission/policy prompt nobody can answer) or no heartbeat for stall_s
-    # ends the turn as "stalled" instead of burning the whole turn cap. Bites
+    # Stall watchdog (#54, #61): a `running` session waiting on a human (any of
+    # _PROMPT_KEYS set) or with no heartbeat for stall_s ends the turn as
+    # "stalled" instead of burning the whole turn cap. Bites
     # only under a turn cap longer than itself (run.py sets 1800 s).
     stall_s: float = 300.0
     # `idle` can be observed before the runner picks the turn up (fresh session),
@@ -433,14 +436,20 @@ class OmnigentDriver(AgentDriver):
     async def _wait_idle(self, min_wait: float = 4.0) -> str:
         start, seen_running = time.monotonic(), False
         heartbeat, last_beat = None, start
-        st = None
+        st, prompt_polls = None, 0
         while time.monotonic() - start < self.turn_timeout_s:
             snap = await self._read_retry(self._snapshot)
             st = snap.get("status")
             if st == "running":
                 seen_running = True
-                if snap.get("pending_elicitations"):
-                    return await self._stalled("elicitation")
+                # any prompt nobody can answer: a policy/permission elicitation,
+                # a queued input request, or the terminal itself waiting (trust
+                # dialog, login) — #61. Two consecutive polls: a real dialog
+                # persists across 1.5 s, in-flight input delivery (seen live on
+                # a healthy simulator turn) does not.
+                prompt_polls = prompt_polls + 1 if any(snap.get(k) for k in _PROMPT_KEYS) else 0
+                if prompt_polls >= 2:
+                    return await self._stalled("prompt")
                 beat = snap.get("updated_at")
                 if beat != heartbeat:
                     heartbeat, last_beat = beat, time.monotonic()

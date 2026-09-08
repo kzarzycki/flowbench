@@ -88,11 +88,12 @@ class RunWatch:
                 events.append(f"SESSION FAILED: {s.get('title')} ({s['id']})")
             self._session_status[s["id"]] = cur
             # stall watchdog (#54): a pending elicitation is a prompt nobody can
-            # answer; a running session with a stale heartbeat is stuck on one
-            # the server cannot see. Fires once per transition, like FAILED.
+            # answer (the list endpoint exposes only that count); a running
+            # session with a stale heartbeat is stuck on one the server cannot
+            # see. Fires once per transition, like FAILED.
             age = time.time() - (s.get("updated_at") or time.time())
             stall = (
-                "elicitation"
+                "prompt"
                 if s.get("pending_elicitations_count")
                 else f"no progress {int(age)}s"
                 if cur == "running" and age >= self.stall_s
