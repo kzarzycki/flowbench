@@ -212,6 +212,7 @@ def test_make_flow_driver_omni_maps_flow_config(tmp_path):
     assert d.skills == "none"
     assert d.reasoning_effort == "xhigh"
     assert d.turn_timeout_s == 1800  # planning turns run way past the driver's 240s default
+    assert d.stall_s == 300  # watchdog (#54) is per-flow tunable like the turn cap
     assert (
         make_flow_driver_omni(
             {"name": "x", "turn_timeout_s": 60}, tmp_path, scenario="swe_planning"

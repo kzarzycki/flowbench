@@ -325,3 +325,151 @@ async def test_context_tokens_none_when_label_missing(tmp_path):
     d._chat = _FakeChat(["idle"])
     d._http = _FakeHttp()
     assert await d._context_tokens() is None
+
+
+class _StallChat(_FakeChat):
+    """Always running; refresh() returns a session snapshot with the stall signals."""
+
+    def __init__(self, *, pending=0, beats=None):
+        super().__init__(["running"])
+        self.pending = pending
+        self._beats = list(beats or [1])
+
+    async def refresh(self):
+        from types import SimpleNamespace
+
+        await super().refresh()
+        beat = self._beats.pop(0) if len(self._beats) > 1 else self._beats[0]
+        return SimpleNamespace(pending_elicitations_count=self.pending, updated_at=beat)
+
+
+async def test_pending_elicitation_stalls_the_turn_at_once(tmp_path, monkeypatch):
+    # todo-app-001: a permission prompt nobody could answer sat until the turn cap
+    monkeypatch.setattr("flowbench.runner.driver.asyncio.sleep", _instant_sleep)
+    d = _settle_driver(tmp_path, _StallChat(pending=1), [[]])
+    d._pane_tail = _pane("❯ Allow Bash(rm -rf build)? (y/n)")
+    result = await d.send("build it")
+    assert (result.status, result.stall_reason) == ("stalled", "elicitation")
+    assert "Allow Bash" in result.pane_tail
+
+
+async def test_frozen_heartbeat_stalls_after_stall_s(tmp_path, monkeypatch):
+    monkeypatch.setattr("flowbench.runner.driver.asyncio.sleep", _instant_sleep)
+    d = _settle_driver(tmp_path, _StallChat(beats=[7]), [[]])
+    d.stall_s = 0.05
+    d._pane_tail = _pane(None)
+    result = await d.send("build it")
+    assert (result.status, result.stall_reason, result.pane_tail) == (
+        "stalled",
+        "no_progress",
+        None,
+    )
+
+
+async def test_moving_heartbeat_is_not_a_stall(tmp_path, monkeypatch):
+    monkeypatch.setattr("flowbench.runner.driver.asyncio.sleep", _instant_sleep)
+    import itertools
+
+    chat = _StallChat()
+    chat._beats = itertools.count()  # every refresh a new updated_at
+    chat.refresh = _counting_refresh(chat)
+    d = _settle_driver(tmp_path, chat, [[]])
+    d.stall_s = 0.05
+    d.turn_timeout_s = 0.2
+    result = await d.send("build it")
+    assert (result.status, result.stall_reason) == ("running", None)
+
+
+def _counting_refresh(chat):
+    async def refresh():
+        from types import SimpleNamespace
+
+        chat.status = "running"
+        return SimpleNamespace(pending_elicitations_count=0, updated_at=next(chat._beats))
+
+    return refresh
+
+
+def _pane(text):
+    async def _tail(lines=40):
+        return text
+
+    return _tail
+
+
+async def test_pane_tail_is_best_effort(tmp_path):
+    from types import SimpleNamespace
+
+    class _Http:
+        async def get(self, url):
+            raise OSError("runner offline")
+
+    d = OmnigentDriver(run_dir=tmp_path, artifact_name="plan.md")
+    d._chat = SimpleNamespace(session_id="conv_x")
+    d._http = _Http()
+    assert await d._pane_tail() is None
+
+
+async def test_pane_tail_captures_tmux(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    class _Resp:
+        def json(self):
+            return {
+                "data": [
+                    {"type": "environment", "metadata": {}},
+                    {"type": "terminal", "metadata": {"tmux_socket": "/s", "tmux_target": "t:0"}},
+                ]
+            }
+
+    class _Http:
+        async def get(self, url):
+            return _Resp()
+
+    class _Proc:
+        async def communicate(self):
+            return ("line1\nline2\n❯ waiting\n".encode(), b"")
+
+    argv = []
+
+    async def fake_exec(*a, **kw):
+        argv.extend(a)
+        return _Proc()
+
+    monkeypatch.setattr("flowbench.runner.driver.asyncio.create_subprocess_exec", fake_exec)
+    d = OmnigentDriver(run_dir=tmp_path, artifact_name="plan.md")
+    d._chat = SimpleNamespace(session_id="conv_x")
+    d._http = _Http()
+    assert await d._pane_tail(lines=2) == "line2\n❯ waiting"
+    assert argv[:4] == ["tmux", "-S", "/s", "capture-pane"]
+
+
+async def test_pane_tail_gives_up_on_a_wedged_tmux(tmp_path, monkeypatch):
+    # the watchdog must never itself hang: a tmux server that never answers -> None
+    from types import SimpleNamespace
+
+    class _Resp:
+        def json(self):
+            return {
+                "data": [
+                    {"type": "terminal", "metadata": {"tmux_socket": "/s", "tmux_target": "t"}}
+                ]
+            }
+
+    class _Http:
+        async def get(self, url):
+            return _Resp()
+
+    async def never(meta):
+        raise AssertionError("wait_for must have cancelled this")  # pragma: no cover
+
+    async def instant_wait_for(coro, timeout):
+        coro.close()
+        raise TimeoutError
+
+    monkeypatch.setattr("flowbench.runner.driver.asyncio.wait_for", instant_wait_for)
+    d = OmnigentDriver(run_dir=tmp_path, artifact_name="plan.md")
+    d._chat = SimpleNamespace(session_id="conv_x")
+    d._http = _Http()
+    d._capture_pane = never
+    assert await d._pane_tail() is None

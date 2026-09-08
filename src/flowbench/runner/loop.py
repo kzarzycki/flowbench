@@ -129,6 +129,9 @@ async def run_agent_session(
         # captured session (live-001 shipped an unfinished plan silently).
         session["exit_status"] = result.status
         session["turns"] = turns
+        if result.status == "stalled":
+            session["stall_reason"] = result.stall_reason
+            session["pane_tail"] = result.pane_tail
         return session
     finally:
         await driver.close()
