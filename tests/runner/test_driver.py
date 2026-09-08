@@ -442,3 +442,34 @@ async def test_pane_tail_captures_tmux(tmp_path, monkeypatch):
     d._http = _Http()
     assert await d._pane_tail(lines=2) == "line2\n❯ waiting"
     assert argv[:4] == ["tmux", "-S", "/s", "capture-pane"]
+
+
+async def test_pane_tail_gives_up_on_a_wedged_tmux(tmp_path, monkeypatch):
+    # the watchdog must never itself hang: a tmux server that never answers -> None
+    from types import SimpleNamespace
+
+    class _Resp:
+        def json(self):
+            return {
+                "data": [
+                    {"type": "terminal", "metadata": {"tmux_socket": "/s", "tmux_target": "t"}}
+                ]
+            }
+
+    class _Http:
+        async def get(self, url):
+            return _Resp()
+
+    async def never(meta):
+        raise AssertionError("wait_for must have cancelled this")  # pragma: no cover
+
+    async def instant_wait_for(coro, timeout):
+        coro.close()
+        raise TimeoutError
+
+    monkeypatch.setattr("flowbench.runner.driver.asyncio.wait_for", instant_wait_for)
+    d = OmnigentDriver(run_dir=tmp_path, artifact_name="plan.md")
+    d._chat = SimpleNamespace(session_id="conv_x")
+    d._http = _Http()
+    d._capture_pane = never
+    assert await d._pane_tail() is None

@@ -163,7 +163,8 @@ class OmnigentDriver(AgentDriver):
     turn_timeout_s: float = 240.0
     # Stall watchdog (#54): a `running` session with a pending elicitation (a
     # permission/policy prompt nobody can answer) or no heartbeat for stall_s
-    # ends the turn as "stalled" instead of burning the whole turn cap.
+    # ends the turn as "stalled" instead of burning the whole turn cap. Bites
+    # only under a turn cap longer than itself (run.py sets 1800 s).
     stall_s: float = 300.0
     # `idle` can be observed before the runner picks the turn up (fresh session),
     # before the reply item persists, or while the agent is still MID-TURN (bridge
@@ -368,9 +369,9 @@ class OmnigentDriver(AgentDriver):
 
     async def _send_once(self, text: str) -> TurnResult:
         n_before = n_assistant_messages(await self._list_items())
+        self._stall = None
         async for ev in self._chat.send(text):  # inject; envelope completes fast
             self._captured.append(_to_jsonable(ev))
-        self._stall = None
         status = await self._wait_idle()
         items = await self._list_items()
         # Settle: an idle status with no NEW assistant message is either the
@@ -447,6 +448,21 @@ class OmnigentDriver(AgentDriver):
         self._stall = {"stall_reason": reason, "pane_tail": await self._pane_tail()}
         return "stalled"
 
+    async def _capture_pane(self, meta: dict) -> bytes:
+        proc = await asyncio.create_subprocess_exec(
+            "tmux",
+            "-S",
+            meta["tmux_socket"],
+            "capture-pane",
+            "-p",
+            "-t",
+            meta["tmux_target"],
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        out, _ = await proc.communicate()
+        return out
+
     async def _pane_tail(self, lines: int = 40) -> str | None:
         """What the agent's terminal shows right now — the question it is stuck
         on. Best effort: None when the runner is offline or tmux is gone."""
@@ -454,18 +470,8 @@ class OmnigentDriver(AgentDriver):
             resp = await self._http.get(f"/v1/sessions/{self._chat.session_id}/resources")
             term = next(r for r in resp.json()["data"] if r.get("type") == "terminal")
             meta = term["metadata"]
-            proc = await asyncio.create_subprocess_exec(
-                "tmux",
-                "-S",
-                meta["tmux_socket"],
-                "capture-pane",
-                "-p",
-                "-t",
-                meta["tmux_target"],
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.DEVNULL,
-            )
-            out, _ = await proc.communicate()
+            # a wedged tmux server must not wedge the watchdog: 5 s, then None
+            out = await asyncio.wait_for(self._capture_pane(meta), 5)
             return "\n".join(out.decode(errors="replace").rstrip().splitlines()[-lines:])
         except Exception:
             return None

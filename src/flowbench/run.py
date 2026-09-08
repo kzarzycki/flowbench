@@ -310,6 +310,7 @@ def make_flow_driver_omni(
         # A planning turn (e.g. superpowers writing-plans) runs way past the
         # driver's 240s default — live-001 lost its plan to that timeout.
         turn_timeout_s=flow.get("turn_timeout_s", 1800),
+        stall_s=flow.get("stall_s", 300),
     )
 
 
