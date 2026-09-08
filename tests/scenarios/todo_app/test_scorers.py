@@ -212,8 +212,6 @@ def test_implemented_true_for_single_module_app(tmp_path):
 
 
 def test_clarifying_coverage_counts_asked_topics():
-    from scenarios.coding_workflow.cases.todo_app import task
-
     # the SUT asked about storage and persistence, nothing else.
     session = {
         "items": [
@@ -234,7 +232,7 @@ def test_clarifying_coverage_counts_asked_topics():
             },  # statement, not a question
         ]
     }
-    cov = scorers.clarifying_coverage(session, task.UNDERSPECIFIED_TOPICS)
+    cov = scorers.clarifying_coverage(session, scorers.UNDERSPECIFIED_TOPICS)
     assert cov["asked"]["storage_format"] is True
     assert cov["asked"]["persistence"] is True
     assert cov["asked"]["done_handling"] is False  # never asked
@@ -242,8 +240,6 @@ def test_clarifying_coverage_counts_asked_topics():
 
 
 def test_clarifying_coverage_uses_word_boundaries_not_substrings():
-    from scenarios.coding_workflow.cases.todo_app import task
-
     # the live false-positive: a `list`-behaviour question that says "incomplete"
     # must NOT count as asking about done-handling (keyword "complete"). Likewise a
     # word like "performance" must not trip "form" anywhere.
@@ -256,7 +252,7 @@ def test_clarifying_coverage_uses_word_boundaries_not_substrings():
             },
         ]
     }
-    cov = scorers.clarifying_coverage(session, task.UNDERSPECIFIED_TOPICS)
+    cov = scorers.clarifying_coverage(session, scorers.UNDERSPECIFIED_TOPICS)
     assert cov["asked"]["done_handling"] is False, (
         "'complete' inside 'incomplete' must not count as a done-handling question"
     )
@@ -271,14 +267,14 @@ def test_clarifying_coverage_uses_word_boundaries_not_substrings():
         ]
     }
     assert (
-        scorers.clarifying_coverage(session2, task.UNDERSPECIFIED_TOPICS)["asked"]["done_handling"]
+        scorers.clarifying_coverage(session2, scorers.UNDERSPECIFIED_TOPICS)["asked"][
+            "done_handling"
+        ]
         is True
     )
 
 
 def test_clarifying_coverage_zero_when_no_questions():
-    from scenarios.coding_workflow.cases.todo_app import task
-
     session = {
         "items": [
             {
@@ -288,7 +284,7 @@ def test_clarifying_coverage_zero_when_no_questions():
             },
         ]
     }
-    cov = scorers.clarifying_coverage(session, task.UNDERSPECIFIED_TOPICS)
+    cov = scorers.clarifying_coverage(session, scorers.UNDERSPECIFIED_TOPICS)
     assert cov["score"] == 0.0  # asserting in a statement is not asking
 
 

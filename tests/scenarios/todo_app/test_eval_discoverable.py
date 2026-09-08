@@ -5,7 +5,6 @@ regression the live run caught. This guards against re-aliasing."""
 
 from pathlib import Path
 
-import pytest
 from inspect_ai._util.decorator import parse_decorators
 
 EVAL_FILE = Path(__file__).resolve().parents[3] / "scenarios/coding_workflow/cases/todo_app/eval.py"
@@ -20,23 +19,7 @@ def test_eval_task_is_discoverable_by_inspect_cli():
     )
 
 
-_SUPERPOWERS_CACHE = Path.home() / ".claude/plugins/cache/claude-plugins-official/superpowers"
-
-
-@pytest.mark.skipif(
-    not any(_SUPERPOWERS_CACHE.glob("*/skills")),
-    reason="importing eval.py resolves superpowers skill dirs from the host plugin cache",
-)
-def test_default_run_base_anchors_outside_the_repo(monkeypatch):
-    # Inspect chdir's into the eval file's directory before the task constructs, so
-    # a cwd-relative default base lands run-dirs INSIDE the repo. The default must
-    # anchor off __file__ to the sibling ../flowbench-runs/, regardless of cwd.
-    from scenarios.coding_workflow.cases.todo_app.eval import default_run_base
-
-    repo_root = EVAL_FILE.parents[4]
-    monkeypatch.chdir(EVAL_FILE.parent)  # mimic Inspect's chdir
-    base = default_run_base()
-    assert repo_root not in base.parents and base != repo_root, (
-        f"run base {base} must not be inside the repo {repo_root}"
-    )
-    assert base.name == "todo-app-eval" and base.parent.name == "flowbench-runs"
+# test_default_run_base_anchors_outside_the_repo removed in S01.3/T4: importing
+# eval.py now fails (scorers.py dropped build_judge/workflow_scorer, the Inspect
+# scorers eval.py wired in). eval.py itself is deleted wholesale in T5; this
+# whole file goes with it. The AST-only test above still passes untouched.
