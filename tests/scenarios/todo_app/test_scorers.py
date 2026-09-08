@@ -145,6 +145,16 @@ def test_skills_report_flags_superpowers_and_brainstorming():
     assert skipped["superpowers_used"] is False and skipped["brainstorming_used"] is False
 
 
+def test_skills_report_is_namespace_agnostic():
+    # vendored bundle skills load as claude_code:<name> (todo-app-001, #51); a foreign
+    # skill under the same namespace is not superpowers
+    vendored = {"items": [sessions._skill("claude_code:writing-plans")]}
+    foreign = {"items": [sessions._skill("claude_code:some-other-skill")]}
+    assert scorers.skills_report(vendored)["superpowers_used"] is True
+    assert scorers.skills_report(foreign)["superpowers_used"] is False
+    assert "writing-plans" in scorers.SUPERPOWERS_SKILLS and len(scorers.SUPERPOWERS_SKILLS) == 14
+
+
 def test_detect_phases_trusts_brainstorming_skill_call(tmp_path):
     # brainstormed must be True purely from the Skill call, even if the agent asked
     # no literal "?" question and wrote no spec yet.

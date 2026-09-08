@@ -153,6 +153,12 @@ def clarifying_coverage(session: dict, topics: dict[str, list[str]]) -> dict:
     return {"asked": asked, "score": score}
 
 
+# The vendored superpowers set (scenarios/coding_workflow/skills/<name>/), by skill name.
+SUPERPOWERS_SKILLS = frozenset(
+    p.name for p in (Path(__file__).resolve().parents[2] / "skills").iterdir() if p.is_dir()
+)
+
+
 def skills_invoked(session: dict) -> list[str]:
     """The skills the SUT actually invoked, in order, scraped from its `Skill` tool
     calls in the transcript (omnigent captures the agent's tool calls as
@@ -176,7 +182,9 @@ def skills_report(session: dict) -> dict:
     headline question (the SUT judged the task too simple and skipped it once);
     `brainstorming_used` is the specific signal that the clarify-first invite took."""
     used = skills_invoked(session)
-    superpowers = [s for s in used if s.startswith("superpowers:")]
+    # Namespace-agnostic: the host plugin exposes `superpowers:<name>`, the vendored
+    # bundle (skills: none + skill_dirs) exposes `claude_code:<name>` (#51).
+    superpowers = [s for s in used if s.rsplit(":", 1)[-1] in SUPERPOWERS_SKILLS]
     return {
         "invoked": used,
         "superpowers": superpowers,
