@@ -54,8 +54,15 @@ Baseline is the same picture with an empty `skills/`. Nothing else changes.
 `run_agent_session(driver, user_model, *, first_prompt, simulator_system,
 done_token, max_turns, deadline_s)`:
 
-- Only an `idle` turn is a clean boundary; `failed`/`timeout`/`running` stops
-  the loop and scores what was built.
+- Only an `idle` turn is a clean boundary; `failed`/`timeout`/`running`/`stalled`
+  stops the loop and scores what was built. `stalled` is the driver's watchdog
+  (`stall_s`, default 300 s): a `running` session with a pending elicitation (a
+  permission or policy prompt nobody can answer) ends the turn at once; one whose
+  `updated_at` heartbeat is silent for `stall_s` ends it as `no_progress`. The
+  session records `exit_status`, `stall_reason` and `pane_tail` (the terminal's
+  last lines, i.e. the question it is stuck on). The watchdog never answers the
+  prompt: a benchmark that resolves its own prompts measures the harness, not
+  the flow. `flowbench.watch` prints `STALLED (...)` on the same signals.
 - The simulator is any `user_model` with `async generate(prompt)`; the loop
   composes `simulator_system` + conversation tail per call.
 - Self-wait turns (agent parked on its own busy sub-agent, not asking anything)

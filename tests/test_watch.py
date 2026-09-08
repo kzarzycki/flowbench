@@ -103,3 +103,25 @@ def test_run_watch_reports_server_errors_touching_run_sessions(tmp_path):
     log.write_text("ERROR runner conv_1 exploded\nERROR unrelated conv_9\n")
     events = w.tick()
     assert len(events) == 1 and events[0].startswith("SERVER ERROR runner conv_1")
+
+
+def test_run_watch_reports_stalls_once_per_transition(tmp_path, monkeypatch):
+    monkeypatch.setattr("flowbench.watch.time.time", lambda: 1000.0)
+    w = RunWatch(
+        "r", runs_root=tmp_path, scenario="s", server_log=tmp_path / "none.log", stall_s=300
+    )
+    sess = {"id": "c1", "status": "running", "title": "flow: x", "updated_at": 900}
+    w._run_sessions = lambda: [sess]
+    assert w.tick() == []  # fresh heartbeat, no prompt
+
+    sess["pending_elicitations_count"] = 1
+    assert w.tick() == ["STALLED (elicitation): flow: x (c1)"]
+    assert w.tick() == []  # unchanged: no repeat
+
+    sess["pending_elicitations_count"] = 0
+    sess["updated_at"] = 600  # 400 s silent while running
+    assert w.tick() == []  # still stalled, reason changed but no new transition
+    sess["status"] = "idle"
+    assert w.tick() == []  # recovered
+    sess["status"] = "running"
+    assert w.tick() == ["STALLED (no progress 400s): flow: x (c1)"]

@@ -34,11 +34,13 @@ from flowbench.transcript import dedup_items, last_assistant_text, n_assistant_m
 
 @dataclass
 class TurnResult:
-    status: str  # "idle" (turn settled) | "failed" | "timeout"
+    status: str  # "idle" (turn settled) | "failed" | "timeout" | "stalled"
     assistant_text: str  # latest assistant-authored text after the turn
     artifact_exists: bool
     child_busy: bool = False  # a dispatched sub-agent is still running (agent is
     # parked on its OWN work, not awaiting the user)
+    stall_reason: str | None = None  # "elicitation" | "no_progress" when stalled
+    pane_tail: str | None = None  # last terminal lines at the stall, best effort
 
 
 class AgentDriver(abc.ABC):
@@ -159,6 +161,10 @@ class OmnigentDriver(AgentDriver):
     )
     git_init: bool = False
     turn_timeout_s: float = 240.0
+    # Stall watchdog (#54): a `running` session with a pending elicitation (a
+    # permission/policy prompt nobody can answer) or no heartbeat for stall_s
+    # ends the turn as "stalled" instead of burning the whole turn cap.
+    stall_s: float = 300.0
     # `idle` can be observed before the runner picks the turn up (fresh session),
     # before the reply item persists, or while the agent is still MID-TURN (bridge
     # race seen live: injecting then hits a busy terminal and the run dies). An
@@ -364,6 +370,7 @@ class OmnigentDriver(AgentDriver):
         n_before = n_assistant_messages(await self._list_items())
         async for ev in self._chat.send(text):  # inject; envelope completes fast
             self._captured.append(_to_jsonable(ev))
+        self._stall = None
         status = await self._wait_idle()
         items = await self._list_items()
         # Settle: an idle status with no NEW assistant message is either the
@@ -391,6 +398,7 @@ class OmnigentDriver(AgentDriver):
             assistant_text=last_assistant_text(items),
             artifact_exists=self.artifact_path() is not None,
             child_busy=any_child_busy(self._captured),
+            **(self._stall or {}),
         )
 
     async def _read_retry(self, op, attempts: int = 4):
@@ -415,17 +423,52 @@ class OmnigentDriver(AgentDriver):
 
     async def _wait_idle(self, min_wait: float = 4.0) -> str:
         start, seen_running = time.monotonic(), False
+        heartbeat, last_beat = None, start
         while time.monotonic() - start < self.turn_timeout_s:
-            await self._read_retry(self._chat.refresh)
+            sess = await self._read_retry(self._chat.refresh)
             st = self._chat.status
             if st == "running":
                 seen_running = True
+                if getattr(sess, "pending_elicitations_count", 0):
+                    return await self._stalled("elicitation")
+                beat = getattr(sess, "updated_at", None)
+                if beat != heartbeat:
+                    heartbeat, last_beat = beat, time.monotonic()
+                elif time.monotonic() - last_beat >= self.stall_s:
+                    return await self._stalled("no_progress")
             if st == "failed":
                 return "failed"
             if st == "idle" and (seen_running or time.monotonic() - start >= min_wait):
                 return "idle"
             await asyncio.sleep(1.5)
         return self._chat.status or "timeout"
+
+    async def _stalled(self, reason: str) -> str:
+        self._stall = {"stall_reason": reason, "pane_tail": await self._pane_tail()}
+        return "stalled"
+
+    async def _pane_tail(self, lines: int = 40) -> str | None:
+        """What the agent's terminal shows right now — the question it is stuck
+        on. Best effort: None when the runner is offline or tmux is gone."""
+        try:
+            resp = await self._http.get(f"/v1/sessions/{self._chat.session_id}/resources")
+            term = next(r for r in resp.json()["data"] if r.get("type") == "terminal")
+            meta = term["metadata"]
+            proc = await asyncio.create_subprocess_exec(
+                "tmux",
+                "-S",
+                meta["tmux_socket"],
+                "capture-pane",
+                "-p",
+                "-t",
+                meta["tmux_target"],
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+            out, _ = await proc.communicate()
+            return "\n".join(out.decode(errors="replace").rstrip().splitlines()[-lines:])
+        except Exception:
+            return None
 
     def artifact_path(self) -> Path | None:
         cand = self.run_dir / self.artifact_name

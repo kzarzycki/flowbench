@@ -10,6 +10,7 @@ Works standalone in a terminal, or wrapped by an agent Monitor.
 from __future__ import annotations
 
 import json
+import time
 import urllib.request
 from pathlib import Path
 
@@ -32,13 +33,16 @@ class RunWatch:
         scenario: str,
         server_log: Path = SERVER_LOG,
         server: str = SERVER,
+        stall_s: float = 300.0,
     ):
+        self.stall_s = stall_s
         self.run_root = Path(runs_root) / run_id
         self.project = f"{scenario}/{run_id}"
         self.server_log = server_log
         self.server = server
         self._log_pos = server_log.stat().st_size if server_log.exists() else 0
         self._session_status: dict[str, str] = {}
+        self._session_stall: dict[str, str | None] = {}
         self._trials_done: set[str] = set()
 
     # --- sources -------------------------------------------------------------
@@ -83,6 +87,20 @@ class RunWatch:
             if prev not in (None, cur) and cur == "failed":
                 events.append(f"SESSION FAILED: {s.get('title')} ({s['id']})")
             self._session_status[s["id"]] = cur
+            # stall watchdog (#54): a pending elicitation is a prompt nobody can
+            # answer; a running session with a stale heartbeat is stuck on one
+            # the server cannot see. Fires once per transition, like FAILED.
+            age = time.time() - (s.get("updated_at") or time.time())
+            stall = (
+                "elicitation"
+                if s.get("pending_elicitations_count")
+                else f"no progress {int(age)}s"
+                if cur == "running" and age >= self.stall_s
+                else None
+            )
+            if stall and self._session_stall.get(s["id"]) is None:
+                events.append(f"STALLED ({stall}): {s.get('title')} ({s['id']})")
+            self._session_stall[s["id"]] = stall
 
         for trial_json in sorted(self.run_root.glob("trial-*/run.json")):
             trial = trial_json.parent.name

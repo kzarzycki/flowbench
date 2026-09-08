@@ -294,3 +294,24 @@ async def test_done_waits_for_pending_artifact(monkeypatch):
     )
     assert driver.polls >= 3  # kept polling until the artifact appeared
     assert driver.closed
+
+
+async def test_loop_records_stall_reason_and_pane(monkeypatch):
+    # #54: a stalled first turn stops the loop and lands what the agent waits on
+    turns = [TurnResult("stalled", "", False, stall_reason="elicitation", pane_tail="❯ y/n?")]
+    driver = _FakeDriver(turns, {"items": []})
+    user = _StubModel(["unused"])
+    session = await run_agent_session(
+        driver,
+        user,
+        first_prompt=FIRST_PROMPT,
+        simulator_system=SIM_SYSTEM,
+        done_token=DONE_TOKEN,
+        max_turns=5,
+        deadline_s=999,
+        artifact_grace_s=0,
+    )
+    assert user.seen == []
+    assert session["exit_status"] == "stalled"
+    assert session["stall_reason"] == "elicitation"
+    assert session["pane_tail"] == "❯ y/n?"
