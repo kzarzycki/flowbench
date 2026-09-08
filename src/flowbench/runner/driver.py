@@ -27,15 +27,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from flowbench.transcript import (  # noqa: F401 — re-exported until S01.2 repoints the scenarios imports
-    dedup_items,
-    is_control_message,
-    item_text,
-    last_assistant_text,
-    n_assistant_messages,
-)
-
-_item_text = item_text  # alias until S01.2
+from flowbench.transcript import dedup_items, last_assistant_text, n_assistant_messages
 
 # Unattended file work inside the run workspace: read tools + file-work bash.
 # Passed as --allowedTools (with --permission-mode acceptEdits) on every flow.

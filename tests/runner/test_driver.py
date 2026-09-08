@@ -3,15 +3,8 @@ cover that); we assert the interface contract and the pure transcript helpers.""
 
 from pathlib import Path
 
-from flowbench.runner.driver import (
-    AgentDriver,
-    OmnigentDriver,
-    TurnResult,
-    any_child_busy,
-    dedup_items,
-    is_control_message,
-    last_assistant_text,
-)
+from flowbench.runner.driver import AgentDriver, OmnigentDriver, TurnResult, any_child_busy
+from flowbench.transcript import dedup_items, is_control_message, last_assistant_text
 
 
 def test_omnigent_driver_satisfies_interface():
