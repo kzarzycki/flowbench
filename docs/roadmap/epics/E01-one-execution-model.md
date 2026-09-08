@@ -39,9 +39,9 @@ Source of truth today: `flowbench-scenarios/scenarios/swe_planning/`. Mapping:
 - Port the relevant offline tests from the scenarios repo into `tests/` here (run_case
   wiring, verdict parsing, aggregation, transcript rendering).
 - Verify: V1 (see `../verification.md`); plus the new modules import without the
-  `spike` extra (they must not import omnigent at module top level — the omnigent
+  `live` extra (they must not import omnigent at module top level — the omnigent
   factories import lazily, same pattern as `OmnigentDriver.start`):
-  `uv run --no-extra spike python -c "import flowbench.run, flowbench.model"`.
+  `uv run --no-extra live python -c "import flowbench.run, flowbench.model"`.
 
 ### S01.2 Paired scenarios PR: swe_planning consumes the engine
 
@@ -75,12 +75,12 @@ Source of truth today: `flowbench-scenarios/scenarios/swe_planning/`. Mapping:
 - Verify: V1 (scorer tests run against the canned sessions in `fixtures/sessions.py`);
   V5 through the new entrypoint.
 
-### S01.4 Remove Inspect and `claude -p`
+### S01.4 Remove Inspect and `claude -p` — done
 
 - Delete `src/flowbench/runner/subscription_model.py`, the
-  `[project.entry-points.inspect_ai]` block, `inspect-ai` from the `spike` extra.
-- Rename extra `spike` → `live` (README, CLAUDE.md, CI, and the scenarios repo's
-  `--extra spike` invocations — grep both repos).
+  `[project.entry-points.inspect_ai]` block, `inspect-ai` from the omnigent extra.
+- Renamed the omnigent install extra to `live` (README, CLAUDE.md, CI, and the
+  scenarios repo's extra invocations — grep both repos).
 - Wheel ships `src/flowbench` only: drop `scenarios` from
   `[tool.hatch.build.targets.wheel].packages` (the top-level `scenarios` package would
   collide in site-packages; in-repo imports keep working via
@@ -110,7 +110,7 @@ Source of truth today: `flowbench-scenarios/scenarios/swe_planning/`. Mapping:
   before Inspect wrapping (solver writes them directly), so the blast radius is the
   deleted decorators only. Check `write_outputs` call sites when porting.
 - **Two repos in flight** — always merge engine first; scenarios PR pins nothing (editable
-  path dep) so a stale sync is the failure mode: re-run `uv sync --extra spike` (pre-
-  rename) after every engine merge, as CLAUDE.md already warns.
+  path dep) so a stale sync is the failure mode: re-run `uv sync --extra live`
+  after every engine merge, as CLAUDE.md already warns.
 - **The `_sim_<flow>` / `_judge` run-dir conventions** become engine behavior; the watcher
   and web-UI grouping (`session_title`, `project`) rely on them — port their tests.

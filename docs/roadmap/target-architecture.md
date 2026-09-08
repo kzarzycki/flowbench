@@ -57,8 +57,8 @@ src/flowbench/
 
 What disappears:
 
-- `runner/subscription_model.py` and the `inspect-ai` dependency + entry-point block (E01,
-  S01.4; todo_app's `eval.py`/`solver.py` glue is gone as of S01.3).
+- `runner/subscription_model.py` and the `inspect-ai` dependency + entry-point block —
+  done (E01, S01.4; todo_app's `eval.py`/`solver.py` glue is gone as of S01.3).
 - `scripts/patch_omnigent.py`, once the prompt-scan fix is upstream (E02).
 - The top-level `scenarios` package from the wheel — the engine wheel ships `flowbench`
   only; the reference scenario stays in-repo as content, imported by path/tests, not

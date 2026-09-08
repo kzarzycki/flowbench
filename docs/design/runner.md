@@ -106,9 +106,8 @@ now per-call overrides (S01.3), defaulting to swe_planning's values. CLI entrypo
 ## One execution model
 
 Scenarios run through the engine's `run_case` orchestrator — not through Inspect
-(true for both scenarios as of S01.3, todo_app's port). `subscription_model.py`
-(`claude -p`) and the `inspect-ai` dependency still exist but are unused; their
-removal is S01.4 (same issue, PR 2).
+(true for both scenarios as of S01.3, todo_app's port; the Inspect-based path was
+removed entirely in S01.4).
 Decision record: flowbench-scenarios
 `docs/superpowers/specs/2026-07-02-swe-planning-rework-design.md` (execution
 model + framework strategy + reconsider-triggers).
