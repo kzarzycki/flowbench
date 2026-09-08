@@ -4,7 +4,7 @@ Python-source checks in the now-deleted test_task.py."""
 
 from pathlib import Path
 
-from scenarios.coding_workflow.cases.todo_app import task
+from scenarios.coding_workflow.cases.todo_app import scorers
 
 CASE_DIR = Path(__file__).parent.parent.parent.parent / "scenarios/coding_workflow/cases/todo_app"
 
@@ -37,11 +37,11 @@ def test_simulator_never_states_corrections():
 
 
 def test_underspecified_topics_cover_the_five_points():
-    assert set(task.UNDERSPECIFIED_TOPICS) == {
+    assert set(scorers.UNDERSPECIFIED_TOPICS) == {
         "persistence",
         "fields",
         "done_handling",
         "invocation",
         "storage_format",
     }
-    assert all(task.UNDERSPECIFIED_TOPICS.values())
+    assert all(scorers.UNDERSPECIFIED_TOPICS.values())
