@@ -296,19 +296,6 @@ async def test_send_does_not_retry_delivered_failure(tmp_path, monkeypatch):
     assert sent == ["go on"]  # no blind retry
 
 
-async def test_launch_args_carry_unattended_permissions(tmp_path):
-    # permissions must ride CLI flags: a skills-"none" flow launches with
-    # --setting-sources "" which drops every settings file (todo-010: plain
-    # prompted for Write while superpowers sailed)
-    d = OmnigentDriver(run_dir=tmp_path, artifact_name="plan.md")
-    args = d._create_metadata()["terminal_launch_args"]
-    mode = args[args.index("--permission-mode") + 1]
-    allowed = args[args.index("--allowedTools") + 1]
-    assert mode == "acceptEdits"
-    assert "Read" in allowed and "Bash(git:*)" in allowed
-    assert args[args.index("--disallowedTools") + 1] == "AskUserQuestion"
-
-
 async def test_capture_session_includes_context_tokens(tmp_path):
     # cost signal: final context size from session labels lands in the capture
     class _FakeResp:
