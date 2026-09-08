@@ -115,7 +115,7 @@ def test_run_watch_reports_stalls_once_per_transition(tmp_path, monkeypatch):
     assert w.tick() == []  # fresh heartbeat, no prompt
 
     sess["pending_elicitations_count"] = 1
-    assert w.tick() == ["STALLED (elicitation): flow: x (c1)"]
+    assert w.tick() == ["STALLED (prompt): flow: x (c1)"]
     assert w.tick() == []  # unchanged: no repeat
 
     sess["pending_elicitations_count"] = 0

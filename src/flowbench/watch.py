@@ -92,7 +92,7 @@ class RunWatch:
             # the server cannot see. Fires once per transition, like FAILED.
             age = time.time() - (s.get("updated_at") or time.time())
             stall = (
-                "elicitation"
+                "prompt"
                 if s.get("pending_elicitations_count")
                 else f"no progress {int(age)}s"
                 if cur == "running" and age >= self.stall_s

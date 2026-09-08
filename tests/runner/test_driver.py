@@ -3,6 +3,8 @@ cover that); we assert the interface contract and the pure transcript helpers.""
 
 from pathlib import Path
 
+import pytest
+
 from flowbench.runner.driver import AgentDriver, OmnigentDriver, TurnResult, any_child_busy
 from flowbench.transcript import dedup_items, is_control_message, last_assistant_text
 
@@ -345,8 +347,26 @@ async def test_pending_elicitation_stalls_the_turn_at_once(tmp_path, monkeypatch
     d = _settle_driver(tmp_path, chat, [[]])
     d._pane_tail = _pane("❯ Allow Bash(rm -rf build)? (y/n)")
     result = await d.send("build it")
-    assert (result.status, result.stall_reason) == ("stalled", "elicitation")
+    assert (result.status, result.stall_reason) == ("stalled", "prompt")
     assert "Allow Bash" in result.pane_tail
+
+
+@pytest.mark.parametrize("key", ["pending_inputs", "terminal_pending"])
+async def test_other_prompt_signals_stall_too(tmp_path, monkeypatch, key):
+    # #61: a trust dialog / login shows up as pending_inputs or terminal_pending,
+    # not as an elicitation — same instant stall
+    monkeypatch.setattr("flowbench.runner.driver.asyncio.sleep", _instant_sleep)
+    chat = _FakeChat(["running"])
+    base = chat.snapshot
+
+    async def snapshot():
+        return {**(await base()), key: True}
+
+    chat.snapshot = snapshot
+    d = _settle_driver(tmp_path, chat, [[]])
+    d._pane_tail = _pane(None)
+    result = await d.send("build it")
+    assert (result.status, result.stall_reason) == ("stalled", "prompt")
 
 
 async def test_frozen_heartbeat_stalls_after_stall_s(tmp_path, monkeypatch):
