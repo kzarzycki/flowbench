@@ -369,6 +369,26 @@ async def test_other_prompt_signals_stall_too(tmp_path, monkeypatch, key):
     assert (result.status, result.stall_reason) == ("stalled", "prompt")
 
 
+async def test_one_poll_prompt_flicker_is_not_a_stall(tmp_path, monkeypatch):
+    # live: a healthy simulator turn showed pending_inputs for a single poll
+    # (in-flight delivery) — a real dialog persists, a flicker must not stall
+    monkeypatch.setattr("flowbench.runner.driver.asyncio.sleep", _instant_sleep)
+    import itertools
+
+    chat = _FakeChat(["running"], beats=itertools.count())
+    base, polls = chat.snapshot, itertools.count()
+
+    async def snapshot():
+        n = next(polls)
+        return {**(await base()), "pending_inputs": [{"id": "in_1"}] if n % 2 == 0 else []}
+
+    chat.snapshot = snapshot
+    d = _settle_driver(tmp_path, chat, [[]])
+    d.turn_timeout_s = 0.1
+    result = await d.send("build it")
+    assert (result.status, result.stall_reason) == ("running", None)
+
+
 async def test_frozen_heartbeat_stalls_after_stall_s(tmp_path, monkeypatch):
     monkeypatch.setattr("flowbench.runner.driver.asyncio.sleep", _instant_sleep)
     d = _settle_driver(tmp_path, _FakeChat(["running"], beats=[7]), [[]])

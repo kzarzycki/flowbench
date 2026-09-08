@@ -436,7 +436,7 @@ class OmnigentDriver(AgentDriver):
     async def _wait_idle(self, min_wait: float = 4.0) -> str:
         start, seen_running = time.monotonic(), False
         heartbeat, last_beat = None, start
-        st = None
+        st, prompt_polls = None, 0
         while time.monotonic() - start < self.turn_timeout_s:
             snap = await self._read_retry(self._snapshot)
             st = snap.get("status")
@@ -444,8 +444,11 @@ class OmnigentDriver(AgentDriver):
                 seen_running = True
                 # any prompt nobody can answer: a policy/permission elicitation,
                 # a queued input request, or the terminal itself waiting (trust
-                # dialog, login) — #61
-                if any(snap.get(k) for k in _PROMPT_KEYS):
+                # dialog, login) — #61. Two consecutive polls: a real dialog
+                # persists across 1.5 s, in-flight input delivery (seen live on
+                # a healthy simulator turn) does not.
+                prompt_polls = prompt_polls + 1 if any(snap.get(k) for k in _PROMPT_KEYS) else 0
+                if prompt_polls >= 2:
                     return await self._stalled("prompt")
                 beat = snap.get("updated_at")
                 if beat != heartbeat:
