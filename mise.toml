@@ -2,7 +2,7 @@
 python = "3.13"
 uv = "latest"
 pre-commit = "latest"
-"github:microsoft/apm" = "0.26.0"
+"github:microsoft/apm" = "0.30.0"
 
 [tasks.agent-sync]
 description = "Converge project-owned coding agent configuration."
@@ -18,7 +18,7 @@ fi
 mode=default
 if [ "${usage_refresh:-false}" = true ]; then mode=refresh; fi
 if [ "${usage_frozen:-false}" = true ]; then mode=frozen; fi
-command -v apm >/dev/null || { echo "error: apm 0.26.0 is required; run 'mise install'" >&2; exit 127; }
+command -v apm >/dev/null || { echo "error: apm 0.30.0 is required; run 'mise install'" >&2; exit 127; }
 command -v python3 >/dev/null || { echo "error: python3 is required; run 'mise install'" >&2; exit 127; }
 agent_targets="$(python3 -c '
 import re
