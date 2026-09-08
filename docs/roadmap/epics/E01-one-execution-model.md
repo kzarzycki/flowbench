@@ -59,10 +59,11 @@ Source of truth today: `flowbench-scenarios/scenarios/swe_planning/`. Mapping:
   `task.md` (FIRST_PROMPT), `simulator.md` (profile + reply rules), `knowledge.md`
   (envisioned-shape.md content), `flows.yaml` (baseline + superpowers, `skills: none`,
   superpowers `skill_dirs` resolved as today).
-- Scenario-local Python keeps: `acceptance.py` (black-box subprocess checks; fix the
-  audited `resolve_invoker` bug — the console-script fallback is gated on the exact
-  CPython string `"No module named todo.__main__"`, so a console-script-only app fails
-  every check), `scorers.py` reworked to consume the captured session dict from `run_case`
+- Scenario-local Python keeps: `acceptance.py` (black-box subprocess checks; the audited
+  `resolve_invoker` bug — the console-script fallback is gated on the exact CPython
+  string `"No module named todo.__main__"`, so a console-script-only app fails every
+  check — → #46, split out: unrelated to the port, needs its own fixture app),
+  `scorers.py` reworked to consume the captured session dict from `run_case`
   instead of Inspect state (`clarifying_coverage`, `skills_report`, `detect_phases`,
   the JSON judge). The scorecard schema stays as-is so `flowbench compare` output is
   comparable with historical runs.

@@ -43,11 +43,20 @@ async def run_case(
     deadline_s: float = 1800.0,
     artifact_grace_s: float = 60.0,
     rotation: int = 0,
+    done_token: str = DONE_TOKEN,
+    score_flow=None,
 ) -> dict:
     """Spawn simulator + each flow, run the mediated loop, collect artifacts,
     then judge. Omnigent-specific spawning is injected via the three factories
     so the whole pipeline runs offline with fakes. `rotation` rotates the flow
-    list left by rotation % N so multi-trial runs cancel judge position bias."""
+    list left by rotation % N so multi-trial runs cancel judge position bias.
+
+    `score_flow(flow, flow_dir, session) -> dict`, when given, is called after
+    each flow's session and its result written to `<flow_dir>/scorecard.json`;
+    a raised exception is caught and recorded as `{"error": ...}` instead of
+    aborting the run. The comparative judge stage runs only when the case
+    carries a `judge.md` (a build-shaped case like todo_app has none — each
+    flow is scored on its own instead)."""
     case_dir = Path(case_dir)
     task_text = (case_dir / "task.md").read_text()
     sim_system = (
@@ -55,7 +64,9 @@ async def run_case(
         + "\n\n--- WHAT YOU KNOW ---\n\n"
         + (case_dir / "knowledge.md").read_text()
     )
-    judge_md = (case_dir / "judge.md").read_text()
+    judge_path = case_dir / "judge.md"
+    has_judge = judge_path.exists()
+    judge_md = judge_path.read_text() if has_judge else None
     flows = load_flows(case_dir / "flows.yaml")
     if len(flows) < 2:
         raise ValueError(f"run_case judges 2+ flows, got {len(flows)}")
@@ -84,7 +95,7 @@ async def run_case(
                 simulator,
                 first_prompt=compose_kickoff(flow, task_text),
                 simulator_system=sim_system,
-                done_token=DONE_TOKEN,
+                done_token=done_token,
                 max_turns=max_turns,
                 deadline_s=deadline_s,
                 artifact_grace_s=artifact_grace_s,
@@ -108,22 +119,34 @@ async def run_case(
             "plan_lines": len((plan_text or "").splitlines()),
             "context_tokens": session.get("context_tokens"),
         }
+        if score_flow is not None:
+            try:
+                card = await score_flow(flow, flow_dir, session)
+            except Exception as e:  # noqa: BLE001 - isolate one flow's scorer, never abort the run
+                error = f"{type(e).__name__}: {e}"
+                card = {"error": error}
+                flow_stats[name]["score_error"] = error
+            (flow_dir / "scorecard.json").write_text(json.dumps(card, indent=2, default=str))
 
     # Rotated flow order defines this trial's judge-facing labels A, B, C…
     names = [f["name"] for f in flows]
     letters = string.ascii_uppercase[: len(flows)]
     labels = dict(zip(letters, names, strict=True))  # {"A": name, "B": name, ...}
-    entries = [
-        (letter, transcripts[name], plans[name] if plans[name] else MISSING_PLAN)
-        for letter, name in zip(letters, names, strict=True)
-    ]
-    judge_dir = run_root / "_judge"
-    judge_dir.mkdir(parents=True, exist_ok=True)
-    verdict_text = await run_judge(judge_md, entries, judge_dir)
-    (run_root / "judge.md").write_text(verdict_text)
-    verdict = parse_verdict(verdict_text)
+    if has_judge:
+        entries = [
+            (letter, transcripts[name], plans[name] if plans[name] else MISSING_PLAN)
+            for letter, name in zip(letters, names, strict=True)
+        ]
+        judge_dir = run_root / "_judge"
+        judge_dir.mkdir(parents=True, exist_ok=True)
+        verdict_text = await run_judge(judge_md, entries, judge_dir)
+        (run_root / "judge.md").write_text(verdict_text)
+        verdict = parse_verdict(verdict_text)
+        winner_flow = labels.get(verdict["winner"].upper(), verdict["winner"])
+    else:
+        verdict = {"winner": None, "scores": {}}
+        winner_flow = None
 
-    winner_flow = labels.get(verdict["winner"].upper(), verdict["winner"])
     meta = {
         "run_id": run_id,
         "scenario": scenario,
@@ -140,7 +163,8 @@ async def run_case(
         "reasoning_effort": {f["name"]: f.get("reasoning_effort") for f in flows},
     }
     (run_root / "run.json").write_text(json.dumps(meta, indent=2, default=str))
-    render_report(run_root)  # pure reader over the files just written
+    if has_judge:
+        render_report(run_root)  # pure reader over the files just written
     return {"run_root": str(run_root), "verdict": verdict, "meta": meta}
 
 
@@ -156,11 +180,15 @@ async def run_case_n(
     scenario: str,
     max_turns: int = 80,
     deadline_s: float = 1800.0,
+    done_token: str = DONE_TOKEN,
+    score_flow=None,
 ) -> dict:
     """Run run_case n times (sequentially; a failing trial propagates) and
     aggregate the categorical verdicts. Uniform return shape for every n:
     {"run_root", "trials", "aggregate"}. n=1 delegates and keeps today's
-    flat layout; n>1 writes trial-XX/ subdirs plus an aggregate run.json."""
+    flat layout; n>1 writes trial-XX/ subdirs plus an aggregate run.json.
+    A case without judge.md never produces a winner_flow — the aggregate is
+    then {"counts": {}, "winner": None} rather than tallying None as a flow."""
     if n < 1:
         raise ValueError(f"n must be >= 1, got {n}")
     kwargs = {
@@ -171,13 +199,23 @@ async def run_case_n(
         "scenario": scenario,
         "max_turns": max_turns,
         "deadline_s": deadline_s,
+        "done_token": done_token,
+        "score_flow": score_flow,
     }
 
     names = [f["name"] for f in load_flows(Path(case_dir) / "flows.yaml")]
 
     if n == 1:
         result = await run_case(case_dir, run_id=run_id, **kwargs)
-        agg = aggregate_verdicts([result["meta"]["winner_flow"]])
+        winner_flow = result["meta"]["winner_flow"]
+        agg = (
+            aggregate_verdicts([winner_flow])
+            if winner_flow is not None
+            else {
+                "counts": {},
+                "winner": None,
+            }
+        )
         return {
             "run_root": result["run_root"],
             "trials": [result["meta"]],
@@ -193,14 +231,18 @@ async def run_case_n(
         )
         trials.append(result["meta"])
 
-    agg = aggregate_verdicts([t["winner_flow"] for t in trials])
-
     def _name_keyed_scores(t: dict) -> dict:
         labels = t.get("labels") or {}
         scores = t.get("scores") or {}
         return {labels.get(letter.upper(), letter): v for letter, v in scores.items()}
 
-    score_means = aggregate_scores([_name_keyed_scores(t) for t in trials])
+    judged = [t["winner_flow"] for t in trials if t.get("winner_flow") is not None]
+    if judged:
+        agg = aggregate_verdicts(judged)
+        counts, winner = agg["counts"], agg["winner"]
+        score_means = aggregate_scores([_name_keyed_scores(t) for t in trials])
+    else:
+        counts, winner, score_means = {}, None, {}
     run_root = Path(runs_root) / run_id
     aggregate_meta = {
         "run_id": run_id,
@@ -212,13 +254,17 @@ async def run_case_n(
             {"trial": f"trial-{k:02d}", "winner_flow": t.get("winner_flow")}
             for k, t in enumerate(trials, 1)
         ],
-        "counts": agg["counts"],
-        "winner": agg["winner"],
+        "counts": counts,
+        "winner": winner,
         "score_means": score_means,  # per flow name, mean per criterion
     }
     (run_root / "run.json").write_text(json.dumps(aggregate_meta, indent=2, default=str))
     render_aggregate_report(run_root)  # pure reader over the files just written
-    return {"run_root": str(run_root), "trials": trials, "aggregate": {"n": n, **agg}}
+    return {
+        "run_root": str(run_root),
+        "trials": trials,
+        "aggregate": {"n": n, "counts": counts, "winner": winner},
+    }
 
 
 # --- the real omnigent factories -------------------------------------------
@@ -242,10 +288,18 @@ def _project(run_dir: Path, scenario: str) -> str:
     return f"{scenario}/{parent.name}"
 
 
-def make_flow_driver_omni(flow: dict, flow_dir: Path, *, scenario: str) -> OmnigentDriver:
+def make_flow_driver_omni(
+    flow: dict,
+    flow_dir: Path,
+    *,
+    scenario: str,
+    artifact_name: str = "plan.md",
+    git_init: bool = False,
+) -> OmnigentDriver:
     return OmnigentDriver(
         run_dir=flow_dir,
-        artifact_name="plan.md",
+        artifact_name=artifact_name,
+        git_init=git_init,
         session_title=_title(flow_dir, f"flow: {flow['name']}"),
         project=_project(flow_dir, scenario),
         model=flow.get("model", "opus"),
@@ -299,13 +353,17 @@ async def run_judge_omni(
         await model.close()
 
 
-def omni_factories(scenario: str):
+def omni_factories(scenario: str, *, artifact_name: str = "plan.md", git_init: bool = False):
     """The three real omnigent factories, bound to `scenario`, matching the
     2-arg `(flow, dir)` / 3-arg `(judge_md, entries, judge_dir)` contract
-    run_case/run_case_n call."""
+    run_case/run_case_n call. `artifact_name`/`git_init` are case properties
+    (todo_app writes `tasks.json` into a git-initialized flow_dir); defaults
+    keep swe_planning byte-identical."""
 
     return (
-        functools.partial(make_flow_driver_omni, scenario=scenario),
+        functools.partial(
+            make_flow_driver_omni, scenario=scenario, artifact_name=artifact_name, git_init=git_init
+        ),
         functools.partial(make_simulator_omni, scenario=scenario),
         functools.partial(run_judge_omni, scenario=scenario),
     )

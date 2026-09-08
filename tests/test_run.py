@@ -701,4 +701,190 @@ def test_omni_factories_bind_scenario():
     assert mk_flow.func is run_mod.make_flow_driver_omni
     assert mk_sim.func is run_mod.make_simulator_omni
     assert judge.func is run_mod.run_judge_omni
-    assert all(f.keywords == {"scenario": "dwh"} for f in (mk_flow, mk_sim, judge))
+    assert mk_flow.keywords == {"scenario": "dwh", "artifact_name": "plan.md", "git_init": False}
+    assert all(f.keywords == {"scenario": "dwh"} for f in (mk_sim, judge))
+
+
+# --- S01.3: no-judge / score_flow / done_token / omni_factories keywords ----
+
+
+def _unjudged_case(tmp_path) -> Path:
+    """feature_flag_service, minus judge.md — a build-shaped case."""
+    src = CASE_DIR
+    case = tmp_path / "unjudged_case"
+    case.mkdir()
+    for name in ("task.md", "simulator.md", "knowledge.md", "flows.yaml"):
+        shutil.copy(src / name, case / name)
+    return case
+
+
+def test_run_case_score_flow_writes_scorecards_no_judge(tmp_path):
+    case = _unjudged_case(tmp_path)
+    mfd, ms, _ = n_run_factories([])
+
+    async def score_flow(flow, flow_dir, session):
+        return {"flow": flow["name"], "objective": {"acceptance": 1.0}}
+
+    result = asyncio.run(
+        run_case(
+            case,
+            run_id="unjudged-run",
+            make_flow_driver=mfd,
+            make_simulator=ms,
+            run_judge=None,
+            runs_root=tmp_path,
+            scenario="coding_workflow",
+            score_flow=score_flow,
+            artifact_grace_s=0.0,
+        )
+    )
+    root = Path(result["run_root"])
+    for name in ("superpowers", "plain"):
+        card = json.loads((root / name / "scorecard.json").read_text())
+        assert card == {"flow": name, "objective": {"acceptance": 1.0}}
+    assert not (root / "_judge").exists()
+    assert not (root / "judge.md").exists()
+    assert not (root / "report.html").exists()
+    meta = json.loads((root / "run.json").read_text())
+    assert meta["winner"] is None
+    assert meta["labels"] == {"A": "superpowers", "B": "plain"}
+
+
+@pytest.mark.parametrize("n", [1, 2])  # n=1 is the CLI default and takes its own branch
+def test_run_case_n_unjudged_aggregate_empty(tmp_path, n):
+    case = _unjudged_case(tmp_path)
+    mfd, ms, _ = n_run_factories([])
+
+    async def score_flow(flow, flow_dir, session):
+        return {"flow": flow["name"]}
+
+    result = asyncio.run(
+        run_case_n(
+            case,
+            run_id="unjudged-agg",
+            n=n,
+            make_flow_driver=mfd,
+            make_simulator=ms,
+            run_judge=None,
+            runs_root=tmp_path,
+            scenario="coding_workflow",
+            score_flow=score_flow,
+        )
+    )
+    assert result["aggregate"] == {"n": n, "counts": {}, "winner": None}
+    root = Path(result["run_root"])
+    meta = json.loads((root / "run.json").read_text())
+    assert meta["winner"] is None
+    if n > 1:  # n=1 writes run_case's own meta; the aggregate keys/report exist only for n>1
+        assert meta["counts"] == {} and meta["score_means"] == {}
+        assert (root / "report.html").is_file()
+
+
+def test_run_case_score_flow_error_is_isolated(tmp_path):
+    case = _unjudged_case(tmp_path)
+    mfd, ms, _ = n_run_factories([])
+    calls = {"n": 0}
+
+    async def score_flow(flow, flow_dir, session):
+        calls["n"] += 1
+        if flow["name"] == "superpowers":
+            raise RuntimeError("boom")
+        return {"flow": flow["name"], "objective": {"acceptance": 1.0}}
+
+    result = asyncio.run(
+        run_case(
+            case,
+            run_id="err-run",
+            make_flow_driver=mfd,
+            make_simulator=ms,
+            run_judge=None,
+            runs_root=tmp_path,
+            scenario="coding_workflow",
+            score_flow=score_flow,
+            artifact_grace_s=0.0,
+        )
+    )
+    root = Path(result["run_root"])
+    sp_card = json.loads((root / "superpowers" / "scorecard.json").read_text())
+    assert sp_card == {"error": "RuntimeError: boom"}
+    plain_card = json.loads((root / "plain" / "scorecard.json").read_text())
+    assert plain_card == {"flow": "plain", "objective": {"acceptance": 1.0}}
+    meta = json.loads((root / "run.json").read_text())
+    assert meta["flow_stats"]["superpowers"]["score_error"] == "RuntimeError: boom"
+    assert calls["n"] == 2
+
+    from flowbench.report.compare import compare_table, load_scorecards
+
+    cards = load_scorecards(tmp_path, "err-run")
+    table = compare_table(cards)
+    assert "FAILED (RuntimeError: boom)" in table
+    lines = table.splitlines()
+    status_line = next(line for line in lines if line.startswith("| _status_"))
+    assert "ok" in status_line
+
+
+def test_run_case_no_score_flow_judge_present_unchanged(tmp_path):
+    case = CASE_DIR
+    mfd, ms, rj = n_run_factories(["A"])
+    result = asyncio.run(
+        run_case(
+            case,
+            run_id="judged-run",
+            make_flow_driver=mfd,
+            make_simulator=ms,
+            run_judge=rj,
+            runs_root=tmp_path,
+            scenario="swe_planning",
+        )
+    )
+    root = Path(result["run_root"])
+    assert not (root / "superpowers" / "scorecard.json").exists()
+    assert (root / "report.html").is_file()
+    assert (root / "judge.md").is_file()
+
+
+def test_run_case_done_token_reaches_run_agent_session(tmp_path, monkeypatch):
+    case = _unjudged_case(tmp_path)
+    calls = []
+
+    async def rec(*args, **kwargs):
+        calls.append(kwargs)
+        return {"items": [], "events": [], "artifact_text": "# p"}
+
+    monkeypatch.setattr(run_mod, "run_agent_session", rec)
+
+    def make_flow_driver(flow, flow_dir):
+        return FakeDriver("# p", [])
+
+    def make_simulator(flow, sim_dir):
+        return StubSim(["<<DONE>>"])
+
+    asyncio.run(
+        run_case(
+            case,
+            run_id="t",
+            make_flow_driver=make_flow_driver,
+            make_simulator=make_simulator,
+            run_judge=None,
+            runs_root=tmp_path,
+            scenario="coding_workflow",
+            done_token="<<DONE>>",
+            artifact_grace_s=0.0,
+        )
+    )
+    assert calls
+    assert all(kwargs["done_token"] == "<<DONE>>" for kwargs in calls)
+
+
+def test_omni_factories_artifact_name_and_git_init(tmp_path):
+    mk_flow, _mk_sim, _judge = run_mod.omni_factories(
+        "x", artifact_name="tasks.json", git_init=True
+    )
+    d = mk_flow({"name": "plain"}, tmp_path)
+    assert d.artifact_name == "tasks.json"
+    assert d.git_init is True
+
+    mk_flow_default, _, _ = run_mod.omni_factories("x")
+    d2 = mk_flow_default({"name": "plain"}, tmp_path)
+    assert d2.artifact_name == "plan.md"
+    assert d2.git_init is False

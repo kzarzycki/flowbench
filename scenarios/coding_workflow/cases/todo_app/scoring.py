@@ -1,0 +1,94 @@
+"""todo_app's score_flow hook: `run_case` calls this after each flow's session
+and writes the returned dict to `<flow_dir>/scorecard.json`. Body mirrors the
+Inspect-era solver.py, minus the Inspect scaffolding — black-box acceptance +
+skills/phase detection + clarifying coverage + a low-confidence judge."""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+from flowbench.model import SessionModel
+from flowbench.run import JUDGE_MODEL, _project, _title
+from flowbench.runner.driver import OmnigentDriver
+from scenarios.coding_workflow.cases.todo_app import scorers as sc
+from scenarios.coding_workflow.cases.todo_app.acceptance import run_acceptance
+
+CASE_DIR = Path(__file__).parent
+
+
+async def score_todo_app(flow: dict, flow_dir: Path, session: dict, *, make_grader) -> dict:
+    flow_dir = Path(flow_dir)
+    grader_model = make_grader(flow_dir)
+    try:
+        acc = run_acceptance(flow_dir)
+        skills = sc.skills_report(session)
+        phases = sc.detect_phases(
+            flow_dir, session, app_runs=acc.app_runs, skills=skills["invoked"]
+        )
+        clarifying = sc.clarifying_coverage(session, sc.UNDERSPECIFIED_TOPICS)
+        acc_d = {
+            "score": acc.score,
+            "passed": acc.passed,
+            "total": acc.total,
+            "app_runs": acc.app_runs,
+            "checks": [c.__dict__ for c in acc.checks],
+        }
+        verdict, judge_reason = await sc.judge_build(
+            shape=(CASE_DIR / "knowledge.md").read_text(),
+            code=sc.collect_code(flow_dir),
+            acceptance=acc_d,
+            transcript=sc.transcript_for_judge(session),
+            grader_model=grader_model,
+        )
+    finally:
+        close = getattr(grader_model, "close", None)
+        if close is not None:
+            await close()
+
+    (flow_dir / "acceptance.json").write_text(json.dumps(acc_d, indent=2, default=str))
+
+    return {
+        "flow": {
+            "name": flow["name"],
+            "harness": flow.get("harness"),
+            "skills": flow.get("skills"),
+            "skill_dirs": [str(p) for p in flow.get("skill_dirs", [])],
+        },
+        "objective": {
+            "app_runs": acc.app_runs,
+            "acceptance": acc_d["score"],
+            "clarifying_coverage": clarifying["score"],
+            "clarifying_asked": clarifying["asked"],
+            # objective: did the superpowers workflow actually load?
+            "superpowers_used": skills["superpowers_used"],
+            "brainstorming_used": skills["brainstorming_used"],
+            "skills_invoked": skills["invoked"],
+        },
+        "heuristic": {"phases": phases},
+        # verdict when parsed; a labeled error (e.g. empty_grader_completion) when
+        # the judge couldn't be scored — never a silent {}.
+        "judge_low_confidence": verdict or {"error": judge_reason},
+        # Where to browse / resume the SUT (session left alive after the run).
+        "session": {
+            "conversation_url": session.get("conversation_url"),
+            "session_id": session.get("session_id"),
+        },
+    }
+
+
+def make_grader_omni(flow_dir: Path, *, scenario: str) -> SessionModel:
+    flow_dir = Path(flow_dir)
+    judge_dir = flow_dir.parent / f"_judge_{flow_dir.name}"
+    judge_dir.mkdir(parents=True, exist_ok=True)
+    return SessionModel(
+        OmnigentDriver(
+            run_dir=judge_dir,
+            artifact_name="__none__",  # no artifact expected
+            model=JUDGE_MODEL,
+            skills="none",
+            turn_timeout_s=600,  # one long grading turn over the produced code
+            session_title=_title(judge_dir, f"judge: {flow_dir.name}"),
+            project=_project(judge_dir, scenario),
+        )
+    )

@@ -1,10 +1,21 @@
 """DONE-token loop, offline: a fake driver replays turns, a stub model simulates
 the user. Asserts the loop answers, stops on the DONE token, respects max_turns,
-and bails on a failed status. The @solver wrapper is exercised live (Task 7)."""
+and bails on a failed status."""
 
 from flowbench.runner.driver import AgentDriver, TurnResult
 from flowbench.runner.loop import _is_done, render_tail, run_agent_session
-from scenarios.coding_workflow.cases.todo_app import task
+
+# Inline fixture data: an engine test must not depend on a scenario (decision 14,
+# flowbench issue #2 / S01.3) — these used to be scenarios.coding_workflow.cases.
+# todo_app.task's FIRST_PROMPT/DONE_TOKEN/simulator_system(), which the loop
+# never inspects beyond the DONE token and a "primed vs. relayed" text diff.
+FIRST_PROMPT = "I want a command-line todo app in Python."
+DONE_TOKEN = "<<DONE>>"
+SIM_SYSTEM = (
+    "You are role-playing a USER who wants a todo app built.\n\n"
+    "ENVISIONED SHAPE: a Python CLI todo app.\n\n"
+    f"Reply with EXACTLY `{DONE_TOKEN}` when the app is delivered and nothing else."
+)
 
 
 class _StubModel:
@@ -81,13 +92,13 @@ async def test_loop_primes_simulator_once_then_relays_deltas():
         TurnResult("idle", "done, tests pass", True),
     ]
     driver = _FakeDriver(turns, {"items": []})
-    user = _StubModel(["a JSON file", "tasks.json", task.DONE_TOKEN])
+    user = _StubModel(["a JSON file", "tasks.json", DONE_TOKEN])
     await run_agent_session(
         driver,
         user,
-        first_prompt=task.FIRST_PROMPT,
-        simulator_system=task.simulator_system(),
-        done_token=task.DONE_TOKEN,
+        first_prompt=FIRST_PROMPT,
+        simulator_system=SIM_SYSTEM,
+        done_token=DONE_TOKEN,
         max_turns=10,
         deadline_s=999,
         artifact_grace_s=0,
@@ -95,12 +106,12 @@ async def test_loop_primes_simulator_once_then_relays_deltas():
     first, second, third = user.seen
     # prime: persona + context
     assert "ENVISIONED SHAPE" in first
-    assert task.FIRST_PROMPT in first
+    assert FIRST_PROMPT in first
     assert "what storage should I use?" in first
     # relays: delta only — no persona, no re-sent history
     for later in (second, third):
         assert "ENVISIONED SHAPE" not in later
-        assert task.FIRST_PROMPT not in later
+        assert FIRST_PROMPT not in later
     assert "and what file name?" in second
     assert "a JSON file" not in second  # its own prior reply is not re-relayed
     assert "done, tests pass" in third
@@ -108,12 +119,12 @@ async def test_loop_primes_simulator_once_then_relays_deltas():
 
 def test_is_done_tolerates_wrapped_token():
     # M1: claude -p may wrap the token; bare equality is too strict.
-    assert _is_done("<<DONE>>", task.DONE_TOKEN)
-    assert _is_done("Looks good. `<<DONE>>`", task.DONE_TOKEN)
-    assert _is_done("  <<DONE>>  ", task.DONE_TOKEN)
-    assert not _is_done("not done yet, keep going", task.DONE_TOKEN)
+    assert _is_done("<<DONE>>", DONE_TOKEN)
+    assert _is_done("Looks good. `<<DONE>>`", DONE_TOKEN)
+    assert _is_done("  <<DONE>>  ", DONE_TOKEN)
+    assert not _is_done("not done yet, keep going", DONE_TOKEN)
     # a long message that merely mentions the token in prose is not a stop signal
-    assert not _is_done("x" * 200 + " <<DONE>> " + "y" * 200, task.DONE_TOKEN)
+    assert not _is_done("x" * 200 + " <<DONE>> " + "y" * 200, DONE_TOKEN)
 
 
 async def test_loop_answers_then_stops_on_done_token():
@@ -122,19 +133,19 @@ async def test_loop_answers_then_stops_on_done_token():
         TurnResult("idle", "Design approved? I built it and tests pass.", True),
     ]
     driver = _FakeDriver(turns, {"items": []})
-    user = _StubModel(["Use a JSON file at ./tasks.json", task.DONE_TOKEN])
+    user = _StubModel(["Use a JSON file at ./tasks.json", DONE_TOKEN])
     session = await run_agent_session(
         driver,
         user,
-        first_prompt=task.FIRST_PROMPT,
-        simulator_system=task.simulator_system(),
-        done_token=task.DONE_TOKEN,
+        first_prompt=FIRST_PROMPT,
+        simulator_system=SIM_SYSTEM,
+        done_token=DONE_TOKEN,
         max_turns=10,
         deadline_s=999,
         artifact_grace_s=0,
     )
     assert driver.started and driver.closed
-    assert driver.sent[0] == task.FIRST_PROMPT
+    assert driver.sent[0] == FIRST_PROMPT
     assert "tasks.json" in driver.sent[1]
     assert len(user.seen) == 2  # answered once, then said DONE
     assert session["items"] == []
@@ -150,18 +161,18 @@ async def test_loop_canned_nudges_self_wait_without_simulator():
         TurnResult("idle", "Task 1 done. App complete, tests pass.", True, child_busy=False),
     ]
     driver = _FakeDriver(turns, {"items": []})
-    user = _StubModel([task.DONE_TOKEN])  # only consulted once, at the end
+    user = _StubModel([DONE_TOKEN])  # only consulted once, at the end
     await run_agent_session(
         driver,
         user,
-        first_prompt=task.FIRST_PROMPT,
-        simulator_system=task.simulator_system(),
-        done_token=task.DONE_TOKEN,
+        first_prompt=FIRST_PROMPT,
+        simulator_system=SIM_SYSTEM,
+        done_token=DONE_TOKEN,
         max_turns=10,
         deadline_s=999,
         artifact_grace_s=0,
     )
-    assert driver.sent == [task.FIRST_PROMPT, "Continue.", "Continue."]
+    assert driver.sent == [FIRST_PROMPT, "Continue.", "Continue."]
     assert len(user.seen) == 1  # simulator NOT burned on the 2 self-waits
     assert driver.closed
 
@@ -174,19 +185,19 @@ async def test_loop_forces_simulator_when_child_looks_stuck_busy():
 
     stuck = TurnResult("idle", "still working in the background", False, child_busy=True)
     driver = _FakeDriver([stuck], {"items": []})  # every turn looks busy, no question
-    user = _StubModel([task.DONE_TOKEN])  # forced call ends the run
+    user = _StubModel([DONE_TOKEN])  # forced call ends the run
     await run_agent_session(
         driver,
         user,
-        first_prompt=task.FIRST_PROMPT,
-        simulator_system=task.simulator_system(),
-        done_token=task.DONE_TOKEN,
+        first_prompt=FIRST_PROMPT,
+        simulator_system=SIM_SYSTEM,
+        done_token=DONE_TOKEN,
         max_turns=50,
         deadline_s=999,
         artifact_grace_s=0,
     )
     # first_prompt + exactly _MAX_CONSEC_NUDGES canned nudges, then simulator -> DONE
-    assert driver.sent == [task.FIRST_PROMPT] + ["Continue."] * _MAX_CONSEC_NUDGES
+    assert driver.sent == [FIRST_PROMPT] + ["Continue."] * _MAX_CONSEC_NUDGES
     assert len(user.seen) == 1
     assert driver.closed
 
@@ -199,13 +210,13 @@ async def test_loop_simulates_when_agent_asks_even_if_child_busy():
         TurnResult("idle", "built it.", True, child_busy=False),
     ]
     driver = _FakeDriver(turns, {"items": []})
-    user = _StubModel(["a JSON file", task.DONE_TOKEN])
+    user = _StubModel(["a JSON file", DONE_TOKEN])
     await run_agent_session(
         driver,
         user,
-        first_prompt=task.FIRST_PROMPT,
-        simulator_system=task.simulator_system(),
-        done_token=task.DONE_TOKEN,
+        first_prompt=FIRST_PROMPT,
+        simulator_system=SIM_SYSTEM,
+        done_token=DONE_TOKEN,
         max_turns=10,
         deadline_s=999,
         artifact_grace_s=0,
@@ -221,9 +232,9 @@ async def test_loop_stops_at_max_turns():
     await run_agent_session(
         driver,
         user,
-        first_prompt=task.FIRST_PROMPT,
-        simulator_system=task.simulator_system(),
-        done_token=task.DONE_TOKEN,
+        first_prompt=FIRST_PROMPT,
+        simulator_system=SIM_SYSTEM,
+        done_token=DONE_TOKEN,
         max_turns=3,
         deadline_s=999,
         artifact_grace_s=0,
@@ -239,9 +250,9 @@ async def test_loop_bails_on_failed_status():
     session = await run_agent_session(
         driver,
         user,
-        first_prompt=task.FIRST_PROMPT,
-        simulator_system=task.simulator_system(),
-        done_token=task.DONE_TOKEN,
+        first_prompt=FIRST_PROMPT,
+        simulator_system=SIM_SYSTEM,
+        done_token=DONE_TOKEN,
         max_turns=5,
         deadline_s=999,
         artifact_grace_s=0,
@@ -270,13 +281,13 @@ async def test_done_waits_for_pending_artifact(monkeypatch):
 
     monkeypatch.setattr("flowbench.runner.loop.asyncio.sleep", _nosleep)
     driver = _LateArtifactDriver([TurnResult("idle", "the plan is complete", False)], {"items": []})
-    user = _StubModel([task.DONE_TOKEN])
+    user = _StubModel([DONE_TOKEN])
     await run_agent_session(
         driver,
         user,
-        first_prompt=task.FIRST_PROMPT,
-        simulator_system=task.simulator_system(),
-        done_token=task.DONE_TOKEN,
+        first_prompt=FIRST_PROMPT,
+        simulator_system=SIM_SYSTEM,
+        done_token=DONE_TOKEN,
         max_turns=5,
         deadline_s=999,
         artifact_grace_s=10,

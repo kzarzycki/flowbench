@@ -7,4 +7,14 @@ black-box acceptance, read alongside a low-confidence judge. Scorers and accepta
 each case for now (single case); promote them here when a second case shares them.
 """
 
+from __future__ import annotations
+
+from pathlib import Path
+
 CASES = ["todo_app"]
+
+_ROOT = Path(__file__).parent / "cases"
+
+
+def CASE_DIR(name: str) -> Path:
+    return _ROOT / name

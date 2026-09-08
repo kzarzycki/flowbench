@@ -8,9 +8,70 @@ import numbers
 import re
 from pathlib import Path
 
-from inspect_ai.scorer import Score, accuracy, mean, scorer
-
 from flowbench.runner.judge import last_json_object
+
+# The five deliberately-underspecified points, with question keywords used to
+# OBJECTIVELY detect whether the SUT asked about each (clarifying_coverage). This
+# does not trust the judge's prose — it scans the SUT's own questions.
+UNDERSPECIFIED_TOPICS: dict[str, list[str]] = {
+    "persistence": [
+        "persist",
+        "save",
+        "saved",
+        "store across",
+        "across runs",
+        "between runs",
+        "survive",
+        "remember",
+        "in-memory",
+        "in memory",
+    ],
+    "fields": [
+        "field",
+        "priority",
+        "attribute",
+        "due date",
+        "metadata",
+        "what information",
+        "what data",
+        "properties",
+    ],
+    "done_handling": [
+        "mark",
+        "complete",
+        "completed",
+        "delete when",
+        "remove when",
+        "keep done",
+        "check off",
+        "vs delete",
+        "or delete",
+    ],
+    "invocation": [
+        "invoke",
+        "run it",
+        "python -m",
+        "entry point",
+        "how do you run",
+        "how should i run",
+        "subcommand",
+        "command name",
+        "cli interface",
+    ],
+    "storage_format": [
+        "json",
+        "sqlite",
+        "csv",
+        "yaml",
+        "format",
+        "filename",
+        "file name",
+        "where should",
+        "which file",
+        "location",
+        "path",
+    ],
+}
 
 _REVIEW_MARKERS = (
     "requesting-code-review",
@@ -250,56 +311,3 @@ async def judge_build(
             continue
         return v, v.get("rationale", "")
     return None, reason
-
-
-@scorer(
-    metrics={
-        "app_runs": [accuracy()],
-        "acceptance": [mean()],
-        "clarifying_coverage": [mean()],
-        "phases_complete": [mean()],
-    }
-)
-def workflow_scorer():
-    """Objective signals only. `app_runs`, `acceptance`, and `clarifying_coverage`
-    run/measure the SUT directly; `phases_complete` is a heuristic roll-up kept in
-    metadata-grade company — read alongside `phases`, not as a hard score."""
-
-    async def score(state, target) -> Score:
-        acc = state.store.get("acceptance")
-        phases = state.store.get("phases")
-        clar = state.store.get("clarifying") or {}
-        if acc is None or phases is None:
-            return Score.unscored(explanation="no acceptance/phase data captured")
-        complete = round(sum(bool(v) for v in phases.values()) / len(phases), 3)
-        return Score(
-            value={
-                "app_runs": 1 if acc.get("app_runs") else 0,
-                "acceptance": acc.get("score", 0.0),
-                "clarifying_coverage": clar.get("score", 0.0),
-                "phases_complete": complete,
-            },
-            explanation=f"phases={phases} clarifying_asked={clar.get('asked')}",
-            metadata={"acceptance": acc, "phases": phases, "clarifying": clar},
-        )
-
-    return score
-
-
-@scorer(
-    metrics={"shape_fit": [mean()], "clarifying_quality": [mean()], "workflow_adherence": [mean()]}
-)
-def build_judge():
-    async def score(state, target) -> Score:
-        verdict = state.store.get("judge")
-        if verdict is None:
-            return Score.unscored(explanation="judge not run / unparseable")
-        return Score(
-            value={
-                k: verdict[k] for k in ("shape_fit", "clarifying_quality", "workflow_adherence")
-            },
-            answer=verdict.get("rationale", ""),
-            metadata=verdict,
-        )
-
-    return score
