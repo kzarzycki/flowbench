@@ -44,8 +44,8 @@ Executes the recorded 2026-07-02 decision: `run_case`, everything omnigent, Insp
   (`run.py`, `SessionModel`, `judge.py`, `transcript.py`, `flowspec.py`, `testing.py`).
 - S01.2 Paired scenarios PR: swe_planning consumes the engine, deletes local copies.
 - S01.3 Port todo_app to `run_case` (case files + scenario-local scorers).
-- S01.4 Remove Inspect + `subscription_model.py`; wheel ships `flowbench` only;
-  extra `spike` → `live`.
+- S01.4 ✅ Remove Inspect + `subscription_model.py`; wheel ships `flowbench` only;
+  omnigent install extra renamed to `live`.
 - S01.5 Milestone live validation: todo_app + swe_planning runs, parity notes.
 
 ### M2 — Runtime robustness (`epics/E02-runtime-robustness.md`)

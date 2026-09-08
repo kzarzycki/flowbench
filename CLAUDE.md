@@ -23,7 +23,7 @@ so the path is not tracked here — record it in `CLAUDE.local.md` (untracked).
 ## Run it
 
 ```bash
-uv sync --extra dev --extra spike      # spike = the agent-eval runner (inspect + omnigent)
+uv sync --extra dev --extra live        # live = the omnigent runtime for live runs
 uv run pytest -q                        # offline suite (live-agent tests skipped)
 
 # drive the reference case live (needs omnigent patched + ANTHROPIC_API_KEY unset):
@@ -37,8 +37,7 @@ uv run flowbench compare --run-base ../flowbench-runs/coding_workflow --run-id <
 
 - `src/flowbench/runner/` — the agent-eval runtime: `driver.py` (`OmnigentDriver`, per-flow bundle
   skills/MCP, subscription guard), `flow.py` (`Flow` = one configuration; bundle fields today, full schema in S03.1),
-  `loop.py` (`run_agent_session` DONE-token loop), `judge.py`,
-  `subscription_model.py` (the `claudesub` Inspect provider).
+  `loop.py` (`run_agent_session` DONE-token loop), `judge.py`.
   Touching `src/flowbench/runner/`? Read `docs/design/runner.md` first (driver/loop
   contracts, one-execution-model decision).
 - `src/flowbench/run.py` — `run_case`/`run_case_n`: the one orchestrator (flows + simulator +
@@ -82,8 +81,8 @@ uv run flowbench compare --run-base ../flowbench-runs/coding_workflow --run-id <
 
 - The agent-eval runner requires `ANTHROPIC_API_KEY` UNSET (subscription billing — the driver
   guards on it) and omnigent patched.
-- `pyproject` registers the `claudesub` Inspect provider via `[project.entry-points.inspect_ai]`
-  and ships `src/flowbench` + `scenarios` in the wheel, so `--model claudesub/sonnet` resolves.
+- Wheel ships `src/flowbench` only; in-repo `scenarios` imports work via pytest `pythonpath`
+  and cwd.
 - Run-dirs live under a sibling `../flowbench-runs/`, never inside the repo.
 - The comparison reader is pure `(<run_base>, <run_id>) -> markdown`; a missing/malformed scorecard
   is a FAILED column and the benchmark never aborts on one bad flow.

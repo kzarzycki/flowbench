@@ -17,7 +17,6 @@ What exists, what works, what is debt. Line counts are `wc -l` on that date.
 | `model.py` | 78 | `SessionModel` simulator/judge shim with freshness retry (S01.1) |
 | `flowspec.py` | 36 | flows.yaml loading, kickoff composition (S01.1) |
 | `runner/loop.py` | 134 | mediated DONE-token loop; nudge policy for self-waiting agents |
-| `runner/subscription_model.py` | 98 | `claudesub` Inspect provider over `claude -p` — **scheduled for deletion** (decision 2026-07-02) |
 | `report/compare.py` | 91 | side-by-side scorecard table; metric paths hardcoded to todo_app's schema |
 | `cli.py` | 36 | typer app; `compare` is the only command |
 | `runner/judge.py` | 142 | `last_json_object` (string-aware) + prose verdict/scores parsing, aggregation (S01.1) |
@@ -58,11 +57,11 @@ orchestration on top of the engine — see "Downstream duplication".
 
 ## Structural debt (each has a home in the roadmap)
 
-1. ~~Two execution models coexist.~~ **Resolved (S01.3):** todo_app now runs through
-   `run_case`/`run_case_n` (`done_token` + an optional per-flow `score_flow` hook,
-   comparative judge conditional on `judge.md`), the same orchestrator swe_planning uses.
-   S01.4 (same issue, PR 2) still needs to delete `subscription_model.py`/the
-   `inspect_ai` entry point/the `spike` extra name now that nothing imports them. → E01
+1. ~~Two execution models coexist.~~ **Resolved (S01.3, S01.4):** todo_app now runs
+   through `run_case`/`run_case_n` (`done_token` + an optional per-flow `score_flow`
+   hook, comparative judge conditional on `judge.md`), the same orchestrator swe_planning
+   uses; `subscription_model.py` and the `inspect_ai` entry point are gone, and the
+   omnigent install extra is renamed to `live`. → E01
 2. **The generic runtime lives downstream.** `run_case`/`run_case_n`, the session-backed
    `.generate()` model, judge prompt/verdict/scores parsing, transcript rendering, trial
    rotation, aggregation, report rendering, and the run watcher are all in
@@ -87,9 +86,9 @@ orchestration on top of the engine — see "Downstream duplication".
 8. **`Flow` diverged from reality.** The dataclass carries bundle fields only; the
    downstream flows.yaml adds `model`, `reasoning_effort`, `prepend`, `append`,
    `turn_timeout_s` and is passed around as raw dicts. → S03.1
-9. **Packaging.** The wheel ships a top-level `scenarios` package (site-packages
-   namespace collision waiting to happen); the omnigent extra is still called `spike`;
-   `inspect-ai` is a dependency only deletion-scheduled code uses. → S01.4
+9. ~~**Packaging.**~~ **Resolved (S01.4):** the wheel ships `src/flowbench` only (no
+   top-level `scenarios` package in site-packages); the omnigent extra is renamed
+   `live`; `inspect-ai` is gone. → E01
 10. **No `flowbench run`.** Each scenario has its own argparse `__main__`; the engine CLI
     only compares. → S03.3
 11. **Un-versioned metadata.** `run.json`/`scorecard.json` are convention, no
@@ -166,8 +165,8 @@ re-reported or "fixed" into regressions)
   (the flags that prevent the AskUserQuestion tmux deadlock) and there is no
   post-creation setter. The reach-in is *forced* by a public-API gap; the fix is an
   upstream omnigent-client addition, then migration (S02.5).
-- "Shipping `scenarios` in the wheel / keeping inspect-ai are defects" — both are
-  *decided-and-scheduled* removals (E01), not new findings.
+- "Shipping `scenarios` in the wheel / keeping inspect-ai are defects" — both were
+  *decided-and-scheduled* removals (E01), resolved in S01.4.
 - "`run_case`/watcher belong in the engine" — true, and already the plan (E01); the
   original placement downstream was a deliberate wait-for-second-consumer decision.
 

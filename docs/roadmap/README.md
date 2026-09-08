@@ -49,7 +49,7 @@ These are prior decision records, not this roadmap's inventions:
 - **One execution model: the `run_case` orchestrator, not Inspect.** Decision record:
   flowbench-scenarios `docs/superpowers/specs/2026-07-02-swe-planning-rework-design.md`.
   todo_app runs on `run_case` since S01.3; Inspect and `subscription_model.py` (`claude -p`)
-  go in S01.4 (epic E01).
+  were removed in S01.4 (epic E01).
 - **Stay DIY; adopt capabilities, not frameworks.** Reconsider only at the written triggers
   in the same decision record (parallel N≥10 with retries; cross-run statistical
   aggregation; cross-month regression tracking; a second scenario-authoring team).

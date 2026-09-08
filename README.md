@@ -21,7 +21,7 @@ Vocabulary in [`docs/GLOSSARY.md`](docs/GLOSSARY.md):
 ## Quickstart
 
 ```bash
-uv sync --extra dev --extra spike     # spike = the agent-eval runner (inspect + omnigent)
+uv sync --extra dev --extra live       # live = the omnigent runtime for live runs
 uv run pytest -q                       # offline suite
 
 # after a run, compare flows side by side:

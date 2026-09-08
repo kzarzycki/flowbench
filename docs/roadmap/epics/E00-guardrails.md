@@ -14,10 +14,9 @@ incident has a named regression test, and CI fails on uncovered new code.
 The code was written across many sessions, partly by weaker models. Symptoms in the tree
 today: `flow.py` opens with "An flow = one approach…", `report/compare.py` still says
 `{arm_name: …}` (the glossary retired "arm"), the driver's default model env var is
-`OMNIGENT_PROBE_MODEL` (a leftover from the pre-flowbench probe spike), and the omnigent
-extra is called `spike`. The war-story comments in `driver.py`/`loop.py` each describe a
-live failure that shaped the code; not all of them have a test that would catch a refactor
-dropping the behavior.
+`OMNIGENT_PROBE_MODEL` (a leftover from the pre-flowbench probe spike). The war-story
+comments in `driver.py`/`loop.py` each describe a live failure that shaped the code; not
+all of them have a test that would catch a refactor dropping the behavior.
 
 ## Stories
 
@@ -26,8 +25,8 @@ dropping the behavior.
 - Grep-driven: `arm`, `An flow`, `SUT` (glossary keeps SUT only in retired-terms), `probe`.
 - Fix docstrings/comments in place; no behavior change.
 - `OMNIGENT_PROBE_MODEL` → `FLOWBENCH_MODEL` (read new name first, fall back to old,
-  comment marks the old one deprecated). The `spike` extra rename happens in S01.4 with
-  the Inspect removal (it changes install instructions; keep it with that PR).
+  comment marks the old one deprecated). The omnigent install extra was renamed to
+  `live` in S01.4 with the Inspect removal (it changed install instructions).
 - Verify: V6 (vocabulary sweep), V1 (offline suite) — see `../verification.md`.
 
 ### S00.2 CI hardening
