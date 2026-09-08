@@ -67,12 +67,24 @@ done_token, max_turns, deadline_s)`:
 ## run.py — the `run_case` orchestrator (since S01.1)
 
 `run_case(case_dir, *, run_id, runs_root, scenario, make_flow_driver, make_simulator,
-run_judge, ...)`: for each flow spawn a driver + simulator, run the loop, write
-`<run_root>/<flow>/{plan.md,transcript.md,session.json}`, then judge all flows in one
-shot and write `run.json` + `report.html`. `run_case_n` repeats it with the flow list
-rotated per trial (cancels judge position bias) under `trial-XX/` and aggregates.
+run_judge, done_token=DONE_TOKEN, score_flow=None, ...)`: for each flow spawn a driver +
+simulator, run the loop (against `done_token`, a per-case override — todo_app's is
+`<<DONE>>`), write `<run_root>/<flow>/{plan.md,transcript.md,session.json}`, then (since
+S01.3) judge all flows in one shot and write `run.json` + `report.html` — but ONLY if
+`case_dir/judge.md` exists. A case with no `judge.md` (a build-shaped case like todo_app,
+scored per-flow rather than comparatively) skips the judge stage entirely: no `_judge/`
+dir, no `report.html`, `run.json`'s `winner`/`winner_flow` are `None`. In that shape
+`score_flow(flow, flow_dir, session) -> dict`, when given, runs after each flow's own
+session and its result is written to `<flow_dir>/scorecard.json`; a raised exception is
+caught and recorded as `{"error": ...}` (plus `flow_stats[name].score_error`) rather than
+aborting the run — `report/compare.py` reads that shape as a FAILED column with the
+reason. `run_case_n` repeats `run_case` with the flow list rotated per trial (cancels
+judge position bias) under `trial-XX/` and aggregates; with no judge across all trials the
+aggregate is `{"counts": {}, "winner": None}` rather than tallying `None` as a flow name.
 The three factories are injected so the whole pipeline runs offline against
-`flowbench.testing` doubles; `omni_factories(scenario)` returns the real ones.
+`flowbench.testing` doubles; `omni_factories(scenario, *, artifact_name="plan.md",
+git_init=False)` returns the real ones (todo_app binds `artifact_name="tasks.json",
+git_init=True`).
 
 Supporting modules, all omnigent-free at import time:
 
@@ -86,15 +98,17 @@ Supporting modules, all omnigent-free at import time:
 | `watch.py` | `RunWatch`: incremental anomaly scanner over a live run (omnigent log + run dir) |
 | `testing.py` | `FakeDriver`, `StubSim`, `MissingPlanDriver`, `ScriptedDriver`, `n_run_factories` |
 
-Case-shaped constants (`DONE_TOKEN`, `MISSING_PLAN`, `SIM_MODEL`, `JUDGE_MODEL`,
-artifact `plan.md`) are still module constants of `run.py`; S01.3/E03 parameterize them.
-CLI entrypoints (`main`) stay scenario-side until S03.x.
+Case-shaped constants (`MISSING_PLAN`, `SIM_MODEL`, `JUDGE_MODEL`) are still module
+constants of `run.py`; `DONE_TOKEN` and the flow driver's `artifact_name`/`git_init` are
+now per-call overrides (S01.3), defaulting to swe_planning's values. CLI entrypoints
+(`main`) stay scenario-side until S03.x.
 
 ## One execution model
 
-Scenarios run through the engine's `run_case` orchestrator — not through Inspect.
-`subscription_model.py` (`claude -p`) and
-the `inspect-ai` dependency are scheduled for removal via the todo_app port.
+Scenarios run through the engine's `run_case` orchestrator — not through Inspect
+(true for both scenarios as of S01.3, todo_app's port). `subscription_model.py`
+(`claude -p`) and the `inspect-ai` dependency still exist but are unused; their
+removal is S01.4 (same issue, PR 2).
 Decision record: flowbench-scenarios
 `docs/superpowers/specs/2026-07-02-swe-planning-rework-design.md` (execution
 model + framework strategy + reconsider-triggers).

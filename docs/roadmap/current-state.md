@@ -19,14 +19,19 @@ What exists, what works, what is debt. Line counts are `wc -l` on that date.
 | `runner/loop.py` | 134 | mediated DONE-token loop; nudge policy for self-waiting agents |
 | `runner/subscription_model.py` | 98 | `claudesub` Inspect provider over `claude -p` — **scheduled for deletion** (decision 2026-07-02) |
 | `report/compare.py` | 91 | side-by-side scorecard table; metric paths hardcoded to todo_app's schema |
-| `runner/run_dir.py` | 47 | run-dir prep + JSON output writers |
 | `cli.py` | 36 | typer app; `compare` is the only command |
 | `runner/judge.py` | 142 | `last_json_object` (string-aware) + prose verdict/scores parsing, aggregation (S01.1) |
 | `runner/flow.py` | 34 | frozen `Flow` dataclass (bundle fields only) |
 
-**Reference scenario** (`scenarios/coding_workflow/cases/todo_app/`, ~920 lines): Inspect
-`@task` + solver glue around the engine loop, keyword-based clarifying-coverage scoring,
-subprocess black-box acceptance, JSON judge.
+`runner/run_dir.py` (47 lines, run-dir prep + JSON output writers) is gone as of S01.3 — it
+served only the Inspect solver; `run_case` writes the run dir directly.
+
+**Reference scenario** (`scenarios/coding_workflow/cases/todo_app/`, S01.3): runs through
+`run_case`/`run_case_n` like every other scenario (no more Inspect `@task`/solver glue,
+no `claudesub`). Plain-text `task.md`/`simulator.md`/`knowledge.md`/`flows.yaml`; each flow
+is scored on its own (no comparative judge) via `scoring.py`'s `score_flow` hook —
+keyword-based clarifying-coverage scoring, subprocess black-box acceptance, JSON judge —
+into `<flow>/scorecard.json`.
 
 **Tests** (~1,360 lines): driver config/bundle/send-retry units, loop behavior, scorer
 units against canned sessions, acceptance checks against fixture apps, compare rendering.
@@ -53,9 +58,11 @@ orchestration on top of the engine — see "Downstream duplication".
 
 ## Structural debt (each has a home in the roadmap)
 
-1. **Two execution models coexist.** todo_app runs through Inspect
-   (`eval.py`/`solver.py`/`claudesub`), swe_planning through its own `run_case`. The
-   decision to converge on `run_case` is recorded but unexecuted. → E01
+1. ~~Two execution models coexist.~~ **Resolved (S01.3):** todo_app now runs through
+   `run_case`/`run_case_n` (`done_token` + an optional per-flow `score_flow` hook,
+   comparative judge conditional on `judge.md`), the same orchestrator swe_planning uses.
+   S01.4 (same issue, PR 2) still needs to delete `subscription_model.py`/the
+   `inspect_ai` entry point/the `spike` extra name now that nothing imports them. → E01
 2. **The generic runtime lives downstream.** `run_case`/`run_case_n`, the session-backed
    `.generate()` model, judge prompt/verdict/scores parsing, transcript rendering, trial
    rotation, aggregation, report rendering, and the run watcher are all in
@@ -108,8 +115,9 @@ list above:
 - `acceptance.py:111` — `resolve_invoker` gates its console-script fallback on the exact
   CPython error string `"No module named todo.__main__"`. An app shipping *only* a
   console script (no `todo` module at all) produces `"No module named todo"`, misses the
-  gate, and fails every acceptance check despite being a faithful build. Fix rides the
-  todo_app port (S01.3).
+  gate, and fails every acceptance check despite being a faithful build. Split out of
+  S01.3 into its own issue (flowbench #46) — unrelated to the port, needs its own fixture
+  app.
 - `runner/judge.py:18` — `last_json_object` counts braces without string-awareness; a
   judge rationale containing `{` or `}` inside a JSON string mis-slices the object. Fix
   when the parser moves in S01.1.

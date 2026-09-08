@@ -46,18 +46,15 @@ send/retry policy.
 
 ## V5 — live todo_app run
 
-Until S01.3 (Inspect era):
+Since S01.3, the `run_case_n` entrypoint (`flowbench run --scenario coding_workflow
+--case todo_app` once S03.3 lands; the interim `python -m` entrypoint before that):
 
 ```bash
-RUN_LIVE_AGENT=1 TODO_RUN_ID=<id> uv run inspect eval \
-  scenarios/coding_workflow/cases/todo_app/eval.py --model claudesub/sonnet \
-  --model-role user=claudesub/sonnet --model-role grader=claudesub/sonnet
+uv run python -m scenarios.coding_workflow.run --case todo_app --run-id <id>
 ```
 
-After S01.3: the `run_case` entrypoint (`flowbench run --scenario coding_workflow
---case todo_app` once S03.3 lands; the interim `python -m` entrypoint before that).
 Success: both flow dirs hold `scorecard.json`, and
-`uv run flowbench compare --run-base ../flowbench-runs/todo-app-eval --run-id <id>`
+`uv run flowbench compare --run-base ../flowbench-runs/coding_workflow --run-id <id>`
 renders both columns without a FAILED banner.
 
 ## V6 — vocabulary sweep
