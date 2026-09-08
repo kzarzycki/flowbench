@@ -8,10 +8,12 @@ swapping omnigent for another REPL driver (or a fake, in tests) changes nothing
 upstream.
 
 The recipe here is exactly what the live probe proved (subscription-billed,
-multi-turn, artifact written). Two hard-won settings:
+multi-turn, artifact written). Three hard-won settings:
 - model pinned (the user's own CLI default may be an unavailable model);
 - `--disallowedTools AskUserQuestion` (the interactive card blocks the tmux
-  input prompt, deadlocking follow-up turns).
+  input prompt, deadlocking follow-up turns);
+- `--permission-mode bypassPermissions` for every flow (#52): a permission
+  prompt has no one to answer it and stalls the turn until the cap.
 """
 
 from __future__ import annotations
@@ -28,29 +30,6 @@ from pathlib import Path
 from typing import Any
 
 from flowbench.transcript import dedup_items, last_assistant_text, n_assistant_messages
-
-# Unattended file work inside the run workspace: read tools + file-work bash.
-# Passed as --allowedTools (with --permission-mode acceptEdits) on every flow.
-ALLOWED_TOOLS = [
-    "Read",
-    "Glob",
-    "Grep",
-    "Bash(ls:*)",
-    "Bash(cat:*)",
-    "Bash(head:*)",
-    "Bash(tail:*)",
-    "Bash(wc:*)",
-    "Bash(find:*)",
-    "Bash(grep:*)",
-    "Bash(rg:*)",
-    "Bash(tree:*)",
-    "Bash(pwd)",
-    "Bash(mkdir:*)",
-    "Bash(touch:*)",
-    "Bash(cp:*)",
-    "Bash(mv:*)",
-    "Bash(git:*)",
-]
 
 
 @dataclass
@@ -273,10 +252,13 @@ class OmnigentDriver(AgentDriver):
                 # drops ALL settings files — todo-010's plain flow prompted for
                 # Write while superpowers (skills "all") sailed. Flags survive
                 # that and are identical for every flow, so comparability holds.
+                # bypassPermissions for every case (decision 2026-09-08, #52): a
+                # prompt nobody can answer froze todo-app-001 for the whole turn
+                # cap (AskUserQuestion is off, the simulator only sees chat). The
+                # run dir is isolated; `auto` was rejected because it puts a
+                # second, non-deterministic model between the flow and its tools.
                 "--permission-mode",
-                "acceptEdits",
-                "--allowedTools",
-                ",".join(ALLOWED_TOOLS),
+                "bypassPermissions",
             ]
         elif self.harness == "codex-native":
             # Codex's unattended stance: never prompt, sandboxed to the workspace.

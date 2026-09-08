@@ -3,7 +3,7 @@ vanilla-Claude-Code prompt with NO behavioural steering (bug-3 fix)."""
 
 import subprocess
 
-from flowbench.runner.driver import ALLOWED_TOOLS, OmnigentDriver, git_init_repo
+from flowbench.runner.driver import OmnigentDriver, git_init_repo
 
 
 def test_render_config_embeds_custom_prompt(tmp_path):
@@ -57,7 +57,7 @@ def test_create_metadata_omits_title_and_project_by_default(tmp_path):
     meta = d._create_metadata()
     args = meta["terminal_launch_args"]
     assert args[:2] == ["--disallowedTools", "AskUserQuestion"]
-    assert "--permission-mode" in args and "--allowedTools" in args
+    assert args[2:] == ["--permission-mode", "bypassPermissions"]
     assert "title" not in meta
     assert "labels" not in meta
 
@@ -91,15 +91,15 @@ def test_create_metadata_unknown_harness_gets_no_flags(tmp_path):
     assert d._create_metadata()["terminal_launch_args"] == []
 
 
-def test_create_metadata_claude_native_flags_unchanged(tmp_path):
-    # Byte-identical to the pre-change list — comparability of past runs holds.
+def test_create_metadata_claude_native_flags(tmp_path):
+    # The exact flag list every claude-native flow launches with: no allowlist, no
+    # prompts (#52) — identical for every flow, so comparability holds.
     d = OmnigentDriver(run_dir=tmp_path, artifact_name="plan.md", harness="claude-native")
     args = d._create_metadata()["terminal_launch_args"]
     assert args == [
         "--disallowedTools",
         "AskUserQuestion",
         "--permission-mode",
-        "acceptEdits",
-        "--allowedTools",
-        ",".join(ALLOWED_TOOLS),
+        "bypassPermissions",
     ]
+    assert "--allowedTools" not in args
