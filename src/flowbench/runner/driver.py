@@ -422,17 +422,26 @@ class OmnigentDriver(AgentDriver):
             lambda: self._client.sessions.list_items(self._chat.session_id, order="asc", limit=200)
         )
 
+    async def _snapshot(self) -> dict:
+        """Raw `GET /v1/sessions/{id}`: status plus the stall signals. Read raw —
+        the client's `Session` dataclass drops `updated_at` and the pending
+        elicitations, which made the watchdog blind in its first live run."""
+        resp = await self._http.get(f"/v1/sessions/{self._chat.session_id}")
+        resp.raise_for_status()
+        return resp.json()
+
     async def _wait_idle(self, min_wait: float = 4.0) -> str:
         start, seen_running = time.monotonic(), False
         heartbeat, last_beat = None, start
+        st = None
         while time.monotonic() - start < self.turn_timeout_s:
-            sess = await self._read_retry(self._chat.refresh)
-            st = self._chat.status
+            snap = await self._read_retry(self._snapshot)
+            st = snap.get("status")
             if st == "running":
                 seen_running = True
-                if getattr(sess, "pending_elicitations_count", 0):
+                if snap.get("pending_elicitations"):
                     return await self._stalled("elicitation")
-                beat = getattr(sess, "updated_at", None)
+                beat = snap.get("updated_at")
                 if beat != heartbeat:
                     heartbeat, last_beat = beat, time.monotonic()
                 elif time.monotonic() - last_beat >= self.stall_s:
@@ -442,7 +451,7 @@ class OmnigentDriver(AgentDriver):
             if st == "idle" and (seen_running or time.monotonic() - start >= min_wait):
                 return "idle"
             await asyncio.sleep(1.5)
-        return self._chat.status or "timeout"
+        return st or "timeout"
 
     async def _stalled(self, reason: str) -> str:
         self._stall = {"stall_reason": reason, "pane_tail": await self._pane_tail()}

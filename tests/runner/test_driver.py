@@ -149,19 +149,29 @@ def _text(it):
 
 
 class _FakeChat:
-    """Status sequence pops once per refresh(), then stays on the last value."""
+    """Status sequence pops once per snapshot(), then stays on the last value.
+    Stands in for the driver's raw `GET /v1/sessions/{id}` poll."""
 
     session_id = "conv_test"
 
-    def __init__(self, statuses):
+    def __init__(self, statuses, *, pending=(), beats=(1,)):
         self._statuses = list(statuses)
+        self._beats = iter(beats)  # exhausted -> last value repeats
+        self._last_beat = None
+        self.pending = list(pending)
         self.status = None
 
-    async def refresh(self):
+    async def snapshot(self):
         if len(self._statuses) > 1:
             self.status = self._statuses.pop(0)
         else:
             self.status = self._statuses[0]
+        self._last_beat = next(self._beats, self._last_beat)
+        return {
+            "status": self.status,
+            "updated_at": self._last_beat,
+            "pending_elicitations": self.pending,
+        }
 
     def send(self, text):
         async def _gen():
@@ -190,6 +200,7 @@ def _settle_driver(tmp_path, chat, batches):
     d.settle_timeout_s = 1.0
     d.settle_poll_s = 0.01
     d._chat = chat
+    d._snapshot = chat.snapshot
     d._client = SimpleNamespace(sessions=_FakeSessions(batches))
     return d
 
@@ -327,26 +338,11 @@ async def test_context_tokens_none_when_label_missing(tmp_path):
     assert await d._context_tokens() is None
 
 
-class _StallChat(_FakeChat):
-    """Always running; refresh() returns a session snapshot with the stall signals."""
-
-    def __init__(self, *, pending=0, beats=None):
-        super().__init__(["running"])
-        self.pending = pending
-        self._beats = list(beats or [1])
-
-    async def refresh(self):
-        from types import SimpleNamespace
-
-        await super().refresh()
-        beat = self._beats.pop(0) if len(self._beats) > 1 else self._beats[0]
-        return SimpleNamespace(pending_elicitations_count=self.pending, updated_at=beat)
-
-
 async def test_pending_elicitation_stalls_the_turn_at_once(tmp_path, monkeypatch):
     # todo-app-001: a permission prompt nobody could answer sat until the turn cap
     monkeypatch.setattr("flowbench.runner.driver.asyncio.sleep", _instant_sleep)
-    d = _settle_driver(tmp_path, _StallChat(pending=1), [[]])
+    chat = _FakeChat(["running"], pending=[{"id": "elicit_1"}])
+    d = _settle_driver(tmp_path, chat, [[]])
     d._pane_tail = _pane("❯ Allow Bash(rm -rf build)? (y/n)")
     result = await d.send("build it")
     assert (result.status, result.stall_reason) == ("stalled", "elicitation")
@@ -355,7 +351,7 @@ async def test_pending_elicitation_stalls_the_turn_at_once(tmp_path, monkeypatch
 
 async def test_frozen_heartbeat_stalls_after_stall_s(tmp_path, monkeypatch):
     monkeypatch.setattr("flowbench.runner.driver.asyncio.sleep", _instant_sleep)
-    d = _settle_driver(tmp_path, _StallChat(beats=[7]), [[]])
+    d = _settle_driver(tmp_path, _FakeChat(["running"], beats=[7]), [[]])
     d.stall_s = 0.05
     d._pane_tail = _pane(None)
     result = await d.send("build it")
@@ -370,9 +366,7 @@ async def test_moving_heartbeat_is_not_a_stall(tmp_path, monkeypatch):
     monkeypatch.setattr("flowbench.runner.driver.asyncio.sleep", _instant_sleep)
     import itertools
 
-    chat = _StallChat()
-    chat._beats = itertools.count()  # every refresh a new updated_at
-    chat.refresh = _counting_refresh(chat)
+    chat = _FakeChat(["running"], beats=itertools.count())  # every poll a new updated_at
     d = _settle_driver(tmp_path, chat, [[]])
     d.stall_s = 0.05
     d.turn_timeout_s = 0.2
@@ -380,14 +374,31 @@ async def test_moving_heartbeat_is_not_a_stall(tmp_path, monkeypatch):
     assert (result.status, result.stall_reason) == ("running", None)
 
 
-def _counting_refresh(chat):
-    async def refresh():
-        from types import SimpleNamespace
+async def test_snapshot_reads_the_raw_session(tmp_path):
+    # the stall signals live only in the raw JSON (the client dataclass drops them)
+    from types import SimpleNamespace
 
-        chat.status = "running"
-        return SimpleNamespace(pending_elicitations_count=0, updated_at=next(chat._beats))
+    class _Resp:
+        def raise_for_status(self):
+            pass
 
-    return refresh
+        def json(self):
+            return {"status": "running", "updated_at": 5, "pending_elicitations": [{"id": "e"}]}
+
+    class _Http:
+        async def get(self, url):
+            assert url == "/v1/sessions/conv_x"
+            return _Resp()
+
+    d = OmnigentDriver(run_dir=tmp_path, artifact_name="plan.md")
+    d._chat = SimpleNamespace(session_id="conv_x")
+    d._http = _Http()
+    snap = await d._snapshot()
+    assert (snap["status"], snap["updated_at"], len(snap["pending_elicitations"])) == (
+        "running",
+        5,
+        1,
+    )
 
 
 def _pane(text):
