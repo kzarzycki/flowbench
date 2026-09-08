@@ -1,6 +1,6 @@
 """DONE-token loop, offline: a fake driver replays turns, a stub model simulates
 the user. Asserts the loop answers, stops on the DONE token, respects max_turns,
-and bails on a failed status. The @solver wrapper is exercised live (Task 7)."""
+and bails on a failed status."""
 
 from flowbench.runner.driver import AgentDriver, TurnResult
 from flowbench.runner.loop import _is_done, render_tail, run_agent_session

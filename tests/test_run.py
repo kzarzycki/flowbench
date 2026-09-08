@@ -750,7 +750,8 @@ def test_run_case_score_flow_writes_scorecards_no_judge(tmp_path):
     assert meta["labels"] == {"A": "superpowers", "B": "plain"}
 
 
-def test_run_case_n_unjudged_aggregate_empty(tmp_path):
+@pytest.mark.parametrize("n", [1, 2])  # n=1 is the CLI default and takes its own branch
+def test_run_case_n_unjudged_aggregate_empty(tmp_path, n):
     case = _unjudged_case(tmp_path)
     mfd, ms, _ = n_run_factories([])
 
@@ -761,7 +762,7 @@ def test_run_case_n_unjudged_aggregate_empty(tmp_path):
         run_case_n(
             case,
             run_id="unjudged-agg",
-            n=2,
+            n=n,
             make_flow_driver=mfd,
             make_simulator=ms,
             run_judge=None,
@@ -770,13 +771,13 @@ def test_run_case_n_unjudged_aggregate_empty(tmp_path):
             score_flow=score_flow,
         )
     )
-    assert result["aggregate"] == {"n": 2, "counts": {}, "winner": None}
+    assert result["aggregate"] == {"n": n, "counts": {}, "winner": None}
     root = Path(result["run_root"])
-    agg = json.loads((root / "run.json").read_text())
-    assert agg["counts"] == {}
-    assert agg["winner"] is None
-    assert agg["score_means"] == {}
-    assert (root / "report.html").is_file()
+    meta = json.loads((root / "run.json").read_text())
+    assert meta["winner"] is None
+    if n > 1:  # n=1 writes run_case's own meta; the aggregate keys/report exist only for n>1
+        assert meta["counts"] == {} and meta["score_means"] == {}
+        assert (root / "report.html").is_file()
 
 
 def test_run_case_score_flow_error_is_isolated(tmp_path):

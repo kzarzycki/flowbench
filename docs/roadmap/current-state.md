@@ -142,8 +142,9 @@ list above:
 - `_injection_undelivered`'s label parsing (the magic strings gating every send retry)
   is stubbed in tests, never exercised.
 - `send()` retry exhaustion and the loop's `deadline_s` backstop are never exercised.
-- The scorecard shape the solver writes is covered only by the gated live test; compare
-  tests validate a hand-built dict instead (drift between them would pass CI).
+- The scorecard key set is pinned offline (`tests/scenarios/todo_app/test_todo_run.py`) and
+  `compare` renders a `run_case`-written run in `tests/test_run.py`; values themselves are
+  only exercised live.
 
 **Scoring credibility** (scenario-side; matters because scores are the product)
 

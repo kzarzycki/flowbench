@@ -134,9 +134,12 @@ def test_make_grader_omni_wires_judge_dir_and_model(tmp_path):
     assert d.artifact_name == "__none__"
 
 
+@pytest.mark.parametrize("flag", ["--deadline-s", "--n"])
 @pytest.mark.parametrize("bad", ["0", "-5"])
-def test_deadline_must_be_positive(bad):
+def test_budgets_must_be_positive(flag, bad):
     from scenarios.coding_workflow.run import _parse_args
 
     with pytest.raises(SystemExit):
-        _parse_args(["--deadline-s", bad])
+        _parse_args([flag, bad])
+    args = _parse_args([flag, "2"])
+    assert getattr(args, flag.lstrip("-").replace("-", "_")) == 2
