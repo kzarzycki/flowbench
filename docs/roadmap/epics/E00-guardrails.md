@@ -15,9 +15,8 @@ The code was written across many sessions, partly by weaker models. Symptoms in 
 today: `flow.py` opens with "An flow = one approach…", `report/compare.py` still says
 `{arm_name: …}` (the glossary retired "arm"), the driver's default model env var is
 `OMNIGENT_PROBE_MODEL` (a leftover from the pre-flowbench probe spike). The war-story
-comments in `driver.py`/`loop.py` each describe a
-live failure that shaped the code; not all of them have a test that would catch a refactor
-dropping the behavior.
+comments in `driver.py`/`loop.py` each describe a live failure that shaped the code; not
+all of them have a test that would catch a refactor dropping the behavior.
 
 ## Stories
 

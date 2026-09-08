@@ -38,11 +38,10 @@ uv run --extra live python -m scenarios.swe_planning.run --run-id <id> &
 uv run python -m scenarios.swe_planning.watch <id> --pid $!
 ```
 
-Success: the
-watcher exits on `run.json`, no failed sessions, `winner` parsed (not `unknown` unless
-the judge genuinely refused), and each flow dir holds `plan.md` + `transcript.md` +
-`session.json`. This is mandatory after any change to `driver.py`, `loop.py`, or the
-send/retry policy.
+Success: the watcher exits on `run.json`, no failed sessions, `winner` parsed (not
+`unknown` unless the judge genuinely refused), and each flow dir holds `plan.md` +
+`transcript.md` + `session.json`. This is mandatory after any change to `driver.py`,
+`loop.py`, or the send/retry policy.
 
 ## V5 — live todo_app run
 
