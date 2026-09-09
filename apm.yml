@@ -1,7 +1,9 @@
 name: flowbench
 version: 0.1.0
-description: Development agent configuration for the flowbench repository.
-author: kzarzycki
+description: Benchmark harness that compares agentic approaches (workflows) on a fixed task, all driven through omnigent.
+author: Krzysztof Zarzycki
+# Add each coding agent's APM mapping here. Claude Code and Codex are the
+# currently implemented and acceptance-tested integrations.
 targets:
 - claude
 - codex

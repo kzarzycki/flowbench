@@ -3,6 +3,12 @@
 .env.*
 !.env.example
 
+# Coding-agent generated/cache state
+apm_modules/
+fnox.local.toml
+# Local session memory — holds a pid and a write lock, not shared state.
+.memsearch/
+
 # OS / editor
 .DS_Store
 *.swp

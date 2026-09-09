@@ -1,11 +1,11 @@
 lockfile_version: '2'
-generated_at: '2026-09-07T13:34:59.679689+00:00'
+generated_at: '2026-09-09T07:49:35.230137+00:00'
 apm_version: 0.29.1
 dependencies:
 - repo_url: kzarzycki/agent-skills
   name: engineering
   host: github.com
-  resolved_commit: 22822e8337f66b368b3ea1d44511fd024a342b1f  # pragma: allowlist secret
+  resolved_commit: 22822e8337f66b368b3ea1d44511fd024a342b1f
   resolved_ref: engineering-v0.4.0
   version: 0.4.0
   virtual_path: engineering

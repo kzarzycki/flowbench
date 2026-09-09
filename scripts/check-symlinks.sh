@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Reject symlinks whose target does not resolve. Ported from dotagents'
-# pre-commit hook. pre-commit passes candidate symlink files as arguments.
+# Reject symlinks whose target does not resolve. pre-commit passes candidate
+# symlink files as arguments.
 set -eu
 fail=0
 for f in "$@"; do

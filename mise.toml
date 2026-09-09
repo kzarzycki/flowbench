@@ -3,6 +3,7 @@ python = "3.13"
 uv = "latest"
 pre-commit = "latest"
 "github:microsoft/apm" = "0.30.0"
+fnox = "1.30.0"
 
 [tasks.agent-sync]
 description = "Converge project-owned coding agent configuration."
@@ -20,6 +21,7 @@ if [ "${usage_refresh:-false}" = true ]; then mode=refresh; fi
 if [ "${usage_frozen:-false}" = true ]; then mode=frozen; fi
 command -v apm >/dev/null || { echo "error: apm 0.30.0 is required; run 'mise install'" >&2; exit 127; }
 command -v python3 >/dev/null || { echo "error: python3 is required; run 'mise install'" >&2; exit 127; }
+command -v fnox >/dev/null || { echo "error: fnox 1.30.0 is required; run 'mise install'" >&2; exit 127; }
 agent_targets="$(python3 -c '
 import re
 from pathlib import Path
@@ -66,8 +68,10 @@ esac
 apm compile --clean
 apm compile --validate
 apm audit --ci --no-policy
+# Add native-output validation for every implemented coding agent here.
 if [ -f .mcp.json ]; then python3 -m json.tool .mcp.json >/dev/null; fi
 if [ -f .codex/config.toml ]; then python3 -c 'import tomllib; tomllib.load(open(".codex/config.toml", "rb"))'; fi
+fnox check --all --non-interactive --if-missing error
 if [ "$mode" = frozen ]; then
   frozen_changes="$(git status --porcelain=v1 --untracked-files=all -- \
     apm.yml apm.lock.yaml .apm AGENTS.md CLAUDE.md \
@@ -82,19 +86,24 @@ if [ "$mode" = frozen ]; then
 fi
 """
 
+# Launcher tasks are coding-agent-specific. Add one only when the coding agent
+# has a stable CLI.
 [tasks.agent-claude]
-description = "Launch Claude Code."
+description = "Launch Claude Code with this repository's machine bindings."
 run = """
+command -v fnox >/dev/null || { echo "error: fnox 1.30.0 is required; run 'mise install'" >&2; exit 127; }
 command -v claude >/dev/null || { echo "error: claude is required; install Claude Code and add 'claude' to PATH" >&2; exit 127; }
-claude
+fnox exec --non-interactive --if-missing error -- claude
 """
 
 [tasks.agent-codex]
-description = "Launch Codex."
+description = "Launch Codex with this repository's machine bindings."
 run = """
+command -v fnox >/dev/null || { echo "error: fnox 1.30.0 is required; run 'mise install'" >&2; exit 127; }
 command -v codex >/dev/null || { echo "error: codex is required; install Codex and add 'codex' to PATH" >&2; exit 127; }
-codex
+fnox exec --non-interactive --if-missing error -- codex
 """
+
 
 [tasks.test]
 run = "uv run pytest"

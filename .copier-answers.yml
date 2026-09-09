@@ -1,15 +1,16 @@
 # Records the answers used to generate this project.
 # Do not edit by hand — `copier update` rewrites it. Edit the template instead.
-_commit: v0.2.0
+_commit: v0.3.0
 _src_path: /Users/zarz/dev/agents/project-templates
 author: Krzysztof Zarzycki
 description: Benchmark harness that compares agentic approaches (workflows) on a fixed
     task, all driven through omnigent.
 email: k.zarzycki@gmail.com
+include_agent_layer: true
+include_engineering_workflow: true
+include_fnox: true
 include_mise: true
 license: none
 project_name: flowbench
 project_type: software/python
 python_version: '3.13'
-shared_apm: false
-toolkit_stack: flowbench
