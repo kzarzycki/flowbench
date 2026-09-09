@@ -617,6 +617,16 @@ async def test_snapshot_attaches_busy_children_when_idle(tmp_path):
     assert any("after=c9" in u for u in _Http.urls)
 
 
+async def test_failed_session_status_ends_the_turn(tmp_path):
+    # The server reporting `failed` ends the turn at once — no settle loop, no
+    # waiting out the turn cap. `send` then decides whether to re-send (only when
+    # the labels confirm the injection never landed).
+    d = _settle_driver(tmp_path, _FakeChat([TurnStatus.FAILED]), [[]])
+    d.send_retry_attempts = 0
+    result = await d.send("build it")
+    assert result.status == TurnStatus.FAILED
+
+
 async def test_undocumented_server_status_passes_through(tmp_path):
     # A server status outside the documented vocabulary (idle/running/failed)
     # must reach TurnResult.status unchanged — no exception, no relabelling
