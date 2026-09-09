@@ -1,0 +1,26 @@
+#!/bin/sh
+# One worktree, one branch. Each worktree is bound to the first branch checked
+# out in it (the one `git worktree add` gave it; `master` for the main checkout).
+# A later switch to any other branch is reverted and fails. Git has no
+# pre-checkout hook, so this runs after the switch and undoes it.
+#
+# Activate once per clone:  git config core.hooksPath .githooks
+# Move a binding on purpose: GIT_REBIND=1 git switch <branch>
+#
+# args: <prev HEAD> <new HEAD> <flag>; flag=1 is a branch checkout, 0 a file checkout.
+[ "$3" = "1" ] || exit 0
+branch=$(git symbolic-ref --quiet --short HEAD) || exit 0 # detached (rebase, bisect): allow
+bind_file="$(git rev-parse --git-dir)/worktree-branch"    # per-worktree: .git/worktrees/<name>/
+if [ -n "$GIT_REBIND" ] || [ ! -f "$bind_file" ]; then
+    printf '%s\n' "$branch" >"$bind_file"
+    exit 0
+fi
+bound=$(cat "$bind_file")
+[ "$branch" = "$bound" ] && exit 0
+cat >&2 <<MSG
+post-checkout: this worktree is bound to '$bound'; switching to '$branch' reverted.
+  One worktree, one branch:  git worktree add ../$(basename "$(git rev-parse --show-toplevel)")--<slug> $branch
+  Rebind on purpose:         GIT_REBIND=1 git switch $branch
+MSG
+git switch --quiet "$bound"
+exit 1
