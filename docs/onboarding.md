@@ -32,10 +32,12 @@ one of their working trees. So: the main checkout stays on `master`, every branc
 sibling worktree (`../flowbench--<slug>`, sibling not nested — scenarios resolves the engine by
 relative path), and the worktree is removed when the branch merges.
 
-`.githooks/post-checkout` enforces it: a worktree is bound to the first branch checked out in
-it, and any later switch to another branch is reverted and fails. Git has no pre-checkout hook,
-so the switch happens and is undone; the net effect is a block. File checkouts, detached HEAD
-(rebase, bisect) and `GIT_REBIND=1 git switch <branch>` pass. Tests: `tests/test_githooks.py`.
+`.githooks/post-checkout` enforces it: the main checkout is bound to the default branch, a
+linked worktree to the first branch checked out in it, and any later switch to another branch
+is reverted and fails. Git has no pre-checkout hook, so the switch happens and is undone; the
+net effect is a block (a `checkout -B`/`switch -C` that reset the target branch is undone too).
+File checkouts, detached HEAD (rebase, bisect) and `GIT_REBIND=1 git switch <branch>` pass.
+Tests: `tests/test_githooks.py`.
 
 ### Installing omnigent
 
