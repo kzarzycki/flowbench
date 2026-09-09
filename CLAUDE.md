@@ -97,6 +97,12 @@ uv run python -m scenarios.coding_workflow.run --rescore <run-id>
 
 ## Conventions / gotchas
 
+- **Issues carry their hierarchy.** Every issue has a `type:epic|story|task|bug` label (issue
+  types are org-only, so labels stand in on this personal repo). One `type:epic` issue per
+  `docs/roadmap/epics/E*`; stories are its sub-issues (`gh issue create --parent <epic>`), bugs
+  and tasks hang under the story or epic they belong to. Work state lives on the Project board
+  https://github.com/users/kzarzycki/projects/1 (both repos; `Status` + loop `Phase`), written
+  by the engineering loop's `board.sh` — not in issue comments or local notes.
 - The agent-eval runner requires `ANTHROPIC_API_KEY` UNSET (subscription billing — the driver
   guards on it) and a live omnigent server with `claude-native` configured
   (`docs/onboarding.md`). Launch live runs with `uv run --extra live`.

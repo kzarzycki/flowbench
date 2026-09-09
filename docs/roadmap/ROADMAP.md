@@ -1,6 +1,8 @@
 # Roadmap — milestones, epics, stories
 
-The destination is `vision.md` (pillars); this file is the ordered plan. Three phases:
+The destination is `vision.md` (pillars); this file is the ordered plan. Live state of every
+epic and story: the Project board https://github.com/users/kzarzycki/projects/1 (epics are
+`type:epic` issues, stories their sub-issues; this file stays the sequencing rationale). Three phases:
 
 - **Foundation (M0–M3)** — one execution model, robust runtime, case format, CLI.
   Everything later stands on this; do not reorder past it.
