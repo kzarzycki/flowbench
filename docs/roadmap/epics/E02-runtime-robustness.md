@@ -58,30 +58,15 @@ pinned `==0.1.1`.
   mechanically and once for real, is the churn the epic's own Risks section warns
   against; the remainder goes with S02.3.
 
-### S02.3 One retry policy, at the driver
+### S02.3 One retry policy, at the driver — DONE (flowbench #103)
 
-- Move the fresh-text rule into `send`: a turn that ends `FAILED` but produced a NEW
-  assistant message (vs. the pre-send count, which `_send_once` already tracks) is a
-  delivered-then-flaked turn — return it as success-with-flag rather than making every
-  caller re-derive it.
-- Resulting policy table (goes verbatim into `docs/design/runner.md`):
-
-  | Observation | Meaning | Action |
-  | --- | --- | --- |
-  | `FAILED` + label says undelivered | injection never landed | wait, re-send same text (bounded) |
-  | `FAILED` + new assistant text | turn completed, then flaked | trust the text, no retry |
-  | `FAILED`, no label, no new text | unknown; likely undelivered | bounded re-send (the #39 behavior, generalized) |
-  | `TIMEOUT` | may be mid-turn after delivery | NEVER retry (injecting into a busy terminal kills sessions) |
-  | `IDLE` + no new text past settle budget | lying idle | report `TIMEOUT` |
-
-- `SessionModel.generate` shrinks to: send, raise on `TIMEOUT`/no-text, wrap completion.
-  Its downstream tests move/port with it.
-- **One wall-clock budget per send** (audited bug): today `_send_once` stacks a full
-  `turn_timeout_s` in `_wait_idle` plus a second `turn_timeout_s` settle window whose
-  iterations call `_wait_idle` again — a single turn can eat ~8–9 min of a 30-min run.
-  The send gets one ceiling that all inner waits and retry sleeps draw down.
-- Verify: the S00.3 regression tests plus new ones covering each table row (V1); V4 is
-  MANDATORY here — this is the code path that killed runs #30/#34/#39.
+One retry policy now lives in `OmnigentDriver.send`; the five-row policy table lives
+in `docs/design/runner.md` under "Send/retry policy". Each `send` runs under a single
+`asyncio.timeout(turn_timeout_s)`, so nested waits and retry sleeps can no longer stack
+past one turn's budget. `SessionModel.generate` shrank to send + raise + wrap, and
+`TurnResult` gained a `flaked` flag (`session["flaked_turns"]` on the run). Verified by
+`tests/driver/test_omnigent.py`, `tests/test_model.py`, `tests/test_loop.py`; live gate
+ids: TBD (ledger).
 
 ### S02.3b Loop hygiene — DONE (flowbench #67, ahead of E02)
 

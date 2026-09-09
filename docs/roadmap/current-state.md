@@ -20,7 +20,7 @@ What exists, what works, what is debt. Line counts are `wc -l` on that date.
 | `testing.py` | 112 | offline doubles: FakeDriver, StubSim, ScriptedDriver, n_run_factories (S01.1) |
 | `watch.py` | 100 | `RunWatch` live-run anomaly scanner (S01.1) |
 | `transcript.py` | 106 | message-item helpers + `render_transcript` (S01.1) |
-| `model.py` | 78 | `SessionModel` simulator/judge shim with freshness retry (S01.1) |
+| `model.py` | 52 | `SessionModel` simulator/judge shim; retry policy is the driver's (S02.3) |
 | `flowspec.py` | 36 | flows.yaml loading, kickoff composition (S01.1) |
 | `loop.py` | 110 | mediated DONE-token loop (no nudges since #67: the driver waits out busy children); moved out of `runner/` in S02.2 |
 | `report/compare.py` | 91 | side-by-side scorecard table; metric paths hardcoded to todo_app's schema |
@@ -68,37 +68,33 @@ orchestration on top of the engine — see "Downstream duplication".
    rotation, aggregation, report rendering, and the run watcher are all in
    flowbench-scenarios' swe_planning dir. The recorded extraction trigger ("a second
    scenario forces extraction") fires with the todo_app port. → E01
-2. **Split retry policy.** `OmnigentDriver.send` retries label-confirmed undelivered
-   injections; downstream `SessionModel.generate` separately retries failed-with-stale-
-   text turns (issue #39) because sim/judge sessions don't reliably set delivery labels.
-   Two policies, two repos, same underlying problem. → S02.3
-3. **Driver god-module + abstraction leaks.** Bundle building, transcript utilities, and
+2. **Driver god-module + abstraction leaks.** Bundle building, transcript utilities, and
    artifact probing (`artifact_name="__none__"` for sessions with no artifact) don't
    belong in the session driver. → S02.2, S02.4
-4. **Private-API reach-ins.** `sessions._http`, `sessions._base`, hand-built
+3. **Private-API reach-ins.** `sessions._http`, `sessions._base`, hand-built
    `SessionsChat`, `omnigent.host.daemon_launch` internals. The 0.1.1 pins exist because of
    this — and the driven server runs from a far newer source checkout, so the pinned client
    and the live server are different versions on purpose
    (`docs/onboarding.md` §2). → S02.5
-5. **Magic strings as contracts.** Turn statuses, omnigent label keys, control-message
+4. **Magic strings as contracts.** Turn statuses, omnigent label keys, control-message
    prefixes. → S02.1
-6. **Engine knows one case's scorecard.** `report/compare.py`'s `_METRICS` hardcodes
+5. **Engine knows one case's scorecard.** `report/compare.py`'s `_METRICS` hardcodes
    todo_app paths (`judge_low_confidence`, `superpowers_used`); swe_planning doesn't use
    `compare` at all. → S03.5
-7. **`Flow` diverged from reality.** The dataclass carries bundle fields only; the
+6. **`Flow` diverged from reality.** The dataclass carries bundle fields only; the
    downstream flows.yaml adds `model`, `reasoning_effort`, `prepend`, `append`,
    `turn_timeout_s` and is passed around as raw dicts. → S03.1
-8. **No `flowbench run`.** Each scenario has its own argparse `__main__`; the engine CLI
+7. **No `flowbench run`.** Each scenario has its own argparse `__main__`; the engine CLI
     only compares. → S03.3
-9. **Un-versioned metadata.** `run.json`/`scorecard.json` are convention, no
+8. **Un-versioned metadata.** `run.json`/`scorecard.json` are convention, no
     `schema_version`; readers guess. → S03.4
-10. **Naming/docstring drift.** "An flow" (`flow.py`), "{arm_name:" (`compare.py`,
+9. **Naming/docstring drift.** "An flow" (`flow.py`), "{arm_name:" (`compare.py`,
     retired vocabulary), `OMNIGENT_PROBE_MODEL` (pre-flowbench probe era). Typical
     weak-model session residue: the code moved on, the prose didn't. → S00.1
-11. **Broad exception swallowing.** `close()`, `_context_tokens()`,
+10. **Broad exception swallowing.** `close()`, `_context_tokens()`,
     `_injection_undelivered()`, `transcript.to_jsonable()` catch `Exception` silently. Correct for
     teardown, unjustified elsewhere. → S02.6
-12. **Terminal-scraping fragility (systemic).** Idle detection via tmux pane scraping,
+11. **Terminal-scraping fragility (systemic).** Idle detection via tmux pane scraping,
     settle loops, `min_wait=4.0`, poll intervals — all downstream of omnigent lacking
     delivery acks/turn events. Hardening has diminishing returns; the fix is upstream
     (wishlist in `target-architecture.md`). → S02.5 + upstream

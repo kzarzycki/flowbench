@@ -91,10 +91,7 @@ the synchronous `artifact_path()` (run via `asyncio.to_thread`) still in flight 
 is cancelled and the send reports `TIMEOUT` with empty text and `artifact_exists=False`
 ("not observed"). At the cap the status is `RUNNING` (or an undocumented server status,
 verbatim) if the soft loop got there first, `TIMEOUT` if the timer did — both mean the
-turn did not finish. Before S02.3 a send stacked a `turn_timeout_s` in `_wait_idle`, a
-second one as the settle window and a third in that window's last `_wait_idle`, times
-`1 + send_retry_attempts`: `(1 + 3) × 3 × turn_timeout_s + 3 × send_retry_wait_s`, 2 970 s
-at the driver defaults and 36 090 s on todo_app's 3 000 s turn cap inside a 3 600 s run.
+turn did not finish.
 
 ## loop.py — the mediated DONE-token loop
 

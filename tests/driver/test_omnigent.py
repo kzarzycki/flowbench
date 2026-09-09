@@ -384,8 +384,9 @@ async def test_non_failed_statuses_are_never_resent(tmp_path, monkeypatch, resul
     assert len(sent) == 1
 
 
-async def test_failed_with_new_text_is_a_flaked_idle(tmp_path, capsys):
+async def test_failed_with_new_text_is_a_flaked_idle(tmp_path, monkeypatch, capsys):
     # row 2: the server said failed AFTER the reply landed — trust the text, IDLE
+    _fake_clock(monkeypatch)
     chat = _FakeChat([TurnStatus.FAILED])
     injects = []
     base_send = chat.send
@@ -396,6 +397,10 @@ async def test_failed_with_new_text_is_a_flaked_idle(tmp_path, capsys):
 
     chat.send = counting_send
     d = _settle_driver(tmp_path, chat, [[], [_USER, _REPLY]])
+    # a retry-eligible budget: if the FAILED were not converted to a flaked idle,
+    # send_retry_wait_s (30) would leave more than enough of turn_timeout_s (1000)
+    # to attempt a re-send, so this budget actually exercises the "must not resend" claim
+    d.turn_timeout_s = 1000
 
     async def must_not_be_called():
         raise AssertionError("_resend_allowed must not be called for a flaked idle")
@@ -458,12 +463,16 @@ async def test_one_budget_per_send(tmp_path, monkeypatch):
         + [(TurnStatus.RUNNING, [])] * 10_000
     )
     chat = _FakeChat([TurnStatus.RUNNING])
-    chat.snapshot, _ = _seq_snapshot(seq)
+    chat.snapshot, polls = _seq_snapshot(seq)
     d = _settle_driver(tmp_path, chat, [[], [_USER]])  # no new text -> keeps settling
     d.turn_timeout_s = 100
     result = await d.send("build it")
     assert result.status == TurnStatus.RUNNING
     assert clock.t <= 100 + d.settle_poll_s + 1.5
+    # the trace's IDLE (at seq index 40) was actually consumed, not skipped over
+    assert polls["n"] > 41
+    # the budget was actually spent, not returned early on a first-poll RUNNING
+    assert clock.t >= d.turn_timeout_s
 
 
 async def test_no_inject_when_the_budget_is_gone_before_it(tmp_path, monkeypatch):
@@ -1467,6 +1476,47 @@ async def test_resend_allowed_is_false_when_the_read_fails(tmp_path):
     d._chat = _FakeChat([TurnStatus.FAILED])
     d._http = _LabelHttp(boom=True)
     assert await d._resend_allowed() is False
+
+
+class _FailingStatusHttp:
+    """A read that succeeds at the transport level but the response is an HTTP
+    error (401/404/500/503): a JSON body with no `labels`, caught only if
+    `raise_for_status()` is actually called."""
+
+    async def get(self, _url):
+        import httpx
+
+        request = httpx.Request("GET", "http://example/v1/sessions/1")
+        response = httpx.Response(503, request=request, json={})
+        return response
+
+
+async def test_resend_allowed_is_false_when_the_status_read_errors(tmp_path):
+    """An HTTP error response (503 etc.) is not "no label" — raise_for_status
+    must be called so this takes the except path, not the "no code" row-3 path."""
+    d = OmnigentDriver(run_dir=tmp_path, artifact_name="plan.md")
+    d._chat = _FakeChat([TurnStatus.FAILED])
+    d._http = _FailingStatusHttp()
+    assert await d._resend_allowed() is False
+
+
+async def test_failed_status_read_error_never_authorizes_a_resend(tmp_path, monkeypatch):
+    _fake_clock(monkeypatch)
+    chat = _FakeChat([TurnStatus.FAILED])
+    injects = []
+    base_send = chat.send
+
+    def counting_send(text):
+        injects.append(text)
+        return base_send(text)
+
+    chat.send = counting_send
+    d = _settle_driver(tmp_path, chat, [[]])
+    d.turn_timeout_s = 1000
+    d._http = _FailingStatusHttp()
+    result = await d.send("go on")
+    assert result.status == TurnStatus.FAILED
+    assert len(injects) == 1
 
 
 async def test_context_tokens_none_before_a_session_exists(tmp_path):

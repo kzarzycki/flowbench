@@ -253,6 +253,7 @@ class OmnigentDriver(AgentDriver):
         False when the label read itself fails (unknown is not "no label")."""
         try:
             resp = await self._http.get(f"/v1/sessions/{self._chat.session_id}")
+            resp.raise_for_status()
             labels = resp.json().get("labels") or {}
         except Exception:
             return False
