@@ -1,5 +1,6 @@
 import json
 
+from flowbench.types import TurnStatus
 from flowbench.watch import RunWatch
 
 
@@ -12,7 +13,7 @@ def test_run_watch_tick_events(tmp_path):
     w._run_sessions = lambda: [
         {
             "id": "conv_aaa",
-            "status": "running",
+            "status": TurnStatus.RUNNING,
             "title": "flow: plain",
             "labels": {"omni_project": "swe_planning/todo-x"},
         },
@@ -30,7 +31,7 @@ def test_run_watch_tick_events(tmp_path):
     w._run_sessions = lambda: [
         {
             "id": "conv_aaa",
-            "status": "failed",
+            "status": TurnStatus.FAILED,
             "title": "flow: plain",
             "labels": {"omni_project": "swe_planning/todo-x"},
         },
@@ -108,7 +109,7 @@ def test_run_watch_reports_server_errors_touching_run_sessions(tmp_path):
     log.write_text("")
     (tmp_path / "runs" / "r").mkdir(parents=True)
     w = RunWatch("r", runs_root=tmp_path / "runs", scenario="s", server_log=log)
-    w._run_sessions = lambda: [{"id": "conv_1", "status": "running", "title": "flow: x"}]
+    w._run_sessions = lambda: [{"id": "conv_1", "status": TurnStatus.RUNNING, "title": "flow: x"}]
     log.write_text("ERROR runner conv_1 exploded\nERROR unrelated conv_9\n")
     events = w.tick()
     assert len(events) == 1 and events[0].startswith("SERVER ERROR runner conv_1")
@@ -119,7 +120,7 @@ def test_run_watch_reports_stalls_once_per_transition(tmp_path, monkeypatch):
     w = RunWatch(
         "r", runs_root=tmp_path, scenario="s", server_log=tmp_path / "none.log", stall_s=300
     )
-    sess = {"id": "c1", "status": "running", "title": "flow: x", "updated_at": 900}
+    sess = {"id": "c1", "status": TurnStatus.RUNNING, "title": "flow: x", "updated_at": 900}
     w._run_sessions = lambda: [sess]
     assert w.tick() == []  # fresh heartbeat, no prompt
 
@@ -130,7 +131,7 @@ def test_run_watch_reports_stalls_once_per_transition(tmp_path, monkeypatch):
     sess["pending_elicitations_count"] = 0
     sess["updated_at"] = 600  # 400 s silent while running
     assert w.tick() == []  # still stalled, reason changed but no new transition
-    sess["status"] = "idle"
+    sess["status"] = TurnStatus.IDLE
     assert w.tick() == []  # recovered
-    sess["status"] = "running"
+    sess["status"] = TurnStatus.RUNNING
     assert w.tick() == ["STALLED (no progress 400s): flow: x (c1)"]

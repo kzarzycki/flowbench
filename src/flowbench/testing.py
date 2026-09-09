@@ -5,7 +5,8 @@ live omnigent server."""
 
 from __future__ import annotations
 
-from flowbench.runner.driver import AgentDriver, TurnResult
+from flowbench.runner.driver import AgentDriver
+from flowbench.types import TurnResult, TurnStatus
 
 
 class ScriptedDriver:
@@ -42,8 +43,8 @@ class FakeDriver(AgentDriver):
     async def send(self, text):
         self.sent.append(text)
         if self._questions:
-            return TurnResult("idle", self._questions.pop(0), False)
-        return TurnResult("idle", "The plan is complete and written to plan.md.", True)
+            return TurnResult(TurnStatus.IDLE, self._questions.pop(0), False)
+        return TurnResult(TurnStatus.IDLE, "The plan is complete and written to plan.md.", True)
 
     async def capture_session(self):
         items = [{"type": "message", "role": "user", "content": s} for s in self.sent]

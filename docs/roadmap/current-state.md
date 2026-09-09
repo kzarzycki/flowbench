@@ -8,7 +8,8 @@ What exists, what works, what is debt. Line counts are `wc -l` on that date.
 
 | Module | Lines | Role |
 | --- | --- | --- |
-| `runner/driver.py` | 538 | `AgentDriver` ABC, `OmnigentDriver` (session lifecycle, send/settle/retry, capture), bundle building, git-init — four concerns in one file (transcript helpers moved out in S01.1) |
+| `runner/driver.py` | 575 | `AgentDriver` ABC, `OmnigentDriver` (session lifecycle, send/settle/retry, capture), bundle building, git-init — four concerns in one file (transcript helpers moved out in S01.1; `TurnResult`/`TurnStatus` moved to `types.py` in S02.1, re-exported here) |
+| `types.py` | 57 | `TurnStatus` (`StrEnum`), `TurnResult`, `UserModel`/`Completion` protocols — the engine's turn-outcome vocabulary (S02.1) |
 | `run.py` | 311 | `run_case`/`run_case_n` orchestrator + omnigent factories (S01.1, lifted from swe_planning) |
 | `report/run_report.py` | 259 | run dir → report.html, single + aggregate (S01.1) |
 | `testing.py` | 112 | offline doubles: FakeDriver, StubSim, ScriptedDriver, n_run_factories (S01.1) |

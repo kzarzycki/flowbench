@@ -10,6 +10,7 @@ import time
 from typing import Any
 
 from flowbench.runner.driver import AgentDriver
+from flowbench.types import TurnStatus, UserModel
 
 
 def render_tail(convo: list[tuple[str, str]], *, n: int = 8) -> str:
@@ -45,7 +46,7 @@ def _is_done(reply: str, done_token: str) -> bool:
 
 async def run_agent_session(
     driver: AgentDriver,
-    user_model,
+    user_model: UserModel,
     *,
     first_prompt: str,
     simulator_system: str,
@@ -68,7 +69,7 @@ async def run_agent_session(
             # Only an `idle` turn is a clean boundary where the agent awaits the
             # user. `failed`/`timeout`/`running` (per-turn cap hit) -> stop and
             # score whatever was built, rather than inject into a non-ready agent.
-            if result.status != "idle":
+            if result.status != TurnStatus.IDLE:
                 break
             # Stateful simulator: prime once with persona+context, then relay
             # only the delta — a normal dialog, not a re-sent transcript. (The
@@ -101,7 +102,7 @@ async def run_agent_session(
         # captured session (live-001 shipped an unfinished plan silently).
         session["exit_status"] = result.status
         session["turns"] = turns
-        if result.status == "stalled":
+        if result.status == TurnStatus.STALLED:
             session["stall_reason"] = result.stall_reason
             session["pane_tail"] = result.pane_tail
         return session
