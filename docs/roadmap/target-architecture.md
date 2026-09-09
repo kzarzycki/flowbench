@@ -132,9 +132,10 @@ epic story to push the fix upstream rather than harden the workaround:
    lying-idle detection, and freshness sentinels all exist because "idle" can be observed
    mid-turn and an injection can silently not land. A server-confirmed "message delivered /
    turn complete" signal deletes most of `_send_once`'s heuristics.
-2. ~~**Prompt-scan window** (`_PROMPT_SCAN_TAIL_LINES`)~~ — **fixed upstream**: prompt-ready
-   detection and the permission-mode read anchor on the input box's rule, so a tall footer
-   cannot push the glyph out of a fixed window. Our monkey-patch is deleted.
+2. ~~**Prompt-scan window** (`_PROMPT_SCAN_TAIL_LINES`)~~ — **fixed upstream as of the
+   published 0.12.0**: prompt-ready detection and the permission-mode read anchor on the input
+   box's rule (`_is_box_rule`), so a tall footer cannot push the glyph out of a fixed window.
+   Our monkey-patch is deleted.
 3. **Public client API for what we reach into**: `sessions._http`, `sessions._base`, and
    constructing `SessionsChat` by hand are private-API reach-ins that break on any
    omnigent-client bump (it is pinned 0.1.1 for exactly this reason).

@@ -6,7 +6,7 @@
 
 A benchmark that compares agentic **flows** — different ways of driving a coding agent at a goal
 (vanilla, superpowers, or any bundle of skills/MCPs) — on a fixed **case**, all driven through
-[omnigent](https://github.com/) as the meta-harness. Flows differ only by their bundle, so a
+[omnigent](https://github.com/omnigent-ai/omnigent) as the meta-harness. Flows differ only by their bundle, so a
 comparison is apples-to-apples: same task, same harness, only the workflow changes.
 
 Vocabulary in [`docs/GLOSSARY.md`](docs/GLOSSARY.md):
@@ -28,7 +28,7 @@ uv run pytest -q                       # offline suite
 uv run flowbench compare --run-base $RUNS/coding_workflow --run-id <run_id>
 ```
 
-Driving a case live needs a running [omnigent](https://github.com/) server and
+Driving a case live needs a running [omnigent](https://github.com/omnigent-ai/omnigent) server and
 `ANTHROPIC_API_KEY` unset (the runner bills against a Claude subscription, not the API):
 **[`docs/onboarding.md`](docs/onboarding.md)** walks the install, the readiness check and that
 rule. Why omnigent and not herdr or a CLI of our own:

@@ -15,7 +15,7 @@ with it.
 | Python 3.12+, [`uv`](https://docs.astral.sh/uv/) | the engine |
 | Node ≥ 22, `tmux` | omnigent's harness runners drive real CLIs inside tmux panes |
 | A Claude Code install and a **Claude subscription** | the system under test is vanilla Claude Code, billed to the subscription |
-| An omnigent checkout | omnigent is not published in the version we drive — see below |
+| An omnigent install that runs a server | see the next paragraph — this is the part that has no default |
 
 Offline first, before any of the above:
 
@@ -24,7 +24,33 @@ uv sync --extra dev --extra live   # live = the omnigent client the driver impor
 uv run pytest -q                   # live-agent tests skip themselves without RUN_LIVE_AGENT=1
 ```
 
-## 2. The topology (three copies of "omnigent", two of which are not the one you think)
+### Installing omnigent
+
+omnigent lives at [omnigent-ai/omnigent](https://github.com/omnigent-ai/omnigent) and publishes
+to PyPI. Two ways in, and the choice matters later (§2, §5):
+
+```bash
+# a) the published release — enough to run the benchmark
+uv tool install 'omnigent==0.12.0'
+
+# b) a source checkout — what you want if you also work on omnigent itself
+uv tool install --editable <path-to-your-omnigent-checkout>
+```
+
+Then, once:
+
+```bash
+omnigent setup            # first-time flow: harness extras, credentials
+omnigent start            # server + this machine's host, in the background
+omnigent --version        # what you actually installed
+omnigent diagnose         # read-only environment snapshot, good for bug reports
+```
+
+`omnigent stop` tears it down again. Pin whatever version you install: this repo drives
+omnigent through private-API reach-ins (`roadmap/current-state.md` #5), so a surprise upgrade
+is a real risk, not a theoretical one.
+
+## 2. The topology (two omnigents, and only one of them drives the agent)
 
 ```
 your shell ─ uv run python -m scenarios.<scenario>.run
@@ -37,14 +63,18 @@ your shell ─ uv run python -m scenarios.<scenario>.run
 ```
 
 - **(a) the venv copy** comes from this repo's `live` extra (`omnigent`, `omnigent-client`,
-  pinned in `pyproject.toml`). It is **client side only**: `OmnigentDriver` uses it to POST a
-  session, ask the host daemon to launch a runner, and poll. Nothing in it scans a pane.
-- **(b) the server's own install** is what actually spawns runners and drives the CLI. It is
-  normally an editable install of an omnigent source checkout
-  (`uv tool install --editable <checkout>` → check `~/.local/share/uv/tools/omnigent/uv-receipt.toml`),
-  kept far ahead of anything on PyPI. **The two versions differ, on purpose.** When you debug
-  harness behaviour — prompt detection, permission mode, injection — read the server's source,
-  not the venv's.
+  pinned in `pyproject.toml`). The distribution is complete — it contains the harness bridge
+  module too — but **flowbench only ever imports the client side of it**: `omnigent_client` to
+  POST a session and poll, and `omnigent.host.daemon_launch` to ask the host daemon for a
+  runner. No code path in a flowbench process scans a tmux pane.
+- **(b) the install the server runs from** is what spawns runners and drives the CLI: every
+  runner and bridge process is `~/.local/share/uv/tools/omnigent/bin/python3 -m omnigent.runner._entry`
+  / `-m omnigent.claude_native_bridge` (see for yourself: `ps ax | grep omnigent`). Check which
+  install that is with `cat ~/.local/share/uv/tools/omnigent/uv-receipt.toml` — an `editable =
+  <path>` line means it tracks a source checkout and can be far ahead of the pinned client.
+  **The two versions differ, and the pin does not constrain the server.** When you debug harness
+  behaviour — prompt detection, permission mode, injection — read the server's install, not the
+  venv's.
 - The server usually runs as a background service (`launchctl list | grep omni` on macOS);
   its logs are `~/.omnigent/logs/launchd-omnigent.out.log` (server) and
   `~/.omnigent/logs/host-runner/runner-*.log` (runners).
@@ -88,19 +118,33 @@ subscription quota.** When the quota runs out, agents do not error — they stal
 hang until the websocket ping timeout (~20 min), and no artifact lands. Everything stalling at
 once is a quota symptom, not a code bug. Check your quota before a multi-hour run.
 
-## 5. Do I need to patch omnigent? No (not any more)
+## 5. Do I need to patch omnigent? No
 
-Older notes in this repo said "needs omnigent patched". History: omnigent's claude-native
-prompt-ready detector scanned only the last 5 non-empty tmux lines for the `❯` input glyph, and
-a tall Claude Code status footer pushed the glyph out of that window — every turn after the
-first failed with "terminal did not become ready". `scripts/patch_omnigent.py` bumped the
-window to 12 (the script is deleted; `git log -- scripts/patch_omnigent.py` has it).
+Older notes in this repo said "needs omnigent patched", and there was a `scripts/patch_omnigent.py`
+to do it (deleted; `git log -- scripts/patch_omnigent.py` has it). History, because the failure
+mode is worth recognising: omnigent's claude-native prompt-ready detector scanned only the last 5
+non-empty tmux lines for the `❯` input glyph, and a tall Claude Code status footer pushed the glyph
+out of that window — every turn after the first failed with "terminal did not become ready". The
+script bumped the window to 12.
 
-Upstream fixed it structurally: prompt detection and the permission-mode read now anchor on the
-input box's own rule, so the footer's height cannot matter, and the tail window survives only as
-a boot-time fallback. Nothing to patch. If a 2nd+-turn injection ever fails this way again, look
-in the server's install at `omnigent/harnesses/claude_native/bridge.py` for `_is_box_rule` /
-`_PROMPT_SCAN_TAIL_LINES` before assuming it is the same bug.
+Upstream fixed it structurally, in the published releases as well as on `main`: prompt-ready
+detection and the permission-mode read anchor on the input box's own rule (`_is_box_rule`), so the
+footer's height cannot matter, and the 5-line tail survives only as a fallback for a box that has
+not mounted yet. Nothing to patch — and the script was aiming at the wrong file anyway: it globbed
+a non-editable uv-tool `site-packages` (an editable install has no such tree) and otherwise fell
+back to whichever `omnigent` was importable, which in this repo is the venv client copy — a module
+that never scans a pane (§2).
+
+If a 2nd+-turn injection ever fails this way again, read the bridge in **the server's** install.
+The module moved between versions, so check both paths:
+
+| Version | Bridge module |
+| --- | --- |
+| ≤ 0.12.0 (published) | `omnigent/claude_native_bridge.py` |
+| 0.13.0.dev0 and later (source) | `omnigent/harnesses/claude_native/bridge.py` |
+
+Look for `_is_box_rule` (present = you have the structural fix) before suspecting
+`_PROMPT_SCAN_TAIL_LINES`.
 
 ## 6. Where runs land
 
