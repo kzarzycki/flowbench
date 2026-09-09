@@ -42,8 +42,8 @@ superpowers flow's "use the brainstorming skill first". The base prompt comes fr
 subprompts are the flow's addition.
 
 **Harness** — The coding-agent runtime a flow drives: `claude-native`, `codex`. **omnigent** is the
-meta-harness that runs every flow uniformly, so flows differ only by their bundle, never by how
-they are launched.
+meta-harness that runs every flow uniformly, so flows differ only by their declared fields, never
+by how they are launched.
 
 **Run** — One Flow executed on one Case (one variant) → a workspace of artifacts + one Scorecard.
 

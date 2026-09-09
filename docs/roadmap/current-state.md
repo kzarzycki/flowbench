@@ -58,50 +58,42 @@ orchestration on top of the engine — see "Downstream duplication".
 
 ## Structural debt (each has a home in the roadmap)
 
-1. ~~Two execution models coexist.~~ **Resolved (S01.3, S01.4):** todo_app now runs
-   through `run_case`/`run_case_n` (`done_token` + an optional per-flow `score_flow`
-   hook, comparative judge conditional on `judge.md`), the same orchestrator swe_planning
-   uses; `subscription_model.py` and the `inspect_ai` entry point are gone, and the
-   omnigent install extra is renamed to `live`. → E01
-2. **The generic runtime lives downstream.** `run_case`/`run_case_n`, the session-backed
+1. **The generic runtime lives downstream.** `run_case`/`run_case_n`, the session-backed
    `.generate()` model, judge prompt/verdict/scores parsing, transcript rendering, trial
    rotation, aggregation, report rendering, and the run watcher are all in
    flowbench-scenarios' swe_planning dir. The recorded extraction trigger ("a second
    scenario forces extraction") fires with the todo_app port. → E01
-3. **Split retry policy.** `OmnigentDriver.send` retries label-confirmed undelivered
+2. **Split retry policy.** `OmnigentDriver.send` retries label-confirmed undelivered
    injections; downstream `SessionModel.generate` separately retries failed-with-stale-
    text turns (issue #39) because sim/judge sessions don't reliably set delivery labels.
    Two policies, two repos, same underlying problem. → S02.3
-4. **Driver god-module + abstraction leaks.** Bundle building, transcript utilities, and
+3. **Driver god-module + abstraction leaks.** Bundle building, transcript utilities, and
    artifact probing (`artifact_name="__none__"` for sessions with no artifact) don't
    belong in the session driver. → S02.2, S02.4
-5. **Private-API reach-ins.** `sessions._http`, `sessions._base`, hand-built
+4. **Private-API reach-ins.** `sessions._http`, `sessions._base`, hand-built
    `SessionsChat`, `omnigent.host.daemon_launch` internals. The 0.1.1 pins exist because of
    this — and the driven server runs from a far newer source checkout, so the pinned client
    and the live server are different versions on purpose
    (`docs/onboarding.md` §2). → S02.5
-6. **Magic strings as contracts.** Turn statuses, omnigent label keys, control-message
+5. **Magic strings as contracts.** Turn statuses, omnigent label keys, control-message
    prefixes. → S02.1
-7. **Engine knows one case's scorecard.** `report/compare.py`'s `_METRICS` hardcodes
+6. **Engine knows one case's scorecard.** `report/compare.py`'s `_METRICS` hardcodes
    todo_app paths (`judge_low_confidence`, `superpowers_used`); swe_planning doesn't use
    `compare` at all. → S03.5
-8. **`Flow` diverged from reality.** The dataclass carries bundle fields only; the
+7. **`Flow` diverged from reality.** The dataclass carries bundle fields only; the
    downstream flows.yaml adds `model`, `reasoning_effort`, `prepend`, `append`,
    `turn_timeout_s` and is passed around as raw dicts. → S03.1
-9. ~~**Packaging.**~~ **Resolved (S01.4):** the wheel ships `src/flowbench` only (no
-   top-level `scenarios` package in site-packages); the omnigent extra is renamed
-   `live`; `inspect-ai` is gone. → E01
-10. **No `flowbench run`.** Each scenario has its own argparse `__main__`; the engine CLI
+8. **No `flowbench run`.** Each scenario has its own argparse `__main__`; the engine CLI
     only compares. → S03.3
-11. **Un-versioned metadata.** `run.json`/`scorecard.json` are convention, no
+9. **Un-versioned metadata.** `run.json`/`scorecard.json` are convention, no
     `schema_version`; readers guess. → S03.4
-12. **Naming/docstring drift.** "An flow" (`flow.py`), "{arm_name:" (`compare.py`,
+10. **Naming/docstring drift.** "An flow" (`flow.py`), "{arm_name:" (`compare.py`,
     retired vocabulary), `OMNIGENT_PROBE_MODEL` (pre-flowbench probe era). Typical
     weak-model session residue: the code moved on, the prose didn't. → S00.1
-13. **Broad exception swallowing.** `close()`, `_context_tokens()`,
+11. **Broad exception swallowing.** `close()`, `_context_tokens()`,
     `_injection_undelivered()`, `_to_jsonable()` catch `Exception` silently. Correct for
     teardown, unjustified elsewhere. → S02.6
-14. **Terminal-scraping fragility (systemic).** Idle detection via tmux pane scraping,
+12. **Terminal-scraping fragility (systemic).** Idle detection via tmux pane scraping,
     settle loops, `min_wait=4.0`, poll intervals — all downstream of omnigent lacking
     delivery acks/turn events. Hardening has diminishing returns; the fix is upstream
     (wishlist in `target-architecture.md`). → S02.5 + upstream
@@ -154,19 +146,6 @@ list above:
   when porting (S01.3) — but reviewers of results should know today's numbers lean on
   keyword heuristics; the objective anchors are `acceptance` and `skills_invoked` (real
   tool calls), which are sound.
-
-**Non-findings** (plausible claims that do not hold — recorded so they aren't
-re-reported or "fixed" into regressions)
-
-- "Just use `omnigent_client`'s public `sessions.create()` instead of the private
-  `_http` POST" — refuted: the public `create()` cannot express `terminal_launch_args`
-  (the flags that prevent the AskUserQuestion tmux deadlock) and there is no
-  post-creation setter. The reach-in is *forced* by a public-API gap; the fix is an
-  upstream omnigent-client addition, then migration (S02.5).
-- "Shipping `scenarios` in the wheel / keeping inspect-ai are defects" — both were
-  *decided-and-scheduled* removals (E01), resolved in S01.4.
-- "`run_case`/watcher belong in the engine" — true, and already the plan (E01); the
-  original placement downstream was a deliberate wait-for-second-consumer decision.
 
 ## Capability gaps against the long-term goal
 

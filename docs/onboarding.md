@@ -47,7 +47,7 @@ omnigent diagnose         # read-only environment snapshot, good for bug reports
 ```
 
 `omnigent stop` tears it down again. Pin whatever version you install: this repo drives
-omnigent through private-API reach-ins (`roadmap/current-state.md` #5), so a surprise upgrade
+omnigent through private-API reach-ins (`roadmap/current-state.md` #4), so a surprise upgrade
 is a real risk, not a theoretical one.
 
 ## 2. The topology (two omnigents, and only one of them drives the agent)
