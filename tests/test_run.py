@@ -81,7 +81,8 @@ def test_run_case_offline(tmp_path):
     assert meta["winner"] == "a"
     assert meta["winner_flow"] == "superpowers"
     assert meta["reasoning_effort"] == {"superpowers": "xhigh", "plain": "xhigh"}
-    assert meta["plans_missing"] == []
+    assert meta["artifact_missing"] == []
+    assert "plans_missing" not in meta and "plan_lines" not in json.dumps(meta)
     # every simulator was closed even though run_agent_session closes only drivers
     assert sims and all(s.closed for s in sims)
 
@@ -119,7 +120,7 @@ def test_run_case_flags_missing_plan(tmp_path):
     assert (root / "plain" / "plan.md").read_text() == ""
 
     meta = json.loads((root / "run.json").read_text())
-    assert meta["plans_missing"] == ["plain"]
+    assert meta["artifact_missing"] == ["plain"]
 
 
 def test_run_case_rejects_flow_count(tmp_path):
@@ -387,7 +388,7 @@ def test_run_case_writes_report_html_and_flow_stats(tmp_path):
     meta = json.loads((root / "run.json").read_text())
     assert meta["winner_flow"] == "superpowers"
     stats = meta["flow_stats"]["superpowers"]
-    assert stats["plan_lines"] == 2  # the fake's two-line plan
+    assert stats["artifact_lines"] == 2  # the fake's two-line plan
     assert "context_tokens" in stats and "exit_status" in stats
 
 
@@ -891,3 +892,145 @@ def test_omni_factories_artifact_name_and_git_init(tmp_path):
     d2 = mk_flow_default({"name": "plain"}, tmp_path)
     assert d2.artifact_name == "plan.md"
     assert d2.git_init is False
+
+    mk_flow_none, _, _ = run_mod.omni_factories("x", artifact_name=None)
+    d3 = mk_flow_none({"name": "plain"}, tmp_path)
+    assert d3.artifact_name == "__none__"
+
+
+def test_run_case_artifact_none_omits_artifact_keys(tmp_path):
+    case = _unjudged_case(tmp_path)
+    mfd, ms, _ = n_run_factories([])
+
+    async def score_flow(flow, flow_dir, session):
+        return {"flow": flow["name"]}
+
+    result = asyncio.run(
+        run_case(
+            case,
+            run_id="no-artifact-run",
+            make_flow_driver=mfd,
+            make_simulator=ms,
+            run_judge=None,
+            runs_root=tmp_path,
+            scenario="coding_workflow",
+            score_flow=score_flow,
+            artifact_name=None,
+        )
+    )
+    root = Path(result["run_root"])
+    run_json_text = (root / "run.json").read_text()
+    for key in ("artifact_missing", "artifact_lines", "plans_missing", "plan_lines"):
+        assert key not in run_json_text
+    for name in ("superpowers", "plain"):
+        assert not (root / name / "plan.md").exists()
+        assert (root / name / "session.json").is_file()
+        assert (root / name / "transcript.md").is_file()
+        card = json.loads((root / name / "scorecard.json").read_text())
+        assert card == {"flow": name}
+
+
+def test_run_case_artifact_none_forwards_zero_grace(tmp_path, monkeypatch):
+    case = _unjudged_case(tmp_path)
+    calls = []
+
+    async def rec(*args, **kwargs):
+        calls.append(kwargs)
+        return {"items": [], "events": [], "artifact_text": None}
+
+    monkeypatch.setattr(run_mod, "run_agent_session", rec)
+
+    def make_flow_driver(flow, flow_dir):
+        return FakeDriver("# p", [])
+
+    def make_simulator(flow, sim_dir):
+        return StubSim(["<<DONE>>"])
+
+    asyncio.run(
+        run_case(
+            case,
+            run_id="t-none",
+            make_flow_driver=make_flow_driver,
+            make_simulator=make_simulator,
+            run_judge=None,
+            runs_root=tmp_path,
+            scenario="coding_workflow",
+            done_token="<<DONE>>",
+            artifact_grace_s=30.0,
+            artifact_name=None,
+        )
+    )
+    assert calls
+    assert all(kwargs["artifact_grace_s"] == 0.0 for kwargs in calls)
+
+    calls.clear()
+    asyncio.run(
+        run_case(
+            case,
+            run_id="t-default",
+            make_flow_driver=make_flow_driver,
+            make_simulator=make_simulator,
+            run_judge=None,
+            runs_root=tmp_path,
+            scenario="coding_workflow",
+            done_token="<<DONE>>",
+            artifact_grace_s=30.0,
+        )
+    )
+    assert calls
+    assert all(kwargs["artifact_grace_s"] == 30.0 for kwargs in calls)
+
+
+def test_run_case_n_forwards_artifact_name(tmp_path, monkeypatch):
+    calls = []
+
+    async def rec(case_dir, *, run_id, **kwargs):
+        calls.append(kwargs)
+        run_root = tmp_path / run_id
+        run_root.mkdir(parents=True, exist_ok=True)
+        return {
+            "run_root": str(run_root),
+            "meta": {"winner_flow": None, "labels": {}, "scores": {}},
+        }
+
+    monkeypatch.setattr(run_mod, "run_case", rec)
+
+    for n in (1, 2):
+        calls.clear()
+        asyncio.run(
+            run_case_n(
+                CASE_DIR,
+                run_id=f"n{n}",
+                n=n,
+                make_flow_driver=None,
+                make_simulator=None,
+                run_judge=None,
+                runs_root=tmp_path,
+                scenario="coding_workflow",
+                artifact_name=None,
+            )
+        )
+        assert calls
+        assert all(kwargs["artifact_name"] is None for kwargs in calls)
+
+
+def test_run_case_artifact_none_with_judge_rejected(tmp_path):
+    case = CASE_DIR
+
+    def fail_factory(*args, **kwargs):
+        pytest.fail("factory should not be called when artifact_name/judge.md conflict")
+
+    with pytest.raises(ValueError):
+        asyncio.run(
+            run_case(
+                case,
+                run_id="rejected-run",
+                make_flow_driver=fail_factory,
+                make_simulator=fail_factory,
+                run_judge=fail_factory,
+                runs_root=tmp_path / "runs",
+                scenario="swe_planning",
+                artifact_name=None,
+            )
+        )
+    assert not (tmp_path / "runs" / "rejected-run").exists()

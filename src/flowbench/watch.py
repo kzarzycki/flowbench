@@ -108,10 +108,10 @@ class RunWatch:
             if trial not in self._trials_done:
                 self._trials_done.add(trial)
                 meta = json.loads(trial_json.read_text())
-                events.append(
-                    f"TRIAL DONE: {trial} winner={meta.get('winner_flow')}"
-                    f" missing={meta.get('plans_missing')}"
-                )
+                line = f"TRIAL DONE: {trial} winner={meta.get('winner_flow')}"
+                if "artifact_missing" in meta:
+                    line += f" missing={meta['artifact_missing']}"
+                events.append(line)
         return events
 
     def run_complete(self) -> Path | None:

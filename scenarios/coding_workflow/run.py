@@ -7,10 +7,14 @@ Usage (from the repo root; needs a live omnigent server):
 
     uv run python -m scenarios.coding_workflow.run --case todo_app
 
+    # re-score an existing run's flows (a dead grader session, a scorer fix)
+    # without re-driving anything — no new session, session.json untouched:
+    uv run python -m scenarios.coding_workflow.run --rescore <run-id>
+
 Outputs land in ../flowbench-runs/coding_workflow/<run-id>/ (per-flow
 subfolders), never inside the repo. The runtime (run_case/run_case_n,
-SessionModel, the omnigent factories) lives in the engine: `flowbench.run`.
-This module is the CLI."""
+SessionModel, the omnigent factories, rescore_run) lives in the engine:
+`flowbench.run`. This module is the CLI."""
 
 from __future__ import annotations
 
@@ -21,11 +25,14 @@ import json
 from datetime import datetime
 from pathlib import Path
 
-from flowbench.run import omni_factories, run_case_n
+from flowbench.run import omni_factories, rescore_run, run_case_n
 from scenarios.coding_workflow.cases.todo_app.scoring import make_grader_omni, score_todo_app
 
 SCENARIO = "coding_workflow"
 DONE_TOKEN = "<<DONE>>"
+# todo_app's deliverable is the running app, judged black-box by acceptance.py
+# — no file artifact (tasks.json is the app's runtime state, not a deliverable).
+ARTIFACT_NAME = None
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -61,6 +68,12 @@ def _parse_args(argv=None) -> argparse.Namespace:
         default=3600.0,
         help="per-flow session budget in seconds (default 3600)",
     )
+    ap.add_argument(
+        "--rescore",
+        default=None,
+        metavar="RUN_ID",
+        help="re-score an existing run's flows in place (no new session); ignores --run-id",
+    )
     return ap.parse_args(argv)
 
 
@@ -68,8 +81,23 @@ def main() -> None:
     from scenarios.coding_workflow import scenario
 
     args = _parse_args()
+    runs_root = Path(args.runs_root) if args.runs_root else default_runs_root()
+    score_flow = functools.partial(
+        score_todo_app, make_grader=functools.partial(make_grader_omni, scenario=SCENARIO)
+    )
+
+    if args.rescore is not None:
+        run_root = runs_root / args.rescore
+        if not run_root.is_dir():
+            raise SystemExit(f"--rescore: no run dir at {run_root}")
+        result = asyncio.run(
+            rescore_run(scenario.CASE_DIR(args.case), run_root, score_flow=score_flow)
+        )
+        print(json.dumps(result, indent=2))
+        return
+
     make_flow_driver, make_simulator, run_judge = omni_factories(
-        SCENARIO, artifact_name="tasks.json", git_init=True
+        SCENARIO, artifact_name=ARTIFACT_NAME, git_init=True
     )
     result = asyncio.run(
         run_case_n(
@@ -79,13 +107,12 @@ def main() -> None:
             make_flow_driver=make_flow_driver,
             make_simulator=make_simulator,
             run_judge=run_judge,
-            runs_root=Path(args.runs_root) if args.runs_root else default_runs_root(),
+            runs_root=runs_root,
             scenario=SCENARIO,
             deadline_s=args.deadline_s,
             done_token=DONE_TOKEN,
-            score_flow=functools.partial(
-                score_todo_app, make_grader=functools.partial(make_grader_omni, scenario=SCENARIO)
-            ),
+            score_flow=score_flow,
+            artifact_name=ARTIFACT_NAME,
         )
     )
     # n=1: trials[0] is run_case's meta (the old single-run print, plus the

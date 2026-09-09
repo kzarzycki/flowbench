@@ -45,11 +45,17 @@ async def run_case(
     rotation: int = 0,
     done_token: str = DONE_TOKEN,
     score_flow=None,
+    artifact_name: str | None = "plan.md",
 ) -> dict:
     """Spawn simulator + each flow, run the mediated loop, collect artifacts,
     then judge. Omnigent-specific spawning is injected via the three factories
     so the whole pipeline runs offline with fakes. `rotation` rotates the flow
     list left by rotation % N so multi-trial runs cancel judge position bias.
+
+    `artifact_name=None` means the case declares no artifact (a build-shaped
+    case like todo_app, judged black-box): no `<flow>/plan.md` is written, no
+    `artifact_missing`/`artifact_lines` keys appear in `run.json`, and the
+    artifact grace-poll is skipped.
 
     `score_flow(flow, flow_dir, session) -> dict`, when given, is called after
     each flow's session and its result written to `<flow_dir>/scorecard.json`;
@@ -67,6 +73,12 @@ async def run_case(
     judge_path = case_dir / "judge.md"
     has_judge = judge_path.exists()
     judge_md = judge_path.read_text() if has_judge else None
+    has_artifact = artifact_name is not None
+    if artifact_name is None and has_judge:
+        raise ValueError(
+            f"{case_dir}: artifact_name=None is incompatible with judge.md "
+            "— the HTML report needs <flow>/plan.md"
+        )
     flows = load_flows(case_dir / "flows.yaml")
     if len(flows) < 2:
         raise ValueError(f"run_case judges 2+ flows, got {len(flows)}")
@@ -98,7 +110,7 @@ async def run_case(
                 done_token=done_token,
                 max_turns=max_turns,
                 deadline_s=deadline_s,
-                artifact_grace_s=artifact_grace_s,
+                artifact_grace_s=(artifact_grace_s if has_artifact else 0.0),
             )
         finally:
             close = getattr(simulator, "close", None)
@@ -107,7 +119,8 @@ async def run_case(
 
         plan_text = session.get("artifact_text")
         transcript_text = render_transcript(session.get("items") or [])
-        (flow_dir / "plan.md").write_text(plan_text or "")
+        if has_artifact:
+            (flow_dir / "plan.md").write_text(plan_text or "")
         (flow_dir / "transcript.md").write_text(transcript_text)
         (flow_dir / "session.json").write_text(json.dumps(session, indent=2, default=str))
         plans[name] = plan_text
@@ -116,7 +129,7 @@ async def run_case(
             "exit_status": session.get("exit_status"),
             "turns": session.get("turns"),
             "duration_s": session.get("duration_s"),
-            "plan_lines": len((plan_text or "").splitlines()),
+            **({"artifact_lines": len((plan_text or "").splitlines())} if has_artifact else {}),
             "context_tokens": session.get("context_tokens"),
         }
         if score_flow is not None:
@@ -157,7 +170,7 @@ async def run_case(
         "winner": verdict["winner"],  # judge letter, or tie/unknown
         "winner_flow": winner_flow,  # flow NAME (order-independent), or tie/unknown
         "scores": verdict.get("scores"),
-        "plans_missing": [n for n, p in plans.items() if not p],
+        **({"artifact_missing": [n for n, p in plans.items() if not p]} if has_artifact else {}),
         "flow_stats": flow_stats,
         "models": {f["name"]: f.get("model") for f in flows},
         "reasoning_effort": {f["name"]: f.get("reasoning_effort") for f in flows},
@@ -182,6 +195,7 @@ async def run_case_n(
     deadline_s: float = 1800.0,
     done_token: str = DONE_TOKEN,
     score_flow=None,
+    artifact_name: str | None = "plan.md",
 ) -> dict:
     """Run run_case n times (sequentially; a failing trial propagates) and
     aggregate the categorical verdicts. Uniform return shape for every n:
@@ -201,6 +215,7 @@ async def run_case_n(
         "deadline_s": deadline_s,
         "done_token": done_token,
         "score_flow": score_flow,
+        "artifact_name": artifact_name,
     }
 
     names = [f["name"] for f in load_flows(Path(case_dir) / "flows.yaml")]
@@ -265,6 +280,65 @@ async def run_case_n(
         "trials": trials,
         "aggregate": {"n": n, "counts": counts, "winner": winner},
     }
+
+
+async def rescore_run(case_dir, run_root, *, score_flow) -> dict[str, str]:
+    """Re-run `score_flow` over an existing run dir, without starting a
+    session: rewrites `<flow>/scorecard.json` and `flow_stats[flow].score_error`
+    from what is already on disk (`<flow>/session.json` + the case's current
+    flows.yaml). Never touches transcripts or session.json.
+
+    Covers both layouts: the flat `n=1` run dir itself, and each `trial-XX/`
+    of an `n>1` run (its own aggregate `run.json` has no `flow_stats` and is
+    left untouched). A flow with no `session.json` (never ran, or was never
+    part of this run) is skipped — recorded neither in the return map nor
+    touched on disk. A flow named in `run.json` but absent from the case's
+    current flows.yaml (edited since the run) is deliberately NOT special-
+    cased: the lookup sits inside the same try/except as the scorer call, so
+    it is recorded as a `KeyError` like any other scorer failure — rescoring
+    against a config that no longer matches the run would be worse than a
+    recorded error."""
+    run_root = Path(run_root)
+    flows_by_name = {f["name"]: f for f in load_flows(Path(case_dir) / "flows.yaml")}
+
+    results: dict[str, str] = {}
+    targets = [run_root, *sorted(run_root.glob("trial-*"))]
+    for target in targets:
+        run_json_path = target / "run.json"
+        if not run_json_path.is_file():
+            continue
+        meta = json.loads(run_json_path.read_text())
+        if not isinstance(meta, dict) or "flow_stats" not in meta:
+            continue
+
+        is_trial = target != run_root
+        changed = False
+        for name in meta.get("flows", []):
+            flow_dir = target / name
+            session_path = flow_dir / "session.json"
+            if not session_path.is_file():
+                continue
+            session = json.loads(session_path.read_text())
+            key = f"{target.name}/{name}" if is_trial else name
+            stats = meta["flow_stats"].setdefault(name, {})
+            try:
+                flow = flows_by_name[name]
+                card = await score_flow(flow, flow_dir, session)
+            except Exception as e:  # noqa: BLE001 - isolate one flow's scorer, never abort the rescore
+                error = f"{type(e).__name__}: {e}"
+                card = {"error": error}
+                stats["score_error"] = error
+                results[key] = error
+            else:
+                stats.pop("score_error", None)
+                results[key] = "ok"
+            (flow_dir / "scorecard.json").write_text(json.dumps(card, indent=2, default=str))
+            changed = True
+
+        if changed:
+            run_json_path.write_text(json.dumps(meta, indent=2, default=str))
+
+    return results
 
 
 # --- the real omnigent factories -------------------------------------------
@@ -354,16 +428,20 @@ async def run_judge_omni(
         await model.close()
 
 
-def omni_factories(scenario: str, *, artifact_name: str = "plan.md", git_init: bool = False):
+def omni_factories(scenario: str, *, artifact_name: str | None = "plan.md", git_init: bool = False):
     """The three real omnigent factories, bound to `scenario`, matching the
     2-arg `(flow, dir)` / 3-arg `(judge_md, entries, judge_dir)` contract
     run_case/run_case_n call. `artifact_name`/`git_init` are case properties
-    (todo_app writes `tasks.json` into a git-initialized flow_dir); defaults
-    keep swe_planning byte-identical."""
+    (todo_app writes into a git-initialized flow_dir); defaults keep
+    swe_planning byte-identical. `artifact_name=None` means the case declares
+    no artifact — mapped to the driver's `"__none__"` sentinel."""
 
     return (
         functools.partial(
-            make_flow_driver_omni, scenario=scenario, artifact_name=artifact_name, git_init=git_init
+            make_flow_driver_omni,
+            scenario=scenario,
+            artifact_name=artifact_name or "__none__",
+            git_init=git_init,
         ),
         functools.partial(make_simulator_omni, scenario=scenario),
         functools.partial(run_judge_omni, scenario=scenario),

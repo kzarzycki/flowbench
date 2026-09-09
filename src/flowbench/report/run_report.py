@@ -76,10 +76,11 @@ def flow_card(name: str, run_root: Path, is_winner: bool, meta: dict) -> dict:
             "exit_status": s.get("exit_status"),
             "turns": s.get("turns"),
             "duration_s": s.get("duration_s"),
-            "plan_lines": None,
+            "artifact_lines": None,
             "context_tokens": s.get("context_tokens"),
         }
-    plan = (run_root / name / "plan.md").read_text()
+    p = run_root / name / "plan.md"
+    plan = p.read_text() if p.exists() else ""
     transcript = (run_root / name / "transcript.md").read_text()
     tokens = stats.get("context_tokens")
     return {
@@ -91,7 +92,7 @@ def flow_card(name: str, run_root: Path, is_winner: bool, meta: dict) -> dict:
         "turns": stats.get("turns"),
         "duration": f"{round(stats.get('duration_s') or 0)}s",
         "tokens": f"{tokens:,}" if tokens else "–",
-        "plan_lines": stats.get("plan_lines") or len(plan.splitlines()),
+        "plan_lines": stats.get("artifact_lines") or len(plan.splitlines()),
         "plan_html": md_to_html(plan),
         "transcript_html": transcript_html(transcript),
     }
