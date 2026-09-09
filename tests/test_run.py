@@ -663,7 +663,9 @@ def test_make_simulator_omni_is_bare_claude_on_a_session_model(tmp_path):
     d = sim._driver
     assert d.skills == "none" and d.model == run_mod.SIM_MODEL
     assert d.artifact_name == "__none__"
+    # web-UI grouping: the sim shares its run's folder, like the flow and judge
     assert d.session_title == "sim: plain"
+    assert d.project == f"swe_planning/{tmp_path.name}"
 
 
 def test_run_judge_omni_generates_once_and_closes(tmp_path, monkeypatch):
