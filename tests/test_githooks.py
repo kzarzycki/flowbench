@@ -142,6 +142,7 @@ def test_pre_commit_wiring_passes_checkout_type(tmp_path: Path):
         == 0
     )
     git(r, "switch", "-q", "master")  # binds
-    assert (r / "f").write_text("2") or git(r, "checkout", "--", "f").returncode == 0  # flag 0
+    (r / "f").write_text("2")
+    assert git(r, "checkout", "--", "f").returncode == 0  # flag 0 passes through
     res = git(r, "switch", "-c", "feat/x")
     assert res.returncode != 0 and branch(r) == "master"
