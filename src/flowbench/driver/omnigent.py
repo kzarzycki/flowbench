@@ -44,6 +44,9 @@ from flowbench.types import TurnResult, TurnStatus
 # message queued behind a running turn (todo-app-005 stalled on its own inject).
 _PROMPT_KEYS = ("pending_elicitations", "terminal_pending")
 _PAGE = 200  # server-side max page for GET /v1/sessions/{id}/items
+# The SDK's httpx client ignores the constructor `timeout` and reads with the 600 s
+# SSE budget; a label read that hangs must fail in the 60 s the raw client had.
+_LABEL_READ_S = 60.0
 _now = time.monotonic  # clock seam: the budget tests drive a fake one; never patch
 # time.monotonic itself (asyncio uses it)
 
@@ -256,8 +259,10 @@ class OmnigentDriver(AgentDriver):
         `model_error` — a delivered failure; re-sending could double-deliver) and
         False when the label read itself fails (unknown is not "no label")."""
         try:
-            # `sessions.get` raises on non-2xx — an HTTP error lands here, not in row 3
-            labels = (await self._client.sessions.get(self._chat.session_id)).labels or {}
+            # `sessions.get` raises on >= 400 and on any body that is not a Session
+            # (a redirect, the web UI's HTML 200) — all land here, not in row 3
+            async with asyncio.timeout(_LABEL_READ_S):
+                labels = (await self._client.sessions.get(self._chat.session_id)).labels or {}
         except Exception:
             return False
         code = labels.get("omnigent.last_task_error_code")
@@ -483,7 +488,8 @@ class OmnigentDriver(AgentDriver):
         if self._chat is None:
             return None
         try:
-            labels = (await self._client.sessions.get(self._chat.session_id)).labels or {}
+            async with asyncio.timeout(_LABEL_READ_S):
+                labels = (await self._client.sessions.get(self._chat.session_id)).labels or {}
             raw = labels.get("omnigent.last_context_tokens")
             return int(raw) if raw else None
         except Exception:

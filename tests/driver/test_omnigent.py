@@ -182,7 +182,8 @@ class _FakeSessions:
         self._get_error = get_error
 
     async def get(self, session_id):
-        """The typed `Session` (labels only matter here); raises on a non-2xx read."""
+        """The typed `Session` (labels only matter here); raises like the SDK does on
+        a >= 400 or non-Session response."""
         if self._get_error is not None:
             raise self._get_error
         return SimpleNamespace(id=session_id, labels=self._labels)
@@ -854,6 +855,24 @@ async def test_hard_ceiling_covers_a_slow_filesystem(tmp_path, monkeypatch):
     assert "fs_done" not in hit  # the worker is still running, its result discarded
 
 
+async def test_context_tokens_read_is_bounded(tmp_path, monkeypatch):
+    """`_context_tokens` has no outer ceiling; the SDK client reads with a 600 s
+    budget, so the driver must cap the label read itself (60 s, as before)."""
+    import flowbench.driver.omnigent as mod
+
+    monkeypatch.setattr(mod, "_LABEL_READ_S", 0.05)
+
+    async def hanging_get(_session_id):
+        await _hang()
+
+    d = OmnigentDriver(run_dir=tmp_path, artifact_name="plan.md")
+    d._chat = _FakeChat([TurnStatus.IDLE])
+    d._client = SimpleNamespace(sessions=SimpleNamespace(get=hanging_get))
+    t0 = time.monotonic()
+    assert await d._context_tokens() is None
+    assert time.monotonic() - t0 < 1.0
+
+
 async def test_capture_session_includes_context_tokens(tmp_path):
     # cost signal: final context size from session labels lands in the capture
     d = OmnigentDriver(run_dir=tmp_path, artifact_name="plan.md")
@@ -871,7 +890,8 @@ async def test_context_tokens_none_when_label_missing(tmp_path):
 
 def _label_client(labels=None, boom=None):
     """`_client.sessions.get()` double: the typed `Session` carries `labels`
-    (omnigent_client 0.2.0), and a non-2xx read raises instead of returning."""
+    (omnigent_client 0.2.0); a >= 400 or non-Session response raises instead of
+    returning."""
 
     async def get(session_id):
         if boom is not None:
@@ -1477,7 +1497,7 @@ async def test_resend_allowed_is_false_when_the_read_fails(tmp_path):
 
 async def test_resend_allowed_is_false_when_the_status_read_errors(tmp_path):
     """An HTTP error response (503 etc.) is not "no label": `sessions.get` raises
-    `OmnigentError` on non-2xx, so this takes the except path, not row 3."""
+    `OmnigentError` at >= 400, so this takes the except path, not row 3."""
     from omnigent_client import OmnigentError
 
     d = OmnigentDriver(run_dir=tmp_path, artifact_name="plan.md")
