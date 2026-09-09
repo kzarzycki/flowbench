@@ -33,3 +33,29 @@ def test_json_round_trip():
 
 def test_turn_result_status_compares_to_literal():
     assert TurnResult(TurnStatus.IDLE, "", False).status == "idle"
+
+
+def test_driver_reexports_types():
+    import flowbench.runner.driver as driver_mod
+    import flowbench.types as types_mod
+
+    assert driver_mod.TurnResult is types_mod.TurnResult
+    assert driver_mod.TurnStatus is types_mod.TurnStatus
+
+
+def test_user_model_implementations():
+    from flowbench.model import SessionModel
+    from flowbench.testing import ScriptedDriver, StubSim
+
+    assert isinstance(SessionModel(ScriptedDriver([])), UserModel)
+    assert isinstance(StubSim([]), UserModel)
+    assert not isinstance(object(), UserModel)
+
+
+def test_user_model_annotation_and_docstring():
+    from flowbench.model import SessionModel
+    from flowbench.runner.loop import run_agent_session
+
+    hints = typing.get_type_hints(run_agent_session)
+    assert hints["user_model"] is UserModel
+    assert "flowbench.types.UserModel" in SessionModel.__doc__

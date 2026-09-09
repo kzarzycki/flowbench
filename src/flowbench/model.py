@@ -10,6 +10,8 @@ import asyncio
 import sys
 from typing import TYPE_CHECKING
 
+from flowbench.types import TurnStatus
+
 if TYPE_CHECKING:
     from flowbench.runner.driver import OmnigentDriver
 
@@ -20,6 +22,7 @@ GENERATE_RETRY_WAIT_S = 30.0  # matches OmnigentDriver.send_retry_wait_s
 class SessionModel:
     """`.generate(prompt) -> obj.completion` shim backed by one persistent
     omnigent session, so the simulator and judge are omnigent agents.
+    Implements `flowbench.types.UserModel`.
 
     The loop primes the simulator once (persona + context) and then relays
     only deltas — a normal dialog against this stateful session."""
@@ -50,13 +53,17 @@ class SessionModel:
         # and injecting into a busy terminal is the known session-killer.
         for attempt in range(1, GENERATE_ATTEMPTS + 1):
             result = await self._driver.send(prompt)
-            if result.status == "idle" or result.status == "timeout" or self._fresh(result):
+            if (
+                result.status == TurnStatus.IDLE
+                or result.status == TurnStatus.TIMEOUT
+                or self._fresh(result)
+            ):
                 break
             if attempt < GENERATE_ATTEMPTS:
                 await asyncio.sleep(GENERATE_RETRY_WAIT_S)
-        if result.status == "timeout":
+        if result.status == TurnStatus.TIMEOUT:
             raise RuntimeError(f"simulator/judge turn ended 'timeout' (attempt {attempt})")
-        if result.status != "idle":
+        if result.status != TurnStatus.IDLE:
             if not self._fresh(result):
                 raise RuntimeError(
                     f"simulator/judge turn ended {result.status!r} with no fresh "

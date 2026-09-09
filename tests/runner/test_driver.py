@@ -604,3 +604,14 @@ async def test_snapshot_attaches_busy_children_when_idle(tmp_path):
     d._http = _Http()
     assert (await d._snapshot())["busy_children"] == [5]
     assert any("after=c9" in u for u in _Http.urls)
+
+async def test_undocumented_server_status_passes_through(tmp_path):
+    # A server status outside the documented vocabulary (idle/running/failed)
+    # must reach TurnResult.status unchanged — no exception, no relabelling
+    # (decisions #7, AC10). NOT monkeypatching asyncio.sleep here: the
+    # passthrough is reached only by exhausting turn_timeout_s in real
+    # monotonic time, which _instant_sleep does not fast-forward.
+    d = _settle_driver(tmp_path, _FakeChat(["zombie"]), [[]])
+    d.turn_timeout_s = 0.1
+    result = await d.send("build it")
+    assert result.status == "zombie"

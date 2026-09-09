@@ -14,6 +14,8 @@ import time
 import urllib.request
 from pathlib import Path
 
+from flowbench.types import TurnStatus
+
 SERVER = "http://127.0.0.1:6767"
 SERVER_LOG = Path.home() / ".omnigent" / "logs" / "launchd-omnigent.out.log"
 
@@ -84,7 +86,7 @@ class RunWatch:
         for s in sessions:
             prev = self._session_status.get(s["id"])
             cur = s.get("status")
-            if prev not in (None, cur) and cur == "failed":
+            if prev not in (None, cur) and cur == TurnStatus.FAILED:
                 events.append(f"SESSION FAILED: {s.get('title')} ({s['id']})")
             self._session_status[s["id"]] = cur
             # stall watchdog (#54): a pending elicitation is a prompt nobody can
@@ -96,7 +98,7 @@ class RunWatch:
                 "prompt"
                 if s.get("pending_elicitations_count")
                 else f"no progress {int(age)}s"
-                if cur == "running" and age >= self.stall_s
+                if cur == TurnStatus.RUNNING and age >= self.stall_s
                 else None
             )
             if stall and self._session_stall.get(s["id"]) is None:

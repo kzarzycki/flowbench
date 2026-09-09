@@ -30,19 +30,11 @@ from pathlib import Path
 from typing import Any
 
 from flowbench.transcript import dedup_items, last_assistant_text, n_assistant_messages
+from flowbench.types import TurnResult, TurnStatus  # re-export, one-release compat
 
 # raw-session fields that mean "the agent is waiting on a human"
 _PROMPT_KEYS = ("pending_elicitations", "pending_inputs", "terminal_pending")
 _PAGE = 200  # server-side max page for GET /v1/sessions/{id}/items
-
-
-@dataclass
-class TurnResult:
-    status: str  # "idle" (turn settled) | "failed" | "timeout" | "stalled"
-    assistant_text: str  # latest assistant-authored text after the turn
-    artifact_exists: bool
-    stall_reason: str | None = None  # "prompt" | "no_progress" when stalled
-    pane_tail: str | None = None  # last terminal lines at the stall, best effort
 
 
 class AgentDriver(abc.ABC):
@@ -148,16 +140,17 @@ class OmnigentDriver(AgentDriver):
     )
     git_init: bool = False
     turn_timeout_s: float = 240.0
-    # Stall watchdog (#54, #61): a `running` session waiting on a human (any of
-    # _PROMPT_KEYS set) or with no heartbeat for stall_s ends the turn as
-    # "stalled" instead of burning the whole turn cap. Bites
+    # Stall watchdog (#54, #61): a `TurnStatus.RUNNING` session waiting on a human
+    # (any of _PROMPT_KEYS set) or with no heartbeat for stall_s ends the turn as
+    # TurnStatus.STALLED instead of burning the whole turn cap. Bites
     # only under a turn cap longer than itself (run.py sets 1800 s).
     stall_s: float = 300.0
-    # `idle` can be observed before the runner picks the turn up (fresh session),
-    # before the reply item persists, or while the agent is still MID-TURN (bridge
-    # race seen live: injecting then hits a busy terminal and the run dies). An
-    # idle turn is trusted only once a NEW assistant message has landed; None =
-    # settle for the full turn budget. Expiry -> "timeout", never a stale reply.
+    # TurnStatus.IDLE can be observed before the runner picks the turn up (fresh
+    # session), before the reply item persists, or while the agent is still
+    # MID-TURN (bridge race seen live: injecting then hits a busy terminal and
+    # the run dies). An idle turn is trusted only once a NEW assistant message
+    # has landed; None = settle for the full turn budget. Expiry ->
+    # TurnStatus.TIMEOUT, never a stale reply.
     settle_timeout_s: float | None = None
     settle_poll_s: float = 2.0
     # An injection into a terminal whose input prompt hasn't rendered fails with
@@ -334,7 +327,7 @@ class OmnigentDriver(AgentDriver):
     async def send(self, text: str) -> TurnResult:
         result = await self._send_once(text)
         for _ in range(self.send_retry_attempts):
-            if result.status != "failed" or not await self._injection_undelivered():
+            if result.status != TurnStatus.FAILED or not await self._injection_undelivered():
                 return result
             # The terminal was busy and the message never landed — give the agent
             # time to finish its in-flight work, then re-send the SAME text.
@@ -369,18 +362,18 @@ class OmnigentDriver(AgentDriver):
             self.settle_timeout_s if self.settle_timeout_s is not None else self.turn_timeout_s
         )
         while (
-            status == "idle"
+            status == TurnStatus.IDLE
             and n_assistant_messages(items) <= n_before
             and time.monotonic() < settle
         ):
             await asyncio.sleep(self.settle_poll_s)
             status = await self._wait_idle()
             items = await self._list_items()
-        if status == "idle" and n_assistant_messages(items) <= n_before:
+        if status == TurnStatus.IDLE and n_assistant_messages(items) <= n_before:
             # Idle but silent past the budget: the turn never completed. Injecting
             # now would hit a busy terminal (message lost, session failed) — fail
             # the turn honestly instead.
-            status = "timeout"
+            status = TurnStatus.TIMEOUT
         return TurnResult(
             status=status,
             assistant_text=last_assistant_text(items),
@@ -452,7 +445,12 @@ class OmnigentDriver(AgentDriver):
                 return out
             after = body.get("last_id") or out[-1]["id"]
 
-    async def _wait_idle(self, min_wait: float = 4.0) -> str:
+    async def _wait_idle(self, min_wait: float = 4.0) -> TurnStatus | str:
+        """Poll the raw session status until a turn boundary. Every documented
+        omnigent status (`idle`/`running`/`failed`) and every flowbench-derived
+        one (`timeout`/`stalled`) returns as a `TurnStatus`; an undocumented
+        server status passes through verbatim (decisions #7) — no coercion, no
+        fallback, no new control flow."""
         start, seen_running = time.monotonic(), False
         heartbeat, last_beat = None, start
         st, prompt_polls, quiet_polls = None, 0, 0
@@ -460,10 +458,10 @@ class OmnigentDriver(AgentDriver):
             snap = await self._read_retry(self._snapshot)
             st = snap.get("status")
             busy_children = snap.get("busy_children") or []
-            if st == "idle" and busy_children:
-                st = "running"  # parked on its own sub-agent: still this turn
+            if st == TurnStatus.IDLE and busy_children:
+                st = TurnStatus.RUNNING  # parked on its own sub-agent: still this turn
                 quiet_polls = 0
-            if st == "running":
+            if st == TurnStatus.RUNNING:
                 seen_running = True
                 # any prompt nobody can answer: a policy/permission elicitation,
                 # a queued input request, or the terminal itself waiting (trust
@@ -478,21 +476,21 @@ class OmnigentDriver(AgentDriver):
                     heartbeat, last_beat = beat, time.monotonic()
                 elif time.monotonic() - last_beat >= self.stall_s:
                     return await self._stalled("no_progress")
-            if st == "failed":
-                return "failed"
-            if st == "idle" and (seen_running or time.monotonic() - start >= min_wait):
+            if st == TurnStatus.FAILED:
+                return TurnStatus.FAILED
+            if st == TurnStatus.IDLE and (seen_running or time.monotonic() - start >= min_wait):
                 # A child just finished -> omnigent is about to inject its
                 # task-notification; one extra quiet poll keeps our inject from
                 # landing on a terminal that is waking up.
                 quiet_polls += 1
                 if heartbeat is None or len(heartbeat) == 1 or quiet_polls >= 2:
-                    return "idle"
+                    return TurnStatus.IDLE
             await asyncio.sleep(1.5)
-        return st or "timeout"
+        return st or TurnStatus.TIMEOUT
 
-    async def _stalled(self, reason: str) -> str:
+    async def _stalled(self, reason: str) -> TurnStatus:
         self._stall = {"stall_reason": reason, "pane_tail": await self._pane_tail()}
-        return "stalled"
+        return TurnStatus.STALLED
 
     async def _capture_pane(self, meta: dict) -> bytes:
         proc = await asyncio.create_subprocess_exec(
