@@ -59,6 +59,43 @@ flowchart LR
 
 Baseline is the same picture with an empty `skills/`. Nothing else changes.
 
+### Send/retry policy
+
+`OmnigentDriver.send` is the only place that decides whether a turn is re-sent; callers —
+the loop, `SessionModel`, scripts — read `TurnResult.status` and never re-derive it.
+
+| Observation | Meaning | Action |
+| --- | --- | --- |
+| `FAILED` + label says undelivered | injection never landed | wait, re-send same text (bounded) |
+| `FAILED` + new assistant text | turn completed, then flaked | trust the text, no retry |
+| `FAILED`, no label, no new text | unknown; likely undelivered | bounded re-send (the #39 behavior, generalized) |
+| `TIMEOUT` | may be mid-turn after delivery | NEVER retry (injecting into a busy terminal kills sessions) |
+| `IDLE` + no new text past settle budget | lying idle | report `TIMEOUT` |
+
+Precedence and mechanics: "new assistant text" is checked first, so row 2 never reads a
+label; a new reply is `transcript.new_assistant_text(items, n_before)` — a NON-EMPTY
+assistant message beyond the count taken before the inject (an empty new message is not
+a reply; it would let an older one pass as this turn's). Rows 1 and 3 are decided by one
+label read in `_resend_allowed`: no error code, or `runner_error` + "not delivered" →
+re-send; any other present code (a delivered failure such as `model_error`), or an
+unreadable label → no re-send. A row-2 turn returns as `status=IDLE, flaked=True` and
+prints one `[flowbench] turn flaked` line; the loop counts them into
+`session["flaked_turns"]`.
+
+**One wall-clock budget per send.** `deadline = now + turn_timeout_s`, taken once at the
+top of `send`; `_wait_idle`, the settle loop and the retry sleeps all draw it down, a
+re-send happens only while the remaining budget exceeds `send_retry_wait_s`, and every
+inject is preceded by a deadline check. The whole send also runs under
+`asyncio.timeout(turn_timeout_s)`, so a server call, back-off, label read, retry sleep or
+the synchronous `artifact_path()` (run via `asyncio.to_thread`) still in flight at the cap
+is cancelled and the send reports `TIMEOUT` with empty text and `artifact_exists=False`
+("not observed"). At the cap the status is `RUNNING` (or an undocumented server status,
+verbatim) if the soft loop got there first, `TIMEOUT` if the timer did — both mean the
+turn did not finish. Before S02.3 a send stacked a `turn_timeout_s` in `_wait_idle`, a
+second one as the settle window and a third in that window's last `_wait_idle`, times
+`1 + send_retry_attempts`: `(1 + 3) × 3 × turn_timeout_s + 3 × send_retry_wait_s`, 2 970 s
+at the driver defaults and 36 090 s on todo_app's 3 000 s turn cap inside a 3 600 s run.
+
 ## loop.py — the mediated DONE-token loop
 
 `run_agent_session(driver, user_model, *, first_prompt, simulator_system,
@@ -72,7 +109,7 @@ done_token, max_turns, deadline_s)`:
   | `IDLE` | turn settled: the agent is awaiting the user | omnigent server |
   | `RUNNING` | still mid-turn when the per-turn cap fired | omnigent server |
   | `FAILED` | the omnigent session reported failed | omnigent server |
-  | `TIMEOUT` | idle but silent, or `_wait_idle`'s budget expired | `_wait_idle` |
+  | `TIMEOUT` | idle but silent, or the send's budget expired | `send` / `_send_once` |
   | `STALLED` | a prompt nobody can answer, or no heartbeat | `_send_once` |
 
   `stalled` is the driver's watchdog
@@ -133,7 +170,7 @@ Supporting modules, all omnigent-free at import time:
 
 | Module | Role |
 | --- | --- |
-| `model.py` | `SessionModel`: `.generate(prompt)` shim over one persistent omnigent session (simulator + judge); freshness-retry policy for the terminal-readiness flake |
+| `model.py` | `SessionModel`: `.generate(prompt)` shim over one persistent omnigent session (simulator + judge); send, raise on a non-idle or empty result, wrap the completion |
 | `flowspec.py` | `load_flows` (flows.yaml, resolves `skill_dirs`), `compose_kickoff` (prepend + task + append) |
 | `runner/judge.py` | `parse_verdict`/`parse_scores` for the prose `WINNER:`/`SCORES X:` tail, `build_judge_prompt`, `aggregate_*`, `last_json_object` for JSON judges |
 | `transcript.py` | message-item helpers shared by driver and reports (`item_text`, `dedup_items`, ...) + `render_transcript` |
