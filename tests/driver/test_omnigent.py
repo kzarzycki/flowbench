@@ -1669,10 +1669,37 @@ async def test_context_tokens_none_on_a_garbage_label(tmp_path, caplog, value):
 async def test_label_reads_fall_back_on_an_overflowing_session_field(tmp_path):
     """`Session.from_dict`'s `int(raw["created_at"])` raises OverflowError on
     `1e400` (parsed as inf) — a schema-drift shape, still an unreadable label."""
-    body = {**_session_body({}), "created_at": 1e400}
-    d = _failed_driver(tmp_path, _real_sdk_client(lambda req: httpx.Response(200, json=body)))
+    # raw bytes: `httpx.Response(json=...)` would refuse to encode inf itself, and the
+    # test would pass for the wrong reason (a ValueError before the SDK ever parses)
+    body = (
+        b'{"id":"c","agent_id":"a","status":"idle","created_at":1e400,"updated_at":0,'
+        b'"title":null,"items":[],"pending_inputs":[],"labels":{}}'
+    )
+    d = _failed_driver(
+        tmp_path,
+        _real_sdk_client(
+            lambda req: httpx.Response(
+                200, content=body, headers={"content-type": "application/json"}
+            )
+        ),
+    )
     assert await d._resend_allowed() is False
     assert await d._context_tokens() is None
+
+
+async def test_label_reads_do_not_paper_over_a_non_dict_labels(tmp_path):
+    """The SDK always hands a dict (`Session.from_dict` coerces); `labels=None`
+    is not an SDK shape, so the `AttributeError` from `.get` is our bug and
+    propagates — no `or {}` in either read hides it."""
+
+    async def get(session_id):
+        return SimpleNamespace(id=session_id, labels=None)
+
+    d = _failed_driver(tmp_path, SimpleNamespace(sessions=SimpleNamespace(get=get)))
+    with pytest.raises(AttributeError):
+        await d._resend_allowed()
+    with pytest.raises(AttributeError):
+        await d._context_tokens()
 
 
 @pytest.mark.parametrize(

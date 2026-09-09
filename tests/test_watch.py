@@ -73,6 +73,7 @@ def test_run_watch_log_sources_missing_and_rotated(tmp_path):
 
 
 def test_run_watch_sessions_filters_by_project_and_survives_server_errors(monkeypatch, caplog):
+    import http.client
     import io
     import logging
     import urllib.request
@@ -111,6 +112,18 @@ def test_run_watch_sessions_filters_by_project_and_survives_server_errors(monkey
     ]
     assert len(records) == 1
     assert "down" in records[0].getMessage()
+
+    def _http_boom(url, timeout):
+        raise http.client.HTTPException("bad status line")
+
+    monkeypatch.setattr(urllib.request, "urlopen", _http_boom)
+    assert w._run_sessions() == []  # HTTPException
+
+    monkeypatch.setattr(urllib.request, "urlopen", lambda url, timeout: _Resp(b"<html>"))
+    assert w._run_sessions() == []  # not JSON: json.load raises ValueError
+
+    monkeypatch.setattr(urllib.request, "urlopen", lambda url, timeout: _Resp(b"[]"))
+    assert w._run_sessions() == []  # a JSON list: .get raises AttributeError
 
     def _foreign_boom(url, timeout):
         raise RuntimeError("driver bug")

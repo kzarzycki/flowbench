@@ -334,6 +334,27 @@ def test_collect_code_skips_an_unreadable_path(tmp_path, caplog):
     assert "IsADirectoryError" in message or "Is a directory" in message
 
 
+def test_collect_code_skips_undecodable_source(tmp_path, caplog):
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    (ws / "ok.py").write_text("OK_MARKER = 1")
+    (ws / "bad.py").write_bytes(b"\xff\xfe\x00bad")  # not UTF-8: read_text() raises
+
+    caplog.set_level(logging.DEBUG, logger="scenarios.coding_workflow.cases.todo_app.scorers")
+    code = scorers.collect_code(ws)
+
+    assert "OK_MARKER = 1" in code
+    assert "bad.py" not in code
+    records = [
+        r
+        for r in caplog.records
+        if r.name == "scenarios.coding_workflow.cases.todo_app.scorers"
+        and r.levelno == logging.DEBUG
+    ]
+    assert len(records) == 1
+    assert "UnicodeDecodeError" in records[0].getMessage()
+
+
 def test_collect_code_reraises_a_foreign_exception(tmp_path, monkeypatch):
     ws = tmp_path / "ws"
     ws.mkdir()
