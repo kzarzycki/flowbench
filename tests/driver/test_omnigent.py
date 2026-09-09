@@ -1486,6 +1486,37 @@ async def test_resend_allowed_is_false_when_the_status_read_errors(tmp_path):
     assert await d._resend_allowed() is False
 
 
+def _real_sdk_client(handler):
+    """The installed `SessionsNamespace` over an httpx MockTransport: pins what the
+    SDK itself does with a response, not what a fake says it does."""
+    import httpx
+    from omnigent_client import SessionsNamespace
+
+    http = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    return SimpleNamespace(sessions=SessionsNamespace(http, "http://omni"))
+
+
+async def test_resend_allowed_is_false_on_a_redirect_through_the_real_sdk(tmp_path):
+    """`raise_for_status` in omnigent_client 0.2.0 lets 3xx through; the read is
+    still "unknown" because a redirect body is not a Session (`require_json_object`
+    / `Session.from_dict` raise) — the only 3xx that would slip past is one that
+    carries a complete Session JSON, which no redirect does."""
+    import httpx
+
+    d = OmnigentDriver(run_dir=tmp_path, artifact_name="plan.md")
+    d._chat = _FakeChat([TurnStatus.FAILED])
+    d._client = _real_sdk_client(
+        lambda req: httpx.Response(302, headers={"location": "http://elsewhere/"}, text="")
+    )
+    assert await d._resend_allowed() is False
+    d._client = _real_sdk_client(  # the web UI answers unknown paths with HTML 200
+        lambda req: httpx.Response(200, headers={"content-type": "text/html"}, text="<html>")
+    )
+    assert await d._resend_allowed() is False
+    d._client = _real_sdk_client(lambda req: httpx.Response(503, json={}))
+    assert await d._resend_allowed() is False
+
+
 async def test_failed_status_read_error_never_authorizes_a_resend(tmp_path, monkeypatch):
     _fake_clock(monkeypatch)
     chat = _FakeChat([TurnStatus.FAILED])
