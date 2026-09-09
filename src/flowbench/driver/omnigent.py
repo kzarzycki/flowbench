@@ -44,6 +44,9 @@ from flowbench.types import TurnResult, TurnStatus
 # message queued behind a running turn (todo-app-005 stalled on its own inject).
 _PROMPT_KEYS = ("pending_elicitations", "terminal_pending")
 _PAGE = 200  # server-side max page for GET /v1/sessions/{id}/items
+# The SDK's httpx client ignores the constructor `timeout` and reads with the 600 s
+# SSE budget; a label read that hangs must fail in the 60 s the raw client had.
+_LABEL_READ_S = 60.0
 _now = time.monotonic  # clock seam: the budget tests drive a fake one; never patch
 # time.monotonic itself (asyncio uses it)
 
@@ -156,12 +159,14 @@ class OmnigentDriver(AgentDriver):
         if os.environ.get("ANTHROPIC_API_KEY"):
             raise RuntimeError("ANTHROPIC_API_KEY is set — would defeat subscription billing.")
         import httpx
+
+        # UPSTREAM: https://github.com/omnigent-ai/omnigent/issues/6822 — the SDK has no hosts/runners
+        # namespace; these are the `omnigent host` CLI's helpers (inventory R3).
         from omnigent.host.daemon_launch import (
             launch_or_reuse_daemon_runner,
             wait_for_runner_online,
         )
-        from omnigent_client import OmnigentClient
-        from omnigent_client._sessions_chat import SessionsChat
+        from omnigent_client import OmnigentClient, SessionsChat
 
         self.run_dir.mkdir(parents=True, exist_ok=True)
         if self.git_init and not (self.run_dir / ".git").exists():
@@ -175,6 +180,8 @@ class OmnigentDriver(AgentDriver):
 
         # Create with --disallowedTools so claude asks in plain text (the card
         # otherwise blocks the tmux prompt and deadlocks turn 2+).
+        # UPSTREAM: https://github.com/omnigent-ai/omnigent/issues/6822 — `sessions.create()` cannot
+        # send `terminal_launch_args`; raw POST until the SDK carries it (inventory R1).
         resp = await self._client.sessions._http.post(
             f"{self._client.sessions._base}/v1/sessions",
             data={"metadata": json.dumps(self._create_metadata())},
@@ -252,9 +259,10 @@ class OmnigentDriver(AgentDriver):
         `model_error` — a delivered failure; re-sending could double-deliver) and
         False when the label read itself fails (unknown is not "no label")."""
         try:
-            resp = await self._http.get(f"/v1/sessions/{self._chat.session_id}")
-            resp.raise_for_status()
-            labels = resp.json().get("labels") or {}
+            # `sessions.get` raises on >= 400 and on any body that is not a Session
+            # (a redirect, the web UI's HTML 200) — all land here, not in row 3
+            async with asyncio.timeout(_LABEL_READ_S):
+                labels = (await self._client.sessions.get(self._chat.session_id)).labels or {}
         except Exception:
             return False
         code = labels.get("omnigent.last_task_error_code")
@@ -480,8 +488,9 @@ class OmnigentDriver(AgentDriver):
         if self._chat is None:
             return None
         try:
-            resp = await self._http.get(f"/v1/sessions/{self._chat.session_id}")
-            raw = (resp.json().get("labels") or {}).get("omnigent.last_context_tokens")
+            async with asyncio.timeout(_LABEL_READ_S):
+                labels = (await self._client.sessions.get(self._chat.session_id)).labels or {}
+            raw = labels.get("omnigent.last_context_tokens")
             return int(raw) if raw else None
         except Exception:
             return None

@@ -176,8 +176,17 @@ class _FakeChat:
 class _FakeSessions:
     """Item batches pop once per list_items(), then stay on the last batch."""
 
-    def __init__(self, batches):
+    def __init__(self, batches, labels=None, get_error=None):
         self._batches = list(batches)
+        self._labels = labels
+        self._get_error = get_error
+
+    async def get(self, session_id):
+        """The typed `Session` (labels only matter here); raises like the SDK does on
+        a >= 400 or non-Session response."""
+        if self._get_error is not None:
+            raise self._get_error
+        return SimpleNamespace(id=session_id, labels=self._labels)
 
     async def list_items(self, session_id, order, limit, after=None):
         if len(self._batches) > 1:
@@ -739,12 +748,11 @@ async def test_hard_ceiling_cancels_a_hanging_label_read(tmp_path):
     d.turn_timeout_s = 0.1
     d.send_retry_wait_s = 0.01  # the 0.1 budget makes the re-send eligible
 
-    class _HangingHttp:
-        async def get(self, _url):
-            hit["labels"] = True
-            await _hang()
+    async def hanging_get(_session_id):
+        hit["labels"] = True
+        await _hang()
 
-    d._http = _HangingHttp()
+    d._client.sessions.get = hanging_get
     t0 = time.monotonic()
     result = await d.send("go on")
     assert result == TurnResult(TurnStatus.TIMEOUT, "", False)
@@ -847,35 +855,50 @@ async def test_hard_ceiling_covers_a_slow_filesystem(tmp_path, monkeypatch):
     assert "fs_done" not in hit  # the worker is still running, its result discarded
 
 
-async def test_capture_session_includes_context_tokens(tmp_path):
-    # cost signal: final context size from session labels lands in the capture
-    class _FakeResp:
-        def json(self):
-            return {"labels": {"omnigent.last_context_tokens": "42072"}}
+async def test_context_tokens_read_is_bounded(tmp_path, monkeypatch):
+    """`_context_tokens` has no outer ceiling; the SDK client reads with a 600 s
+    budget, so the driver must cap the label read itself (60 s, as before)."""
+    import flowbench.driver.omnigent as mod
 
-    class _FakeHttp:
-        async def get(self, _url):
-            return _FakeResp()
+    monkeypatch.setattr(mod, "_LABEL_READ_S", 0.05)
+
+    async def hanging_get(_session_id):
+        await _hang()
 
     d = OmnigentDriver(run_dir=tmp_path, artifact_name="plan.md")
     d._chat = _FakeChat([TurnStatus.IDLE])
-    d._http = _FakeHttp()
+    d._client = SimpleNamespace(sessions=SimpleNamespace(get=hanging_get))
+    t0 = time.monotonic()
+    assert await d._context_tokens() is None
+    assert time.monotonic() - t0 < 1.0
+
+
+async def test_capture_session_includes_context_tokens(tmp_path):
+    # cost signal: final context size from session labels lands in the capture
+    d = OmnigentDriver(run_dir=tmp_path, artifact_name="plan.md")
+    d._chat = _FakeChat([TurnStatus.IDLE])
+    d._client = _label_client({"omnigent.last_context_tokens": "42072"})
     assert await d._context_tokens() == 42072
 
 
 async def test_context_tokens_none_when_label_missing(tmp_path):
-    class _FakeResp:
-        def json(self):
-            return {"labels": {}}
-
-    class _FakeHttp:
-        async def get(self, _url):
-            return _FakeResp()
-
     d = OmnigentDriver(run_dir=tmp_path, artifact_name="plan.md")
     d._chat = _FakeChat([TurnStatus.IDLE])
-    d._http = _FakeHttp()
+    d._client = _label_client({})
     assert await d._context_tokens() is None
+
+
+def _label_client(labels=None, boom=None):
+    """`_client.sessions.get()` double: the typed `Session` carries `labels`
+    (omnigent_client 0.2.0); a >= 400 or non-Session response raises instead of
+    returning."""
+
+    async def get(session_id):
+        if boom is not None:
+            raise boom
+        return SimpleNamespace(id=session_id, labels=labels)
+
+    return SimpleNamespace(sessions=SimpleNamespace(get=get))
 
 
 async def test_pending_elicitation_stalls_the_turn_at_once(tmp_path, monkeypatch):
@@ -1339,7 +1362,6 @@ def _patch_start(monkeypatch, http):
     import httpx
     import omnigent.host.daemon_launch as dl
     import omnigent_client
-    import omnigent_client._sessions_chat as sc
 
     ns = _FakeSessionsNs(http)
     launched = {}
@@ -1351,7 +1373,7 @@ def _patch_start(monkeypatch, http):
 
     class _FakeChatSession:
         """`SessionsChat.session_id` is a property over `self._session.id`
-        (omnigent_client/_sessions_chat.py) — the fake reads it off the session
+        (the root export of omnigent_client) — the fake reads it off the session
         the driver passes, so a driver that stopped passing one would fail."""
 
         def __init__(self, *, namespace, files_uploader, files_getter, session):
@@ -1362,7 +1384,7 @@ def _patch_start(monkeypatch, http):
         def session_id(self):
             return self._session["id"]
 
-    monkeypatch.setattr(sc, "SessionsChat", _FakeChatSession)
+    monkeypatch.setattr(omnigent_client, "SessionsChat", _FakeChatSession)
 
     async def _launch(http_, *, host_id, session_id, workspace):
         launched["args"] = (host_id, session_id, workspace)
@@ -1446,24 +1468,13 @@ async def test_start_raises_when_no_host_has_claude_native(tmp_path, monkeypatch
 # --- the paths the file's move pulled into diff-cover's scope ----------------
 
 
-class _LabelHttp:
-    def __init__(self, labels=None, boom=False):
-        self._labels = labels
-        self._boom = boom
-
-    async def get(self, _url):
-        if self._boom:
-            raise RuntimeError("transport gone")
-        return _FakeResponse({"labels": self._labels})
-
-
 async def test_resend_allowed_reads_the_error_labels(tmp_path):
     d = OmnigentDriver(run_dir=tmp_path, artifact_name="plan.md")
     d._chat = _FakeChat([TurnStatus.FAILED])
-    d._http = _LabelHttp({})  # row 3: no label at all — sim/judge sessions (#39)
+    d._client = _label_client({})  # row 3: no label at all — sim/judge sessions (#39)
     assert await d._resend_allowed() is True
 
-    d._http = _LabelHttp(
+    d._client = _label_client(
         {
             "omnigent.last_task_error_code": "runner_error",
             "omnigent.last_task_error_message": "The message was not delivered",
@@ -1472,7 +1483,7 @@ async def test_resend_allowed_reads_the_error_labels(tmp_path):
     assert await d._resend_allowed() is True  # row 1
 
     # a failure that is not the undelivered one: retrying could double-deliver
-    d._http = _LabelHttp({"omnigent.last_task_error_code": "model_error"})
+    d._client = _label_client({"omnigent.last_task_error_code": "model_error"})
     assert await d._resend_allowed() is False
 
 
@@ -1480,29 +1491,49 @@ async def test_resend_allowed_is_false_when_the_read_fails(tmp_path):
     """Unknown means "do not retry" — a blind resend can double-deliver."""
     d = OmnigentDriver(run_dir=tmp_path, artifact_name="plan.md")
     d._chat = _FakeChat([TurnStatus.FAILED])
-    d._http = _LabelHttp(boom=True)
+    d._client = _label_client(boom=RuntimeError("transport gone"))
     assert await d._resend_allowed() is False
 
 
-class _FailingStatusHttp:
-    """A read that succeeds at the transport level but the response is an HTTP
-    error (401/404/500/503): a JSON body with no `labels`, caught only if
-    `raise_for_status()` is actually called."""
-
-    async def get(self, _url):
-        import httpx
-
-        request = httpx.Request("GET", "http://example/v1/sessions/1")
-        response = httpx.Response(503, request=request, json={})
-        return response
-
-
 async def test_resend_allowed_is_false_when_the_status_read_errors(tmp_path):
-    """An HTTP error response (503 etc.) is not "no label" — raise_for_status
-    must be called so this takes the except path, not the "no code" row-3 path."""
+    """An HTTP error response (503 etc.) is not "no label": `sessions.get` raises
+    `OmnigentError` at >= 400, so this takes the except path, not row 3."""
+    from omnigent_client import OmnigentError
+
     d = OmnigentDriver(run_dir=tmp_path, artifact_name="plan.md")
     d._chat = _FakeChat([TurnStatus.FAILED])
-    d._http = _FailingStatusHttp()
+    d._client = _label_client(boom=OmnigentError("503 service unavailable"))
+    assert await d._resend_allowed() is False
+
+
+def _real_sdk_client(handler):
+    """The installed `SessionsNamespace` over an httpx MockTransport: pins what the
+    SDK itself does with a response, not what a fake says it does."""
+    import httpx
+    from omnigent_client import SessionsNamespace
+
+    http = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    return SimpleNamespace(sessions=SessionsNamespace(http, "http://omni"))
+
+
+async def test_resend_allowed_is_false_on_a_redirect_through_the_real_sdk(tmp_path):
+    """`raise_for_status` in omnigent_client 0.2.0 lets 3xx through; the read is
+    still "unknown" because a redirect body is not a Session (`require_json_object`
+    / `Session.from_dict` raise) — the only 3xx that would slip past is one that
+    carries a complete Session JSON, which no redirect does."""
+    import httpx
+
+    d = OmnigentDriver(run_dir=tmp_path, artifact_name="plan.md")
+    d._chat = _FakeChat([TurnStatus.FAILED])
+    d._client = _real_sdk_client(
+        lambda req: httpx.Response(302, headers={"location": "http://elsewhere/"}, text="")
+    )
+    assert await d._resend_allowed() is False
+    d._client = _real_sdk_client(  # the web UI answers unknown paths with HTML 200
+        lambda req: httpx.Response(200, headers={"content-type": "text/html"}, text="<html>")
+    )
+    assert await d._resend_allowed() is False
+    d._client = _real_sdk_client(lambda req: httpx.Response(503, json={}))
     assert await d._resend_allowed() is False
 
 
@@ -1519,7 +1550,9 @@ async def test_failed_status_read_error_never_authorizes_a_resend(tmp_path, monk
     chat.send = counting_send
     d = _settle_driver(tmp_path, chat, [[]])
     d.turn_timeout_s = 1000
-    d._http = _FailingStatusHttp()
+    from omnigent_client import OmnigentError
+
+    d._client.sessions._get_error = OmnigentError("503 service unavailable")
     result = await d.send("go on")
     assert result.status == TurnStatus.FAILED
     assert len(injects) == 1
@@ -1533,7 +1566,7 @@ async def test_context_tokens_none_before_a_session_exists(tmp_path):
 async def test_context_tokens_none_when_the_read_fails(tmp_path):
     d = OmnigentDriver(run_dir=tmp_path, artifact_name="plan.md")
     d._chat = _FakeChat([TurnStatus.IDLE])
-    d._http = _LabelHttp(boom=True)
+    d._client = _label_client(boom=RuntimeError("transport gone"))
     assert await d._context_tokens() is None
 
 
@@ -1567,7 +1600,7 @@ async def test_capture_session_returns_the_run_fields(tmp_path):
     (tmp_path / "plan.md").write_text("# the plan\n")
     chat = _FakeChat([TurnStatus.IDLE])
     d = _settle_driver(tmp_path, chat, [[_USER, _USER, _REPLY]])
-    d._http = _LabelHttp({"omnigent.last_context_tokens": "1234"})
+    d._client.sessions._labels = {"omnigent.last_context_tokens": "1234"}
 
     out = await d.capture_session()
 
