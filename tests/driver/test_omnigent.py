@@ -1581,7 +1581,7 @@ def _driver_debug(caplog):
 
 
 def _failed_driver(tmp_path, client):
-    d = OmnigentDriver(run_dir=tmp_path, artifact_name="plan.md")
+    d = OmnigentDriver(run_dir=tmp_path)
     d._chat = _FakeChat([TurnStatus.FAILED])
     d._client = client
     return d
@@ -1759,7 +1759,7 @@ async def test_pane_tail_logs_the_swallowed_error(tmp_path, caplog):
         async def get(self, url):
             raise OSError("runner offline")
 
-    d = OmnigentDriver(run_dir=tmp_path, artifact_name="plan.md")
+    d = OmnigentDriver(run_dir=tmp_path)
     d._chat = SimpleNamespace(session_id="conv_x")
     d._http = _Http()
     assert await d._pane_tail() is None
@@ -1775,7 +1775,7 @@ async def test_close_logs_the_swallowed_error(tmp_path, caplog):
         async def aclose(self):
             raise RuntimeError("already gone")
 
-    d = OmnigentDriver(run_dir=tmp_path, artifact_name="plan.md")
+    d = OmnigentDriver(run_dir=tmp_path)
     d._http, d._client = _Boom(), None
     await d.close()
     records = _driver_debug(caplog)
