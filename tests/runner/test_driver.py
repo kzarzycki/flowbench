@@ -340,10 +340,10 @@ async def test_pending_elicitation_stalls_the_turn_at_once(tmp_path, monkeypatch
     assert "Allow Bash" in result.pane_tail
 
 
-@pytest.mark.parametrize("key", ["pending_inputs", "terminal_pending"])
+@pytest.mark.parametrize("key", ["terminal_pending"])
 async def test_other_prompt_signals_stall_too(tmp_path, monkeypatch, key):
-    # #61: a trust dialog / login shows up as pending_inputs or terminal_pending,
-    # not as an elicitation — same instant stall
+    # #61: a trust dialog / login shows up as terminal_pending, not as an
+    # elicitation — same instant stall
     monkeypatch.setattr("flowbench.runner.driver.asyncio.sleep", _instant_sleep)
     chat = _FakeChat([TurnStatus.RUNNING])
     base = chat.snapshot
@@ -359,8 +359,7 @@ async def test_other_prompt_signals_stall_too(tmp_path, monkeypatch, key):
 
 
 async def test_one_poll_prompt_flicker_is_not_a_stall(tmp_path, monkeypatch):
-    # live: a healthy simulator turn showed pending_inputs for a single poll
-    # (in-flight delivery) — a real dialog persists, a flicker must not stall
+    # a one-poll flicker of a prompt signal must not stall — a real dialog persists
     monkeypatch.setattr("flowbench.runner.driver.asyncio.sleep", _instant_sleep)
     import itertools
 
@@ -369,7 +368,7 @@ async def test_one_poll_prompt_flicker_is_not_a_stall(tmp_path, monkeypatch):
 
     async def snapshot():
         n = next(polls)
-        return {**(await base()), "pending_inputs": [{"id": "in_1"}] if n % 2 == 0 else []}
+        return {**(await base()), "terminal_pending": n % 2 == 0}
 
     chat.snapshot = snapshot
     d = _settle_driver(tmp_path, chat, [[]])
@@ -565,9 +564,10 @@ async def test_idle_with_busy_child_is_still_this_turn(tmp_path, monkeypatch):
 
     chat.snapshot = snapshot
     d = _settle_driver(tmp_path, chat, [[], [_USER, _REPLY]])
+    d.child_wake_s = 0
     result = await d.send("build it")
     assert result.status == TurnStatus.IDLE
-    assert polls["n"] >= 6  # waited through the busy child, plus one quiet poll
+    assert polls["n"] >= 5  # waited through the busy child
 
 
 async def test_frozen_child_stalls_after_stall_s(tmp_path, monkeypatch):
@@ -637,3 +637,85 @@ async def test_undocumented_server_status_passes_through(tmp_path):
     d.turn_timeout_s = 0.1
     result = await d.send("build it")
     assert result.status == "zombie"
+
+
+# --- wake-up after children clear (todo-app-005) -------------------------------
+
+
+def _seq_snapshot(seq):
+    polls = {"n": 0}
+
+    async def snapshot():
+        st, kids = seq[min(polls["n"], len(seq) - 1)]
+        polls["n"] += 1
+        return {
+            "status": st,
+            "updated_at": polls["n"],
+            "pending_elicitations": [],
+            "busy_children": kids,
+        }
+
+    return snapshot, polls
+
+
+async def test_children_cleared_waits_for_the_wakeup_turn(tmp_path, monkeypatch):
+    # children cleared, we reported idle, omnigent's task-notification started a turn
+    # 1 s later and our inject queued behind it. After children clear the turn ends
+    # only once that wake-up turn has run (or child_wake_s passes).
+    monkeypatch.setattr("flowbench.runner.driver.asyncio.sleep", _instant_sleep)
+    RUN, IDL = TurnStatus.RUNNING, TurnStatus.IDLE
+    seq = [(RUN, [11]), (IDL, [11]), (IDL, []), (IDL, []), (IDL, []), (RUN, []), (IDL, [])]
+    chat = _FakeChat([IDL])
+    chat.snapshot, polls = _seq_snapshot(seq)
+    d = _settle_driver(tmp_path, chat, [[], [_USER, _REPLY]])
+    d.child_wake_s = 999  # grace never elapses: only the wake-up turn releases
+    result = await d.send("build it")
+    assert result.status == TurnStatus.IDLE
+    assert polls["n"] >= len(seq)  # did not return during the idle gap
+
+
+async def test_wakeup_already_ran_returns_idle_at_once(tmp_path, monkeypatch):
+    # idle+busy -> running (the wake-up turn) -> idle: the wake-up is over, no grace
+    monkeypatch.setattr("flowbench.runner.driver.asyncio.sleep", _instant_sleep)
+    RUN, IDL = TurnStatus.RUNNING, TurnStatus.IDLE
+    seq = [(IDL, [11]), (RUN, []), (IDL, [])]
+    chat = _FakeChat([IDL])
+    chat.snapshot, polls = _seq_snapshot(seq)
+    d = _settle_driver(tmp_path, chat, [[], [_USER, _REPLY]])
+    d.child_wake_s = 999
+    result = await d.send("build it")
+    assert result.status == TurnStatus.IDLE
+    assert polls["n"] == len(seq)
+
+
+async def test_cap_during_wake_wait_is_a_timeout_not_idle(tmp_path, monkeypatch):
+    # children clear right before the turn cap, no wake-up seen: the withheld idle
+    # must not leak out of the timeout fallthrough
+    monkeypatch.setattr("flowbench.runner.driver.asyncio.sleep", _instant_sleep)
+    IDL = TurnStatus.IDLE
+    chat = _FakeChat([IDL])
+    chat.snapshot, _ = _seq_snapshot([(IDL, [11]), (IDL, [])])
+    d = _settle_driver(tmp_path, chat, [[], [_USER, _REPLY]])
+    d.child_wake_s = 999
+    d.turn_timeout_s = 0.05
+    result = await d.send("build it")
+    assert result.status == TurnStatus.TIMEOUT
+
+
+async def test_queued_own_input_is_not_a_prompt(tmp_path, monkeypatch):
+    # pending_inputs = our own message queued behind a running turn (omnigent docs),
+    # never a human prompt; the turn just keeps waiting
+    monkeypatch.setattr("flowbench.runner.driver.asyncio.sleep", _instant_sleep)
+    import itertools
+
+    chat = _FakeChat([TurnStatus.RUNNING], beats=itertools.count())
+    base = chat.snapshot
+
+    async def snapshot():
+        return {**(await base()), "pending_inputs": [{"pending_id": "p1", "content": "Continue."}]}
+
+    chat.snapshot = snapshot
+    d = _settle_driver(tmp_path, chat, [[]])
+    d.turn_timeout_s = 0.1
+    result = await d.send("build it")
+    assert (result.status, result.stall_reason) == (TurnStatus.RUNNING, None)
