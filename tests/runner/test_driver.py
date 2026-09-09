@@ -586,10 +586,16 @@ async def test_snapshot_attaches_busy_children_when_idle(tmp_path):
             return self._d
 
     class _Http:
+        urls = []
+
         async def get(self, url):
-            if url.endswith("/child_sessions"):
+            self.urls.append(url)
+            if "/child_sessions" in url:
+                if "after=" not in url:  # page 1: newest, idle; an older busy child is on page 2
+                    page = {"data": [{"id": "c9", "busy": False, "updated_at": 9}]}
+                    return _Resp({**page, "has_more": True, "last_id": "c9"})
                 return _Resp(
-                    {"data": [{"busy": True, "updated_at": 5}, {"busy": False, "updated_at": 9}]}
+                    {"data": [{"id": "c1", "busy": True, "updated_at": 5}], "has_more": False}
                 )
             return _Resp({"status": "idle", "updated_at": 1})
 
@@ -597,3 +603,4 @@ async def test_snapshot_attaches_busy_children_when_idle(tmp_path):
     d._chat = SimpleNamespace(session_id="conv_test")
     d._http = _Http()
     assert (await d._snapshot())["busy_children"] == [5]
+    assert any("after=c9" in u for u in _Http.urls)

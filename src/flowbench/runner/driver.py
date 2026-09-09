@@ -432,12 +432,25 @@ class OmnigentDriver(AgentDriver):
             # parked on its OWN work, not awaiting the user: omnigent wakes it with
             # a task-notification when the child finishes. Read the children live
             # (the event stream races the session end and can miss the settle).
-            resp = await self._http.get(f"/v1/sessions/{self._chat.session_id}/child_sessions")
-            resp.raise_for_status()
             snap["busy_children"] = [
-                c.get("updated_at") for c in resp.json().get("data", []) if c.get("busy")
+                c.get("updated_at") for c in await self._children() if c.get("busy")
             ]
         return snap
+
+    async def _children(self) -> list[dict]:
+        """All child sessions, paged (the endpoint is newest-first with a small
+        default page; an old, still-busy child must not hide behind idle ones)."""
+        out: list[dict] = []
+        after = None
+        while True:
+            url = f"/v1/sessions/{self._chat.session_id}/child_sessions?limit={_PAGE}"
+            resp = await self._http.get(url + (f"&after={after}" if after else ""))
+            resp.raise_for_status()
+            body = resp.json()
+            out.extend(body.get("data", []))
+            if not body.get("has_more"):
+                return out
+            after = body.get("last_id") or out[-1]["id"]
 
     async def _wait_idle(self, min_wait: float = 4.0) -> str:
         start, seen_running = time.monotonic(), False

@@ -75,17 +75,13 @@ pinned `==0.1.1`.
 - Verify: the S00.3 regression tests plus new ones covering each table row (V1); V4 is
   MANDATORY here — this is the code path that killed runs #30/#34/#39.
 
-### S02.3b Loop hygiene (audited bugs, small PR)
+### S02.3b Loop hygiene — DONE (flowbench #67, ahead of E02)
 
-- Harness `Continue.` nudges are appended to `convo` and later relayed to the simulator
-  as `[user]` messages it never authored — a stateful dialog agent gets words put in its
-  mouth. Nudges stay out of the simulator's relay window (they remain in the captured
-  transcript, flagged as harness turns).
-- `any_child_busy` folds the cumulative event stream: one child whose settling
-  `busy=False` is never captured poisons `child_busy` for every subsequent turn. Track
-  per-turn (or timestamp-bounded) child state instead; the `_MAX_CONSEC_NUDGES` cap stays
-  as the backstop.
-- Verify: loop unit tests for both (V1); V4 alongside S02.3's.
+Both audited bugs were removed rather than patched: the loop no longer nudges at all (the
+driver reports `idle` only once no child session is busy, reading `/child_sessions` live
+and paged, with a frozen child a `no_progress` stall), and `_list_items` pages past the
+server's 200-item cap. Unit tests in `tests/runner/test_driver.py` / `test_loop.py` (V1);
+live check todo-app-005.
 
 ### S02.4 Artifact concern out of the driver
 

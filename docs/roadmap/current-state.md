@@ -16,7 +16,7 @@ What exists, what works, what is debt. Line counts are `wc -l` on that date.
 | `transcript.py` | 89 | message-item helpers + `render_transcript` (S01.1) |
 | `model.py` | 78 | `SessionModel` simulator/judge shim with freshness retry (S01.1) |
 | `flowspec.py` | 36 | flows.yaml loading, kickoff composition (S01.1) |
-| `runner/loop.py` | 134 | mediated DONE-token loop; nudge policy for self-waiting agents |
+| `runner/loop.py` | 134 | mediated DONE-token loop (no nudges since #67: the driver waits out busy children) |
 | `report/compare.py` | 91 | side-by-side scorecard table; metric paths hardcoded to todo_app's schema |
 | `cli.py` | 36 | typer app; `compare` is the only command |
 | `runner/judge.py` | 142 | `last_json_object` (string-aware) + prose verdict/scores parsing, aggregation (S01.1) |
@@ -126,13 +126,9 @@ list above:
   `_wait_idle`, then opens a *second* `turn_timeout_s` settle window whose iterations
   each call `_wait_idle` again; with send retries a single turn can consume ~8–9 minutes
   of a 30-minute run deadline. One wall-clock ceiling per send (S02.3).
-- `loop.py:121` — the harness's free `Continue.` nudges are appended to the conversation
-  and later relayed to the simulator as `[user]` messages it never authored, polluting a
-  stateful dialog with words put in its mouth. Loop hygiene fix in E02.
-- `driver.py:129` — `any_child_busy` folds the *cumulative* event stream, so one child
-  whose settling `busy=False` event is never captured poisons `child_busy` for every
-  later turn (the nudge cap bounds the damage; the state should be per-turn or
-  timestamped). E02.
+- (fixed, flowbench #67) the `Continue.` nudge relay pollution and the cumulative
+  `any_child_busy` fold: the driver now waits out busy children (`/child_sessions`, paged)
+  and the loop never nudges; `_list_items` pages past the 200-item cap.
 
 **Test gaps** (fold into S00.3's table)
 
