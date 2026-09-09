@@ -102,14 +102,6 @@ live check todo-app-005.
   public `sessions.create()` cannot express `terminal_launch_args` — do NOT "simplify"
   to the public call until upstream carries a metadata parameter, or the
   AskUserQuestion-deadlock protection silently disappears.
-- ~~Upstream the `_PROMPT_SCAN_TAIL_LINES` fix~~ — **done (2026-09-09)**: the published
-  0.12.0 wheel and every later build anchor the prompt scan on the input box's rule
-  (`_is_box_rule`), so `scripts/patch_omnigent.py` and every "needs omnigent patched" claim
-  are deleted. Correction to the note that stood here: the venv dependency IS the copy the
-  driver imports — but the driver uses only its client side, and the bridge that scans the pane runs out of
-  the install the *server* uses, so the script's target was wrong regardless of its search
-  path. **This does not close S02.5** — the public-API bullets above stay open, and so does
-  the `live` pin bump (a runtime change: it needs a live run, not a docs pass).
 - Verify: `rg '\._[a-z]' src/flowbench/driver/` shows only self-attributes; pins bumped
   intentionally; V1, V4.
 

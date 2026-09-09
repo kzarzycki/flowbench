@@ -59,10 +59,8 @@ Executes the recorded 2026-07-02 decision: `run_case`, everything omnigent, Insp
 - S02.4 Artifact probe out of the driver (kill `artifact_name="__none__"`).
 - S02.5 Meta-harness decision — **recorded** (2026-09-09,
   `docs/design/decisions/2026-09-09-omnigent-as-the-meta-harness.md`: omnigent stays, herdr and
-  per-CLI drivers rejected with triggers). The tmux prompt-scan patch is retired — upstream
-  anchors the scan on the input box's rule, so `scripts/patch_omnigent.py` is deleted. Left:
-  the omnigent public-API migration (and the `live` pin bump), or a herdr driver behind the
-  same seam if a trigger fires.
+  per-CLI drivers rejected with triggers). Left: the omnigent public-API migration (and the
+  `live` pin bump), or a herdr driver behind the same seam if a trigger fires.
 - S02.6 Error taxonomy: narrow the broad `except Exception` sites.
 
 ### M3 — Case format v1 and a real CLI (`epics/E03-case-format-and-cli.md`)

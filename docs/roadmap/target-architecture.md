@@ -59,8 +59,6 @@ What disappears:
 
 - `runner/subscription_model.py` and the `inspect-ai` dependency + entry-point block —
   done (E01, S01.4; todo_app's `eval.py`/`solver.py` glue is gone as of S01.3).
-- `scripts/patch_omnigent.py` — done (2026-09-09): upstream anchors the prompt scan on the
-  input box's rule, so the monkey-patch is unnecessary and the script is deleted.
 - The top-level `scenarios` package from the wheel — the engine wheel ships `flowbench`
   only; the reference scenario stays in-repo as content, imported by path/tests, not
   installed into site-packages.
@@ -132,14 +130,10 @@ epic story to push the fix upstream rather than harden the workaround:
    lying-idle detection, and freshness sentinels all exist because "idle" can be observed
    mid-turn and an injection can silently not land. A server-confirmed "message delivered /
    turn complete" signal deletes most of `_send_once`'s heuristics.
-2. ~~**Prompt-scan window** (`_PROMPT_SCAN_TAIL_LINES`)~~ — **fixed upstream as of the
-   published 0.12.0**: prompt-ready detection and the permission-mode read anchor on the input
-   box's rule (`_is_box_rule`), so a tall footer cannot push the glyph out of a fixed window.
-   Our monkey-patch is deleted.
-3. **Public client API for what we reach into**: `sessions._http`, `sessions._base`, and
+2. **Public client API for what we reach into**: `sessions._http`, `sessions._base`, and
    constructing `SessionsChat` by hand are private-API reach-ins that break on any
    omnigent-client bump (it is pinned 0.1.1 for exactly this reason).
-4. **Per-session tool restriction** in the bundle config, so the simulator can be denied
+3. **Per-session tool restriction** in the bundle config, so the simulator can be denied
    shell/file tools (today the mitigation is prompt-only).
-5. **Cost fields on the session** (`last_context_tokens` exists as a label; a stable field
+4. **Cost fields on the session** (`last_context_tokens` exists as a label; a stable field
    with input/output token totals would feed the cost column in comparisons).
