@@ -106,10 +106,12 @@ pinned `==0.1.1`.
   public `sessions.create()` cannot express `terminal_launch_args` — do NOT "simplify"
   to the public call until upstream carries a metadata parameter, or the
   AskUserQuestion-deadlock protection silently disappears.
-- Upstream the `_PROMPT_SCAN_TAIL_LINES` fix; when a release carries it, delete
-  `scripts/patch_omnigent.py` and its README mention, and bump the pin. Until then, fix
-  the patch script's search path: it only patches the uv-tool install, while the `live`
-  extra installs omnigent as a venv dependency — the copy the driver actually imports.
+- ~~Upstream the `_PROMPT_SCAN_TAIL_LINES` fix~~ — **done (2026-09-09)**: upstream anchors
+  the prompt scan on the input box's rule; `scripts/patch_omnigent.py` and every "needs
+  omnigent patched" claim are deleted. (For the record, the script had been aiming at the
+  wrong copy either way: the venv dependency the driver imports is client-side only, and the
+  bridge that scans the pane belongs to the install the *server* runs from.) Still open here:
+  bump the `live` pin — a runtime change, so it needs a live run, not a docs pass.
 - Verify: `rg '\._[a-z]' src/flowbench/driver/` shows only self-attributes; pins bumped
   intentionally; V1, V4.
 

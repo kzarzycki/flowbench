@@ -53,7 +53,7 @@ uv run python -m scenarios.coding_workflow.run --case todo_app --run-id <id>
 ```
 
 Success: both flow dirs hold `scorecard.json`, and
-`uv run flowbench compare --run-base ../flowbench-runs/coding_workflow --run-id <id>`
+`uv run flowbench compare --run-base $RUNS/coding_workflow --run-id <id>`
 renders both columns without a FAILED banner.
 
 ## V6 — vocabulary sweep

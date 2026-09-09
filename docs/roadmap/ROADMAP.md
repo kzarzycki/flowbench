@@ -57,9 +57,12 @@ Executes the recorded 2026-07-02 decision: `run_case`, everything omnigent, Insp
 - S02.3b Loop hygiene: keep harness nudges out of the simulator's relayed context;
   per-turn child-busy state (both audit-confirmed bugs).
 - S02.4 Artifact probe out of the driver (kill `artifact_name="__none__"`).
-- S02.5 Meta-harness decision: omnigent vs herdr (is omnigent more than we need?). Record it;
-  then either the omnigent public-API migration + upstream the tmux-scan patch (delete
-  `scripts/patch_omnigent.py` when released), or a herdr driver behind the same seam.
+- S02.5 Meta-harness decision — **recorded** (2026-09-09,
+  `docs/design/decisions/2026-09-09-omnigent-as-the-meta-harness.md`: omnigent stays, herdr and
+  per-CLI drivers rejected with triggers). The tmux prompt-scan patch is retired — upstream
+  anchors the scan on the input box's rule, so `scripts/patch_omnigent.py` is deleted. Left:
+  the omnigent public-API migration (and the `live` pin bump), or a herdr driver behind the
+  same seam if a trigger fires.
 - S02.6 Error taxonomy: narrow the broad `except Exception` sites.
 
 ### M3 — Case format v1 and a real CLI (`epics/E03-case-format-and-cli.md`)

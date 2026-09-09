@@ -1,0 +1,161 @@
+# Onboarding: getting a live run working
+
+Everything in this repo runs offline against test doubles. A **live** run — a real coding
+agent, driven turn by turn — needs a working [omnigent](design/decisions/2026-09-09-omnigent-as-the-meta-harness.md)
+server on the same machine. That part is not discoverable from the code, so it lives here.
+
+Read [`GLOSSARY.md`](GLOSSARY.md) first for the vocabulary (Scenario → Case → Flow → Run →
+Scorecard → Comparison), and [`design/runner.md`](design/runner.md) for what the runtime does
+with it.
+
+## 1. What you need
+
+| Thing | Why |
+| --- | --- |
+| Python 3.12+, [`uv`](https://docs.astral.sh/uv/) | the engine |
+| Node ≥ 22, `tmux` | omnigent's harness runners drive real CLIs inside tmux panes |
+| A Claude Code install and a **Claude subscription** | the system under test is vanilla Claude Code, billed to the subscription |
+| An omnigent checkout | omnigent is not published in the version we drive — see below |
+
+Offline first, before any of the above:
+
+```bash
+uv sync --extra dev --extra live   # live = the omnigent client the driver imports
+uv run pytest -q                   # live-agent tests skip themselves without RUN_LIVE_AGENT=1
+```
+
+## 2. The topology (three copies of "omnigent", two of which are not the one you think)
+
+```
+your shell ─ uv run python -m scenarios.<scenario>.run
+                │  imports omnigent_client + omnigent.host.daemon_launch   ← (a) venv copy
+                │  HTTP :6767
+                ▼
+        omnigent server ──► host daemon ──► harness runner ──► tmux pane ──► `claude` CLI
+                                                                              (vanilla, host ~/.claude)
+        └────────────────── (b) the install the server runs from ─────────────┘
+```
+
+- **(a) the venv copy** comes from this repo's `live` extra (`omnigent`, `omnigent-client`,
+  pinned in `pyproject.toml`). It is **client side only**: `OmnigentDriver` uses it to POST a
+  session, ask the host daemon to launch a runner, and poll. Nothing in it scans a pane.
+- **(b) the server's own install** is what actually spawns runners and drives the CLI. It is
+  normally an editable install of an omnigent source checkout
+  (`uv tool install --editable <checkout>` → check `~/.local/share/uv/tools/omnigent/uv-receipt.toml`),
+  kept far ahead of anything on PyPI. **The two versions differ, on purpose.** When you debug
+  harness behaviour — prompt detection, permission mode, injection — read the server's source,
+  not the venv's.
+- The server usually runs as a background service (`launchctl list | grep omni` on macOS);
+  its logs are `~/.omnigent/logs/launchd-omnigent.out.log` (server) and
+  `~/.omnigent/logs/host-runner/runner-*.log` (runners).
+
+## 3. Is it ready? Ask the same question the driver asks
+
+`OmnigentDriver._resolve_claude_host` needs one host that is online **and** has the
+`claude-native` harness configured. That is the only readiness check worth running:
+
+```bash
+curl -s http://127.0.0.1:6767/v1/hosts | python3 -m json.tool | less   # or:
+curl -s http://127.0.0.1:6767/v1/hosts \
+  | python3 -c 'import json,sys;print([(h["status"],h["configured_harnesses"].get("claude-native")) for h in json.load(sys.stdin)["hosts"]])'
+```
+
+You want `('online', True)`. Anything else and the run dies at `start()` with
+`no online host with claude-native configured` — which is also what you get if the machine
+sleeps mid-run (the host daemon drops off).
+
+There is **no health or version endpoint**: unknown paths return the web UI with HTTP 200, so
+`/healthz`-style probes always "pass". Use `/v1/hosts`.
+
+Override the address with `OMNIGENT_SERVER` if it is not on `127.0.0.1:6767`.
+
+## 4. `ANTHROPIC_API_KEY` must be UNSET
+
+`OmnigentDriver.start()` raises if it is set, before doing anything else:
+
+```
+RuntimeError: ANTHROPIC_API_KEY is set — would defeat subscription billing.
+```
+
+This is not hygiene, it is the measurement. With the key set, Claude Code bills the API and
+runs as an API client; unset, it runs exactly as the product a developer uses, on subscription
+billing — which is the thing the benchmark claims to compare. A benchmark whose runs differ
+from the product in billing mode differs from it in rate limits, defaults and availability too,
+so the guard is a hard failure rather than a warning.
+
+The cost of that choice, worth knowing before a long run: **runs consume the operator's
+subscription quota.** When the quota runs out, agents do not error — they stall mid-turn, turns
+hang until the websocket ping timeout (~20 min), and no artifact lands. Everything stalling at
+once is a quota symptom, not a code bug. Check your quota before a multi-hour run.
+
+## 5. Do I need to patch omnigent? No (not any more)
+
+Older notes in this repo said "needs omnigent patched". History: omnigent's claude-native
+prompt-ready detector scanned only the last 5 non-empty tmux lines for the `❯` input glyph, and
+a tall Claude Code status footer pushed the glyph out of that window — every turn after the
+first failed with "terminal did not become ready". `scripts/patch_omnigent.py` bumped the
+window to 12 (the script is deleted; `git log -- scripts/patch_omnigent.py` has it).
+
+Upstream fixed it structurally: prompt detection and the permission-mode read now anchor on the
+input box's own rule, so the footer's height cannot matter, and the tail window survives only as
+a boot-time fallback. Nothing to patch. If a 2nd+-turn injection ever fails this way again, look
+in the server's install at `omnigent/harnesses/claude_native/bridge.py` for `_is_box_rule` /
+`_PROMPT_SCAN_TAIL_LINES` before assuming it is the same bug.
+
+## 6. Where runs land
+
+Run dirs are **never** inside the repo: they default to `<launching checkout>/../flowbench-runs/<scenario>/`
+(`$RUNS` in tracked docs). Live runs are launched from the scenarios checkout, so that is where
+the real run dirs are — record the concrete path in your untracked `CLAUDE.local.md`, per the
+no-per-developer-paths policy. A run dir is a plain folder of files (`run.json`,
+`<flow>/scorecard.json`, transcripts): every reader in this repo reads them, nothing wraps
+execution.
+
+## 7. Your first live run
+
+From this repo (the open reference case; `$SCENARIOS` has the private ones):
+
+```bash
+unset ANTHROPIC_API_KEY
+caffeinate -i uv run --extra live python -m scenarios.coding_workflow.run \
+  --case todo_app --run-id <id>
+```
+
+Four rules learned the hard way:
+
+- **`uv run --extra live`, always.** A bare `uv run` resyncs the env to the default deps and
+  drops the extra; omnigent then vanishes mid-day (`ModuleNotFoundError: omnigent` at
+  `driver.start()`).
+- **`caffeinate -i`.** An idle Mac sleeps mid-turn and the agent dies on wake
+  (`native_turn_error: "Your computer went to sleep mid-response"`). `-i` does not stop
+  clamshell sleep — keep the lid open, or run headless.
+- **Watch it.** `flowbench.watch.RunWatch` is an incremental anomaly scanner over a live run
+  (permission prompts, run-scoped server errors, failed sessions, `STALLED (...)`) — one line
+  per event. The engine ships the class, not a CLI; the private scenarios repo wraps it as
+  `uv run python -m scenarios.swe_planning.watch <run_id> --pid <runner-pid>`. For the open
+  reference case, drive `RunWatch(...).tick()` yourself or tail the logs from §2.
+- **Expect long turns.** A workflow-heavy flow can spend half an hour in one turn; `stall_s`
+  (heartbeat watchdog) and `turn_timeout_s`/`deadline_s` (budgets) are per-flow fields in the
+  case's `flows.yaml`, and the budget is a first-order variable of the benchmark, so it is
+  declared per case rather than tuned per run.
+
+Then read the scorecards side by side:
+
+```bash
+uv run flowbench compare --run-base $RUNS/coding_workflow --run-id <id>
+```
+
+The omnigent session, its runner and its tmux pane are **left alive on purpose** when a run
+ends: `session.json` carries a `conversation_url` you can open to continue the agent the
+simulator was driving.
+
+## 8. Where to read next
+
+- [`GLOSSARY.md`](GLOSSARY.md) — the vocabulary, in dependency order.
+- [`design/runner.md`](design/runner.md) — driver/loop/run_case contracts.
+- [`design/decisions/`](design/decisions/) — why a flow is the full configuration; why omnigent
+  is the meta-harness.
+- [`roadmap/current-state.md`](roadmap/current-state.md) — the known warts, each pointing at the
+  epic that fixes it (private-API reach-ins and the version split are #5 there).
+- `$SCENARIOS/docs/knowledge/omnigent.md` — operational gotchas from real runs, in the private
+  scenarios repo.
