@@ -67,8 +67,8 @@ done_token, max_turns, deadline_s)`:
 
   `stalled` is the driver's watchdog
   (`stall_s`, default 300 s): a `running` session waiting on a human (a pending
-  elicitation, a pending input, or `terminal_pending` — permission, policy,
-  trust or login prompt nobody can answer) ends the turn at once as `prompt`; one whose
+  elicitation or `terminal_pending` — permission, policy, trust or login prompt nobody
+  can answer; NOT `pending_inputs`, which is our own queued message) ends the turn at once as `prompt`; one whose
   `updated_at` heartbeat is silent for `stall_s` ends it as `no_progress`. The
   session records `exit_status`, `stall_reason` and `pane_tail` (the terminal's
   last lines, i.e. the question it is stuck on). The watchdog never answers the
@@ -79,7 +79,8 @@ done_token, max_turns, deadline_s)`:
 - An idle main agent with a busy sub-agent (`GET /v1/sessions/{id}/child_sessions`,
   per-child `busy`) is still mid-turn: the driver keeps waiting, with the children's
   `updated_at` folded into the heartbeat, and reports `idle` only once no child is busy
-  (plus one quiet poll, so the inject doesn't land on the task-notification wake-up).
+  and, once children have cleared, only after the task-notification wake-up turn has run
+  (or `child_wake_s`, 20 s, has passed) so the inject never queues behind it.
   The loop therefore never nudges; every idle turn is a real hand-over to the simulator.
   (#67 — the old "Continue." nudge burned turns and items, and its sentinel collided
   with a simulator that itself answered "Continue.", freezing the relay cursor.)

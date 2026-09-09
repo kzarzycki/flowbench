@@ -33,7 +33,10 @@ from flowbench.transcript import dedup_items, last_assistant_text, n_assistant_m
 from flowbench.types import TurnResult, TurnStatus  # re-export, one-release compat
 
 # raw-session fields that mean "the agent is waiting on a human"
-_PROMPT_KEYS = ("pending_elicitations", "pending_inputs", "terminal_pending")
+# Signals that a human is being asked something. NOT `pending_inputs`: omnigent
+# documents that as "un-consumed web-composer user messages" — i.e. OUR posted
+# message queued behind a running turn (todo-app-005 stalled on its own inject).
+_PROMPT_KEYS = ("pending_elicitations", "terminal_pending")
 _PAGE = 200  # server-side max page for GET /v1/sessions/{id}/items
 
 
@@ -145,6 +148,11 @@ class OmnigentDriver(AgentDriver):
     # TurnStatus.STALLED instead of burning the whole turn cap. Bites
     # only under a turn cap longer than itself (run.py sets 1800 s).
     stall_s: float = 300.0
+    # After the last busy child clears, omnigent injects a task-notification and
+    # the main agent runs again a few seconds later. Reporting idle in that gap
+    # queued our inject behind the wake-up turn (todo-app-005). Wait for the
+    # wake-up (status running) or this many seconds, whichever comes first.
+    child_wake_s: float = 20.0
     # TurnStatus.IDLE can be observed before the runner picks the turn up (fresh
     # session), before the reply item persists, or while the agent is still
     # MID-TURN (bridge race seen live: injecting then hits a busy terminal and
@@ -453,21 +461,26 @@ class OmnigentDriver(AgentDriver):
         fallback, no new control flow."""
         start, seen_running = time.monotonic(), False
         heartbeat, last_beat = None, start
-        st, prompt_polls, quiet_polls = None, 0, 0
+        st, prompt_polls = None, 0
+        had_children, cleared_at = False, None
         while time.monotonic() - start < self.turn_timeout_s:
             snap = await self._read_retry(self._snapshot)
             st = snap.get("status")
             busy_children = snap.get("busy_children") or []
             if st == TurnStatus.IDLE and busy_children:
                 st = TurnStatus.RUNNING  # parked on its own sub-agent: still this turn
-                quiet_polls = 0
+                had_children, cleared_at = True, None
+            elif st == TurnStatus.IDLE and had_children:
+                # children just finished: arm the wake-up wait once per clearing
+                had_children, cleared_at = False, time.monotonic()
+            elif st == TurnStatus.RUNNING:
+                had_children, cleared_at = False, None  # the wake-up turn ran
             if st == TurnStatus.RUNNING:
                 seen_running = True
-                # any prompt nobody can answer: a policy/permission elicitation,
-                # a queued input request, or the terminal itself waiting (trust
-                # dialog, login) — #61. Two consecutive polls: a real dialog
-                # persists across 1.5 s, in-flight input delivery (seen live on
-                # a healthy simulator turn) does not.
+                # any prompt nobody can answer: a policy/permission elicitation
+                # or the terminal itself waiting (trust dialog, login) — #61. Two
+                # consecutive polls: a real dialog persists across 1.5 s, a
+                # one-poll flicker does not.
                 prompt_polls = prompt_polls + 1 if any(snap.get(k) for k in _PROMPT_KEYS) else 0
                 if prompt_polls >= 2:
                     return await self._stalled("prompt")
@@ -478,15 +491,14 @@ class OmnigentDriver(AgentDriver):
                     return await self._stalled("no_progress")
             if st == TurnStatus.FAILED:
                 return TurnStatus.FAILED
-            if st == TurnStatus.IDLE and (seen_running or time.monotonic() - start >= min_wait):
-                # A child just finished -> omnigent is about to inject its
-                # task-notification; one extra quiet poll keeps our inject from
-                # landing on a terminal that is waking up.
-                quiet_polls += 1
-                if heartbeat is None or len(heartbeat) == 1 or quiet_polls >= 2:
-                    return TurnStatus.IDLE
+            settled = seen_running or time.monotonic() - start >= min_wait
+            woke = cleared_at is None or time.monotonic() - cleared_at >= self.child_wake_s
+            if st == TurnStatus.IDLE and settled and woke:
+                return TurnStatus.IDLE
             await asyncio.sleep(1.5)
-        return st or TurnStatus.TIMEOUT
+        # Cap hit. An idle here was withheld on purpose (unsettled, or wake-up
+        # pending) — report it as the unfinished turn it is, never as idle.
+        return TurnStatus.TIMEOUT if not st or st == TurnStatus.IDLE else st
 
     async def _stalled(self, reason: str) -> TurnStatus:
         self._stall = {"stall_reason": reason, "pane_tail": await self._pane_tail()}
