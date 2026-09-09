@@ -134,9 +134,12 @@ def resolve_invoker(app_dir: Path) -> list[str]:
     ep = _console_entry(app_dir)
     if ep:
         mod, func = ep
+        # `raise SystemExit(_entry())`, not a bare call: a console entry point
+        # signals failure by RETURNING a nonzero code, and acceptance grades on
+        # the exit status — a bare call would hand every shim app a free pass.
         shim = (
             f"import sys; sys.argv=['todo']+sys.argv[1:]; "
-            f"from {mod} import {func} as _entry; _entry()"
+            f"from {mod} import {func} as _entry; raise SystemExit(_entry())"
         )
         return [sys.executable, "-c", shim]
     return [sys.executable, "-m", "todo"]
