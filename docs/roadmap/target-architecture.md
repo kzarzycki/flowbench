@@ -55,14 +55,6 @@ src/flowbench/
   cli.py             # flowbench run | compare | watch
 ```
 
-What disappears:
-
-- `runner/subscription_model.py` and the `inspect-ai` dependency + entry-point block —
-  done (E01, S01.4; todo_app's `eval.py`/`solver.py` glue is gone as of S01.3).
-- The top-level `scenarios` package from the wheel — the engine wheel ships `flowbench`
-  only; the reference scenario stays in-repo as content, imported by path/tests, not
-  installed into site-packages.
-
 ## The run, end to end
 
 ```

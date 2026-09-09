@@ -44,8 +44,7 @@ These are prior decision records, not this roadmap's inventions:
 - **A flow is the full configuration; nothing hidden.** Harness, model, effort, bundle,
   optional system prompt, overlay, budgets — all declared, all in the manifest. Reports state
   which fields differ; scenarios decide which fields are eligible. Decision record:
-  `docs/design/decisions/2026-09-03-flow-is-the-full-configuration.md` (supersedes the earlier
-  "bundle-only" wording).
+  `docs/design/decisions/2026-09-03-flow-is-the-full-configuration.md`.
 - **One execution model: the `run_case` orchestrator, not Inspect.** Decision record:
   flowbench-scenarios `docs/superpowers/specs/2026-07-02-swe-planning-rework-design.md`.
   todo_app runs on `run_case` since S01.3; Inspect and `subscription_model.py` (`claude -p`)
@@ -53,10 +52,10 @@ These are prior decision records, not this roadmap's inventions:
 - **Stay DIY; adopt capabilities, not frameworks.** Reconsider only at the written triggers
   in the same decision record (parallel N≥10 with retries; cross-run statistical
   aggregation; cross-month regression tracking; a second scenario-authoring team).
-- **Plain-file seams.** Run folders (`../flowbench-runs/...`) hold `run.json`,
-  `scorecard.json`, transcripts. Future tooling reads these files; it never wraps execution.
+- **Plain-file seams.** Run folders (sibling `../flowbench-runs/`, never inside the repo) hold
+  `run.json`, `scorecard.json`, transcripts. Future tooling reads these files; it never wraps
+  execution.
 - **Subscription billing only.** `ANTHROPIC_API_KEY` must be unset; the driver guards on it.
-- **Run outputs never live in the repo** — sibling `../flowbench-runs/`.
 - **Baseline is not a privileged type** — a comparison may nominate a reference flow at
   read time; there is no built-in control category.
 

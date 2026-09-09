@@ -104,7 +104,7 @@ defaults.
   second `AgentDriver`, and running both on one case is the honest way to measure the
   meta-harness's own contribution.
 - Keeping up with omnigent's internals costs more than a direct driver would (the reach-in list
-  in `roadmap/current-state.md` #5 stops shrinking after S02.5).
+  in `roadmap/current-state.md` #4 stops shrinking after S02.5).
 - We need runs on hardware we do not operate: the server/host/tmux model is local-first.
 
 ## Consequences

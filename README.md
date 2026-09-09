@@ -6,8 +6,8 @@
 
 A benchmark that compares agentic **flows** — different ways of driving a coding agent at a goal
 (vanilla, superpowers, or any bundle of skills/MCPs) — on a fixed **case**, all driven through
-[omnigent](https://github.com/omnigent-ai/omnigent) as the meta-harness. Flows differ only by their bundle, so a
-comparison is apples-to-apples: same task, same harness, only the workflow changes.
+[omnigent](https://github.com/omnigent-ai/omnigent) as the meta-harness. Every field of a flow is declared and recorded, so a comparison states
+exactly which knobs differ: same task, same meta-harness, nothing steering from hiding.
 
 Vocabulary in [`docs/GLOSSARY.md`](docs/GLOSSARY.md):
 **Scenario → Case → Flow → Run → Scorecard → Comparison.**
