@@ -24,7 +24,7 @@ Vocabulary in [`docs/GLOSSARY.md`](docs/GLOSSARY.md):
 uv sync --extra dev --extra live       # live = the omnigent runtime for live runs
 uv run pytest -q                       # offline suite
 
-# after a run, compare flows side by side:
+# after a run, compare flows side by side ($RUNS = your run-dir root, see docs/onboarding.md §6):
 uv run flowbench compare --run-base $RUNS/coding_workflow --run-id <run_id>
 ```
 

@@ -66,10 +66,11 @@ do. Rejected for this job on three counts:
    own a per-harness transcript parser, and the comparison's inputs would depend on terminal
    width.
 3. **A TUI-derived state machine, and it says so.** `unknown` "does not prove completion";
-   `idle` vs `done` depends on whether a human has *seen* the tab in the focused UI. Control
-   also requires the caller to be running inside a herdr-managed pane (`HERDR_ENV=1`), which a
-   headless benchmark process is not. omnigent's status plus the three pending-prompt fields
-   are server state, and the watchdog needed server state to be trustworthy.
+   `idle` vs `done` depends on whether a human has *seen* the tab in the focused UI. herdr's own
+   operating guidance also tells a caller not to control a session from outside a herdr-managed
+   pane (`HERDR_ENV=1`) — a policy, not an API gate: the socket answers `agent list` from a plain
+   shell. omnigent's status plus the three pending-prompt fields are server state, and the
+   watchdog needed server state to be trustworthy.
 
 ### Driving each CLI directly (`claude -p` / `--resume`, or an SDK)
 
