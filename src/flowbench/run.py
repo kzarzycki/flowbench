@@ -30,6 +30,16 @@ SIM_MODEL = "opus"
 JUDGE_MODEL = "opus"
 
 
+def find_artifact(run_dir: Path, name: str) -> Path | None:
+    """Which file proves a flow delivered — the orchestrator's knowledge, not
+    the driver's. `run_dir/name` if it landed at the top level, else the first
+    `run_dir.rglob(name)` hit (nested, e.g. under a subagent's cwd), else None."""
+    top = run_dir / name
+    if top.exists():
+        return top
+    return next(run_dir.rglob(name), None)
+
+
 async def run_case(
     case_dir,
     *,
@@ -110,7 +120,12 @@ async def run_case(
                 done_token=done_token,
                 max_turns=max_turns,
                 deadline_s=deadline_s,
-                artifact_grace_s=(artifact_grace_s if has_artifact else 0.0),
+                artifact_grace_s=artifact_grace_s,
+                artifact_probe=(
+                    functools.partial(find_artifact, flow_dir, artifact_name)
+                    if has_artifact
+                    else None
+                ),
             )
         finally:
             close = getattr(simulator, "close", None)
@@ -367,12 +382,10 @@ def make_flow_driver_omni(
     flow_dir: Path,
     *,
     scenario: str,
-    artifact_name: str = "plan.md",
     git_init: bool = False,
 ) -> OmnigentDriver:
     return OmnigentDriver(
         run_dir=flow_dir,
-        artifact_name=artifact_name,
         git_init=git_init,
         session_title=_title(flow_dir, f"flow: {flow['name']}"),
         project=_project(flow_dir, scenario),
@@ -393,7 +406,6 @@ def make_simulator_omni(flow: dict, sim_dir: Path, *, scenario: str) -> SessionM
     return SessionModel(
         OmnigentDriver(
             run_dir=sim_dir,
-            artifact_name="__none__",  # no artifact expected; name never matches, artifact_exists stays False
             model=SIM_MODEL,
             skills="none",
             session_title=_title(sim_dir, f"sim: {flow['name']}"),
@@ -413,7 +425,6 @@ async def run_judge_omni(
     model = SessionModel(
         OmnigentDriver(
             run_dir=judge_dir,
-            artifact_name="__none__",  # no artifact expected; name never matches, artifact_exists stays False
             model=JUDGE_MODEL,
             skills="none",
             turn_timeout_s=600,  # one long grading turn over all full plans
@@ -428,21 +439,16 @@ async def run_judge_omni(
         await model.close()
 
 
-def omni_factories(scenario: str, *, artifact_name: str | None = "plan.md", git_init: bool = False):
+def omni_factories(scenario: str, *, git_init: bool = False):
     """The three real omnigent factories, bound to `scenario`, matching the
     2-arg `(flow, dir)` / 3-arg `(judge_md, entries, judge_dir)` contract
-    run_case/run_case_n call. `artifact_name`/`git_init` are case properties
-    (todo_app writes into a git-initialized flow_dir); defaults keep
-    swe_planning byte-identical. `artifact_name=None` means the case declares
-    no artifact — mapped to the driver's `"__none__"` sentinel."""
+    run_case/run_case_n call. `git_init` is a case property (todo_app writes
+    into a git-initialized flow_dir); the default keeps swe_planning
+    byte-identical. Which file proves delivery (`artifact_name`) is a
+    `run_case`/`run_case_n` concern, not the driver's — see `find_artifact`."""
 
     return (
-        functools.partial(
-            make_flow_driver_omni,
-            scenario=scenario,
-            artifact_name="__none__" if artifact_name is None else artifact_name,
-            git_init=git_init,
-        ),
+        functools.partial(make_flow_driver_omni, scenario=scenario, git_init=git_init),
         functools.partial(make_simulator_omni, scenario=scenario),
         functools.partial(run_judge_omni, scenario=scenario),
     )

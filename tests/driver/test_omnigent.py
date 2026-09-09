@@ -20,7 +20,7 @@ from flowbench.types import TurnStatus
 def test_omnigent_driver_satisfies_interface():
     d = OmnigentDriver(run_dir=Path("/tmp/x"), artifact_name="account_summary.md")
     assert isinstance(d, AgentDriver)
-    for m in ("start", "send", "capture_session", "artifact_path", "close"):
+    for m in ("start", "send", "capture_session", "close"):
         assert hasattr(d, m)
 
 

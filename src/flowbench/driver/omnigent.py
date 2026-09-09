@@ -85,7 +85,8 @@ class OmnigentDriver(AgentDriver):
     """
 
     run_dir: Path
-    artifact_name: str
+    artifact_name: str = "__none__"  # unused by run_case/omni_factories now (S02.4 Task A);
+    # dropped along with the rest of the artifact concern in Task B.
     server_url: str = field(
         default_factory=lambda: os.environ.get("OMNIGENT_SERVER", "http://127.0.0.1:6767")
     )

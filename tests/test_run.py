@@ -30,8 +30,9 @@ def test_run_case_offline(tmp_path):
             return FakeDriver(
                 "# SP plan\nunknown flag key returns 404.",
                 ["what should evaluation return for an unknown flag key?"],
+                run_dir=flow_dir,
             )
-        return FakeDriver("# plain plan\nno unknown-key note.", [])
+        return FakeDriver("# plain plan\nno unknown-key note.", [], run_dir=flow_dir)
 
     def make_simulator(flow, sim_dir):
         replies = (
@@ -92,8 +93,8 @@ def test_run_case_flags_missing_plan(tmp_path):
 
     def make_flow_driver(flow, flow_dir):
         if flow["name"] == "superpowers":
-            return FakeDriver("# SP plan\nunknown flag key returns 404.", [])
-        return MissingPlanDriver("unused", [])
+            return FakeDriver("# SP plan\nunknown flag key returns 404.", [], run_dir=flow_dir)
+        return MissingPlanDriver("unused", [], run_dir=flow_dir)
 
     def make_simulator(flow, sim_dir):
         return StubSim(["PLAN_COMPLETE"])
@@ -207,7 +208,6 @@ def test_make_flow_driver_omni_maps_flow_config(tmp_path):
     }
     d = make_flow_driver_omni(flow, tmp_path, scenario="swe_planning")
     assert d.run_dir == tmp_path
-    assert d.artifact_name == "plan.md"
     assert d.model == "opus"
     assert d.harness == "claude-native"
     assert d.skills == "none"
@@ -477,7 +477,9 @@ def _three_flow_case(tmp_path) -> Path:
 
 def _three_flow_factories():
     def make_flow_driver(flow, flow_dir):
-        return FakeDriver(f"# {flow['name']} plan\ncontent for {flow['name']}.", [])
+        return FakeDriver(
+            f"# {flow['name']} plan\ncontent for {flow['name']}.", [], run_dir=flow_dir
+        )
 
     def make_simulator(flow, sim_dir):
         return StubSim(["PLAN_COMPLETE"])
@@ -663,7 +665,6 @@ def test_make_simulator_omni_is_bare_claude_on_a_session_model(tmp_path):
     )
     d = sim._driver
     assert d.skills == "none" and d.model == run_mod.SIM_MODEL
-    assert d.artifact_name == "__none__"
     # web-UI grouping: the sim shares its run's folder, like the flow and judge
     assert d.session_title == "sim: plain"
     assert d.project == f"swe_planning/{tmp_path.name}"
@@ -705,7 +706,7 @@ def test_omni_factories_bind_scenario():
     assert mk_flow.func is run_mod.make_flow_driver_omni
     assert mk_sim.func is run_mod.make_simulator_omni
     assert judge.func is run_mod.run_judge_omni
-    assert mk_flow.keywords == {"scenario": "dwh", "artifact_name": "plan.md", "git_init": False}
+    assert mk_flow.keywords == {"scenario": "dwh", "git_init": False}
     assert all(f.keywords == {"scenario": "dwh"} for f in (mk_sim, judge))
 
 
@@ -880,27 +881,24 @@ def test_run_case_done_token_reaches_run_agent_session(tmp_path, monkeypatch):
     assert all(kwargs["done_token"] == "<<DONE>>" for kwargs in calls)
 
 
-def test_omni_factories_artifact_name_and_git_init(tmp_path):
-    mk_flow, _mk_sim, _judge = run_mod.omni_factories(
-        "x", artifact_name="tasks.json", git_init=True
-    )
+def test_omni_factories_git_init(tmp_path):
+    mk_flow, _mk_sim, _judge = run_mod.omni_factories("x", git_init=True)
     d = mk_flow({"name": "plain"}, tmp_path)
-    assert d.artifact_name == "tasks.json"
     assert d.git_init is True
 
     mk_flow_default, _, _ = run_mod.omni_factories("x")
     d2 = mk_flow_default({"name": "plain"}, tmp_path)
-    assert d2.artifact_name == "plan.md"
     assert d2.git_init is False
-
-    mk_flow_none, _, _ = run_mod.omni_factories("x", artifact_name=None)
-    d3 = mk_flow_none({"name": "plain"}, tmp_path)
-    assert d3.artifact_name == "__none__"
 
 
 def test_run_case_artifact_none_omits_artifact_keys(tmp_path):
     case = _unjudged_case(tmp_path)
-    mfd, ms, _ = n_run_factories([])
+
+    def make_flow_driver(flow, flow_dir):
+        return FakeDriver("# p", [])
+
+    def make_simulator(flow, sim_dir):
+        return StubSim(["PLAN_COMPLETE"])
 
     async def score_flow(flow, flow_dir, session):
         return {"flow": flow["name"]}
@@ -909,8 +907,8 @@ def test_run_case_artifact_none_omits_artifact_keys(tmp_path):
         run_case(
             case,
             run_id="no-artifact-run",
-            make_flow_driver=mfd,
-            make_simulator=ms,
+            make_flow_driver=make_flow_driver,
+            make_simulator=make_simulator,
             run_judge=None,
             runs_root=tmp_path,
             scenario="coding_workflow",
@@ -930,13 +928,13 @@ def test_run_case_artifact_none_omits_artifact_keys(tmp_path):
         assert card == {"flow": name}
 
 
-def test_run_case_artifact_none_forwards_zero_grace(tmp_path, monkeypatch):
+def test_run_case_builds_probe_from_flow_dir(tmp_path, monkeypatch):
     case = _unjudged_case(tmp_path)
     calls = []
 
     async def rec(*args, **kwargs):
         calls.append(kwargs)
-        return {"items": [], "events": [], "artifact_text": None}
+        return {"items": [], "events": []}
 
     monkeypatch.setattr(run_mod, "run_agent_session", rec)
 
@@ -961,7 +959,8 @@ def test_run_case_artifact_none_forwards_zero_grace(tmp_path, monkeypatch):
         )
     )
     assert calls
-    assert all(kwargs["artifact_grace_s"] == 0.0 for kwargs in calls)
+    assert all(kwargs["artifact_probe"] is None for kwargs in calls)
+    assert all(kwargs["artifact_grace_s"] == 30.0 for kwargs in calls)
 
     calls.clear()
     asyncio.run(
@@ -978,7 +977,11 @@ def test_run_case_artifact_none_forwards_zero_grace(tmp_path, monkeypatch):
         )
     )
     assert calls
-    assert all(kwargs["artifact_grace_s"] == 30.0 for kwargs in calls)
+    names = [f["name"] for f in run_mod.load_flows(case / "flows.yaml")]
+    for name, kwargs in zip(names, calls, strict=True):
+        assert kwargs["artifact_probe"].func is run_mod.find_artifact
+        assert kwargs["artifact_probe"].args == (tmp_path / "t-default" / name, "plan.md")
+        assert kwargs["artifact_grace_s"] == 30.0
 
 
 def test_run_case_n_forwards_artifact_name(tmp_path, monkeypatch):
@@ -1034,3 +1037,17 @@ def test_run_case_artifact_none_with_judge_rejected(tmp_path):
             )
         )
     assert not (tmp_path / "runs" / "rejected-run").exists()
+
+
+def test_find_artifact_missing_top_level_nested(tmp_path):
+    assert run_mod.find_artifact(tmp_path, "plan.md") is None
+
+    top = tmp_path / "plan.md"
+    top.write_text("top")
+    assert run_mod.find_artifact(tmp_path, "plan.md") == top
+
+    top.unlink()
+    nested = tmp_path / "sub" / "plan.md"
+    nested.parent.mkdir()
+    nested.write_text("nested")
+    assert run_mod.find_artifact(tmp_path, "plan.md") == nested

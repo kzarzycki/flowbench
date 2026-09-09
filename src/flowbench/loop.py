@@ -7,6 +7,8 @@ from __future__ import annotations
 
 import asyncio
 import time
+from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
 from flowbench.driver import AgentDriver
@@ -54,7 +56,13 @@ async def run_agent_session(
     max_turns: int = 80,
     deadline_s: float = 1800.0,
     artifact_grace_s: float = 60.0,
+    artifact_probe: Callable[[], Path | None] | None = None,
 ) -> dict[str, Any]:
+    """`artifact_probe`, when given, is the orchestrator's answer to "which file
+    proves this session delivered" — the driver knows nothing about it. On DONE
+    the loop polls it until it returns a path (grace-bounded), and after capture
+    it sets `artifact_exists`/`artifact_path`/`artifact_text` on the session for
+    every run (False/None/None when no probe is given)."""
     start = time.monotonic()
     convo: list[tuple[str, str]] = []
     flaked = 0
@@ -89,10 +97,15 @@ async def run_agent_session(
                 # DONE claimed with no artifact on disk: the agent may have
                 # announced completion while its Write was still flushing
                 # (seen live: plan.md landed a minute after capture). Grace-
-                # poll before capturing.
-                grace = time.monotonic() + artifact_grace_s
-                while driver.artifact_path() is None and time.monotonic() < grace:
-                    await asyncio.sleep(2.0)
+                # poll before capturing. No probe (case declares no artifact)
+                # -> nothing to wait for.
+                if artifact_probe is not None:
+                    try:
+                        async with asyncio.timeout(artifact_grace_s):
+                            while await asyncio.to_thread(artifact_probe) is None:
+                                await asyncio.sleep(2.0)
+                    except TimeoutError:
+                        pass  # grace spent (or a hung filesystem): capture what is there
                 break
             result = await driver.send(reply)
             flaked += result.flaked
@@ -102,6 +115,10 @@ async def run_agent_session(
                 convo.append(("assistant", result.assistant_text))
             turns += 1
         session = await driver.capture_session()
+        artifact = await asyncio.to_thread(artifact_probe) if artifact_probe else None
+        session["artifact_exists"] = artifact is not None
+        session["artifact_path"] = str(artifact) if artifact else None
+        session["artifact_text"] = artifact.read_text() if artifact else None
         # Why the loop stopped — a timeout here is otherwise invisible in the
         # captured session (live-001 shipped an unfinished plan silently).
         session["exit_status"] = result.status

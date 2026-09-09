@@ -48,7 +48,6 @@ def test_main_wires_engine_run_case_n(monkeypatch, capsys, tmp_path):
     assert kw["make_flow_driver"].func is engine_run.make_flow_driver_omni
     assert kw["make_flow_driver"].keywords == {
         "scenario": "coding_workflow",
-        "artifact_name": "__none__",
         "git_init": True,
     }
     assert kw["artifact_name"] is None
