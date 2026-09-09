@@ -2,7 +2,7 @@
 
 The destination is `vision.md` (pillars); this file is the ordered plan. Live state of every
 epic and story: the Project board https://github.com/users/kzarzycki/projects/1 (epics are
-`type:epic` issues, stories their sub-issues; this file stays the sequencing rationale). Three phases:
+`type:epic` issues, stories their sub-issues; this file stays the sequencing rationale and carries no done-marks). Three phases:
 
 - **Foundation (M0–M3)** — one execution model, robust runtime, case format, CLI.
   Everything later stands on this; do not reorder past it.
@@ -46,7 +46,7 @@ Executes the recorded 2026-07-02 decision: `run_case`, everything omnigent, Insp
   (`run.py`, `SessionModel`, `judge.py`, `transcript.py`, `flowspec.py`, `testing.py`).
 - S01.2 ✅ Paired scenarios PR: swe_planning consumes the engine, deletes local copies.
 - S01.3 ✅ Port todo_app to `run_case` (case files + scenario-local scorers).
-- S01.4 ✅ Remove Inspect + `subscription_model.py`; wheel ships `flowbench` only;
+- S01.4 Remove Inspect + `subscription_model.py`; wheel ships `flowbench` only;
   omnigent install extra renamed to `live`.
 - S01.5 ✅ Milestone live validation: todo_app + swe_planning runs, parity notes.
 
