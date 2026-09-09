@@ -2,7 +2,7 @@
 
 The destination is `vision.md` (pillars); this file is the ordered plan. Live state of every
 epic and story: the Project board https://github.com/users/kzarzycki/projects/1 (epics are
-`type:epic` issues, stories their sub-issues; this file stays the sequencing rationale). Three phases:
+`type:epic` issues, stories their sub-issues; this file stays the sequencing rationale and carries no done-marks). Three phases:
 
 - **Foundation (M0–M3)** — one execution model, robust runtime, case format, CLI.
   Everything later stands on this; do not reorder past it.
@@ -37,18 +37,18 @@ Make the repo safe for autonomous weak-model development first.
 - S00.3 Regression tests for every live-incident comment in `driver.py`/`loop.py`.
 - S00.4 Docs wiring: CLAUDE.md pointers, refresh `docs/design/runner.md`.
 
-### M1 — One execution model (`epics/E01-one-execution-model.md`) ✅ done 2026-09-08
+### M1 — One execution model (`epics/E01-one-execution-model.md`)
 
 Executes the recorded 2026-07-02 decision: `run_case`, everything omnigent, Inspect and
 `claude -p` removed.
 
-- S01.1 ✅ Lift the generic runtime out of swe_planning into the engine
+- S01.1 Lift the generic runtime out of swe_planning into the engine
   (`run.py`, `SessionModel`, `judge.py`, `transcript.py`, `flowspec.py`, `testing.py`).
-- S01.2 ✅ Paired scenarios PR: swe_planning consumes the engine, deletes local copies.
-- S01.3 ✅ Port todo_app to `run_case` (case files + scenario-local scorers).
-- S01.4 ✅ Remove Inspect + `subscription_model.py`; wheel ships `flowbench` only;
+- S01.2 Paired scenarios PR: swe_planning consumes the engine, deletes local copies.
+- S01.3 Port todo_app to `run_case` (case files + scenario-local scorers).
+- S01.4 Remove Inspect + `subscription_model.py`; wheel ships `flowbench` only;
   omnigent install extra renamed to `live`.
-- S01.5 ✅ Milestone live validation: todo_app + swe_planning runs, parity notes.
+- S01.5 Milestone live validation: todo_app + swe_planning runs, parity notes.
 
 ### M2 — Runtime robustness (`epics/E02-runtime-robustness.md`)
 
