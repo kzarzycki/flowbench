@@ -96,26 +96,50 @@ def _console_entry(app_dir: Path) -> tuple[str, str] | None:
     return None
 
 
+_RESOLVE_PROBE = (
+    "import importlib.util, sys\n"
+    "try:\n"
+    "    spec = importlib.util.find_spec('todo')\n"
+    "    ok = spec is not None and (\n"
+    "        spec.submodule_search_locations is None\n"
+    "        or importlib.util.find_spec('todo.__main__') is not None\n"
+    "    )\n"
+    "except Exception:\n"
+    "    ok = False\n"
+    "sys.exit(0 if ok else 1)\n"
+)
+
+
 def resolve_invoker(app_dir: Path) -> list[str]:
     """The argv prefix that runs the app; acceptance args are appended to it.
     Accepts BOTH styles: `python -m todo` when a runnable module exists, else a
     console-script entry point (`todo = pkg.cli:fn`) invoked via a `python -c`
-    shim that sets argv and calls the function. A faithful build can ship either."""
+    shim that sets argv and calls the function. A faithful build can ship either.
+
+    Whether `-m todo` is runnable is decided by probing the import system
+    (`importlib.util.find_spec`) in a subprocess with cwd=app_dir, never by
+    running the app: `todo` must resolve, and if it resolves to a package
+    (has `submodule_search_locations`), `todo.__main__` must resolve too. For a
+    package this imports `todo/__init__.py` — its import side effects still
+    run — but `__main__.py` itself is never executed."""
     probe = subprocess.run(
-        [sys.executable, "-m", "todo"],
+        [sys.executable, "-c", _RESOLVE_PROBE],
         cwd=str(app_dir),
         capture_output=True,
         text=True,
         timeout=30.0,
     )
-    if "No module named todo.__main__" not in probe.stderr:
+    if probe.returncode == 0:
         return [sys.executable, "-m", "todo"]
     ep = _console_entry(app_dir)
     if ep:
         mod, func = ep
+        # `raise SystemExit(_entry())`, not a bare call: a console entry point
+        # signals failure by RETURNING a nonzero code, and acceptance grades on
+        # the exit status — a bare call would hand every shim app a free pass.
         shim = (
             f"import sys; sys.argv=['todo']+sys.argv[1:]; "
-            f"from {mod} import {func} as _entry; _entry()"
+            f"from {mod} import {func} as _entry; raise SystemExit(_entry())"
         )
         return [sys.executable, "-c", shim]
     return [sys.executable, "-m", "todo"]
