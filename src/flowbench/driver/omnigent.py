@@ -21,6 +21,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import sys
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -32,6 +33,7 @@ from flowbench.transcript import (
     dedup_items,
     last_assistant_text,
     n_assistant_messages,
+    new_assistant_text,
     to_jsonable,
 )
 from flowbench.types import TurnResult, TurnStatus
@@ -42,6 +44,8 @@ from flowbench.types import TurnResult, TurnStatus
 # message queued behind a running turn (todo-app-005 stalled on its own inject).
 _PROMPT_KEYS = ("pending_elicitations", "terminal_pending")
 _PAGE = 200  # server-side max page for GET /v1/sessions/{id}/items
+_now = time.monotonic  # clock seam: the budget tests drive a fake one; never patch
+# time.monotonic itself (asyncio uses it)
 
 
 def git_init_repo(path: Path) -> None:
@@ -105,14 +109,14 @@ class OmnigentDriver(AgentDriver):
     # session), before the reply item persists, or while the agent is still
     # MID-TURN (bridge race seen live: injecting then hits a busy terminal and
     # the run dies). An idle turn is trusted only once a NEW assistant message
-    # has landed; None = settle for the full turn budget. Expiry ->
-    # TurnStatus.TIMEOUT, never a stale reply.
-    settle_timeout_s: float | None = None
+    # has landed; settling draws on the one send-wide budget (`deadline`).
+    # Expiry -> TurnStatus.TIMEOUT, never a stale reply.
     settle_poll_s: float = 2.0
-    # An injection into a terminal whose input prompt hasn't rendered fails with
-    # runner_error "The message was not delivered" — the agent was still mid-turn
-    # behind a lying idle (seen live twice). Undelivered means retrying is
-    # double-delivery-safe: wait for the terminal to finish, re-send.
+    # FAILED with no new assistant message (rows 1/3, docs/design/runner.md): the
+    # inject likely never landed (busy terminal behind a lying idle, seen live
+    # twice) — wait `send_retry_wait_s`, re-send the same text, at most
+    # `send_retry_attempts` times, only while the send's budget still covers the
+    # wait. FAILED with a new assistant message is a flaked idle, never re-sent.
     send_retry_attempts: int = 3
     send_retry_wait_s: float = 30.0
     # Per-flow bundle inputs (see runner.flow.Flow). Defaults reproduce the vanilla
@@ -214,59 +218,93 @@ class OmnigentDriver(AgentDriver):
         raise RuntimeError("no online host with claude-native configured")
 
     async def send(self, text: str) -> TurnResult:
-        result = await self._send_once(text)
-        for _ in range(self.send_retry_attempts):
-            if result.status != TurnStatus.FAILED or not await self._injection_undelivered():
+        # ONE wall-clock budget per send: the soft checks below pre-empt every wait
+        # against `deadline`; the timer cancels whatever server call, back-off or
+        # retry sleep is still in flight when the same instant passes. A cancelled
+        # inject is the unknown-delivery state TIMEOUT names — never re-sent.
+        deadline = _now() + self.turn_timeout_s
+        try:
+            async with asyncio.timeout(self.turn_timeout_s):
+                result = await self._send_once(text, deadline)
+                for _ in range(self.send_retry_attempts):
+                    if (
+                        result.status != TurnStatus.FAILED  # rows 2, 4, 5: never re-sent
+                        or deadline - _now() <= self.send_retry_wait_s  # no budget to wait for it
+                        or not await self._resend_allowed()
+                    ):
+                        return result
+                    # rows 1/3: failed and no new text — the inject (likely) never landed
+                    await asyncio.sleep(self.send_retry_wait_s)
+                    result = await self._send_once(text, deadline)
                 return result
-            # The terminal was busy and the message never landed — give the agent
-            # time to finish its in-flight work, then re-send the SAME text.
-            await asyncio.sleep(self.send_retry_wait_s)
-            result = await self._send_once(text)
-        return result
+        except TimeoutError:
+            return self._timed_out()
 
-    async def _injection_undelivered(self) -> bool:
-        """True when the last failure was the runner refusing the inject because
-        the input prompt never rendered — the message did NOT reach the agent."""
+    def _timed_out(self) -> TurnResult:
+        # nothing is read at expiry; artifact_exists=False means "not observed"
+        return TurnResult(TurnStatus.TIMEOUT, "", False)
+
+    async def _resend_allowed(self) -> bool:
+        """Rows 1/3 (docs/design/runner.md): whether a FAILED turn with no new
+        assistant text is safe to re-send. True when no error label is set (sim/
+        judge sessions set none, #39 — row 3) or the label says the injection
+        itself never landed (row 1). False for any other present code (e.g.
+        `model_error` — a delivered failure; re-sending could double-deliver) and
+        False when the label read itself fails (unknown is not "no label")."""
         try:
             resp = await self._http.get(f"/v1/sessions/{self._chat.session_id}")
+            resp.raise_for_status()
             labels = resp.json().get("labels") or {}
         except Exception:
             return False
-        return labels.get("omnigent.last_task_error_code") == "runner_error" and (
+        code = labels.get("omnigent.last_task_error_code")
+        if not code:
+            return True  # row 3
+        return code == "runner_error" and (
             "not delivered" in labels.get("omnigent.last_task_error_message", "")
-        )
+        )  # row 1
 
-    async def _send_once(self, text: str) -> TurnResult:
+    async def _send_once(self, text: str, deadline: float) -> TurnResult:
         n_before = n_assistant_messages(await self._list_items())
         self._stall = None
+        if _now() >= deadline:
+            return self._timed_out()  # budget gone before the inject
         async for ev in self._chat.send(text):  # inject; envelope completes fast
             self._captured.append(to_jsonable(ev))
-        status = await self._wait_idle()
+        status = await self._wait_idle(deadline)
         items = await self._list_items()
         # Settle: an idle status with no NEW assistant message is either the
         # pickup/persist race (a live judge returned an empty verdict this way) or
         # the agent still mid-turn behind a lying idle (todo-003: plan being
-        # written) — keep polling until the reply lands or the budget expires.
-        settle = time.monotonic() + (
-            self.settle_timeout_s if self.settle_timeout_s is not None else self.turn_timeout_s
-        )
+        # written) — keep polling until the reply lands or the send's budget
+        # (`deadline`) expires.
         while (
             status == TurnStatus.IDLE
-            and n_assistant_messages(items) <= n_before
-            and time.monotonic() < settle
+            and not new_assistant_text(items, n_before)
+            and _now() < deadline
         ):
             await asyncio.sleep(self.settle_poll_s)
-            status = await self._wait_idle()
+            status = await self._wait_idle(deadline)
             items = await self._list_items()
-        if status == TurnStatus.IDLE and n_assistant_messages(items) <= n_before:
+        if status == TurnStatus.IDLE and not new_assistant_text(items, n_before):
             # Idle but silent past the budget: the turn never completed. Injecting
             # now would hit a busy terminal (message lost, session failed) — fail
             # the turn honestly instead.
             status = TurnStatus.TIMEOUT
+        flaked = False
+        if status == TurnStatus.FAILED and new_assistant_text(items, n_before):
+            # row 2: the reply landed, then the server flaked — a completed turn
+            status, flaked = TurnStatus.IDLE, True
+            print(
+                "[flowbench] turn flaked: server said failed after the reply landed; "
+                "using the emitted text",
+                file=sys.stderr,
+            )
         return TurnResult(
             status=status,
             assistant_text=last_assistant_text(items),
-            artifact_exists=self.artifact_path() is not None,
+            artifact_exists=(await asyncio.to_thread(self.artifact_path)) is not None,
+            flaked=flaked,
             **(self._stall or {}),
         )
 
@@ -334,17 +372,18 @@ class OmnigentDriver(AgentDriver):
                 return out
             after = body.get("last_id") or out[-1]["id"]
 
-    async def _wait_idle(self, min_wait: float = 4.0) -> TurnStatus | str:
-        """Poll the raw session status until a turn boundary. Every documented
-        omnigent status (`idle`/`running`/`failed`) and every flowbench-derived
-        one (`timeout`/`stalled`) returns as a `TurnStatus`; an undocumented
-        server status passes through verbatim (decisions #7) — no coercion, no
+    async def _wait_idle(self, deadline: float, min_wait: float = 4.0) -> TurnStatus | str:
+        """Poll the raw session status until a turn boundary, or until `deadline`
+        (the send's single wall-clock budget) passes. Every documented omnigent
+        status (`idle`/`running`/`failed`) and every flowbench-derived one
+        (`timeout`/`stalled`) returns as a `TurnStatus`; an undocumented server
+        status passes through verbatim (decisions #7) — no coercion, no
         fallback, no new control flow."""
-        start, seen_running = time.monotonic(), False
+        start, seen_running = _now(), False
         heartbeat, last_beat = None, start
         st, prompt_polls = None, 0
         had_children, cleared_at = False, None
-        while time.monotonic() - start < self.turn_timeout_s:
+        while _now() < deadline:
             snap = await self._read_retry(self._snapshot)
             st = snap.get("status")
             busy_children = snap.get("busy_children") or []
@@ -353,7 +392,7 @@ class OmnigentDriver(AgentDriver):
                 had_children, cleared_at = True, None
             elif st == TurnStatus.IDLE and had_children:
                 # children just finished: arm the wake-up wait once per clearing
-                had_children, cleared_at = False, time.monotonic()
+                had_children, cleared_at = False, _now()
             elif st == TurnStatus.RUNNING:
                 had_children, cleared_at = False, None  # the wake-up turn ran
             if st == TurnStatus.RUNNING:
@@ -367,13 +406,13 @@ class OmnigentDriver(AgentDriver):
                     return await self._stalled("prompt")
                 beat = (snap.get("updated_at"), *busy_children)
                 if beat != heartbeat:
-                    heartbeat, last_beat = beat, time.monotonic()
-                elif time.monotonic() - last_beat >= self.stall_s:
+                    heartbeat, last_beat = beat, _now()
+                elif _now() - last_beat >= self.stall_s:
                     return await self._stalled("no_progress")
             if st == TurnStatus.FAILED:
                 return TurnStatus.FAILED
-            settled = seen_running or time.monotonic() - start >= min_wait
-            woke = cleared_at is None or time.monotonic() - cleared_at >= self.child_wake_s
+            settled = seen_running or _now() - start >= min_wait
+            woke = cleared_at is None or _now() - cleared_at >= self.child_wake_s
             if st == TurnStatus.IDLE and settled and woke:
                 return TurnStatus.IDLE
             await asyncio.sleep(1.5)

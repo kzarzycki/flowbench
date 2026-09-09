@@ -2,6 +2,10 @@
 the user. Asserts the loop answers, stops on the DONE token, respects max_turns,
 and bails on a failed status."""
 
+import dataclasses
+
+import pytest
+
 from flowbench.driver import AgentDriver, TurnResult
 from flowbench.loop import _is_done, render_tail, run_agent_session
 from flowbench.types import TurnStatus
@@ -119,6 +123,34 @@ async def test_loop_primes_simulator_once_then_relays_deltas():
     assert "and what file name?" not in third  # relayed once, never again
 
 
+@pytest.mark.parametrize("flaked_index", [0, 1])
+async def test_loop_continues_past_a_flaked_idle_turn_and_counts_it(flaked_index):
+    # a flaked turn (driver already resolved FAILED-after-reply-landed to IDLE,
+    # flaked=True) is a normal idle turn to the loop — it just counts it. The
+    # flaked_index=0 case is the uninitialized-counter trap: `flaked` must exist
+    # before the FIRST send, not only inside the in-loop send.
+    turns = [
+        TurnResult(TurnStatus.IDLE, "q?", False),
+        TurnResult(TurnStatus.IDLE, "done", True),
+    ]
+    turns[flaked_index] = dataclasses.replace(turns[flaked_index], flaked=True)
+    driver = _FakeDriver(turns, {"items": []})
+    user = _StubModel(["some reply", DONE_TOKEN])
+    session = await run_agent_session(
+        driver,
+        user,
+        first_prompt=FIRST_PROMPT,
+        simulator_system=SIM_SYSTEM,
+        done_token=DONE_TOKEN,
+        max_turns=10,
+        deadline_s=999,
+        artifact_grace_s=0,
+    )
+    assert session["exit_status"] == TurnStatus.IDLE
+    assert session["flaked_turns"] == 1
+    assert session["turns"] == 1
+
+
 async def test_relay_advances_even_when_simulator_says_continue():
     # todo-app-004: the sim's literal "Continue." matched the old nudge sentinel,
     # so sim_seen froze and every later relay resent the whole backlog (quadratic)
@@ -177,6 +209,7 @@ async def test_loop_answers_then_stops_on_done_token():
     assert "tasks.json" in driver.sent[1]
     assert len(user.seen) == 2  # answered once, then said DONE
     assert session["items"] == []
+    assert session["flaked_turns"] == 0
 
 
 async def test_loop_stops_at_max_turns():

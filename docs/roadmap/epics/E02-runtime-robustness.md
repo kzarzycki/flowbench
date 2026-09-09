@@ -15,10 +15,7 @@ tracked by an upstream PR.
 `runner/driver.py` today mixes five concerns: the `AgentDriver` ABC, transcript utilities,
 bundle building (config render + tar), the omnigent session lifecycle, and the
 send/settle/retry heuristics. Statuses are magic strings (`"idle"`, `"failed"`,
-`"timeout"`). Retry policy is split: the driver retries *undelivered* injections
-(label-confirmed), while downstream `SessionModel.generate` (issue #39) separately retries
-*failed-with-stale-text* turns because simulator/judge sessions don't reliably set the
-delivery labels. The driver also reaches into `omnigent_client` privates
+`"timeout"`). The driver also reaches into `omnigent_client` privates
 (`sessions._http`, `sessions._base`, hand-built `SessionsChat`), which is why the dep is
 pinned `==0.1.1`.
 
@@ -58,31 +55,6 @@ pinned `==0.1.1`.
   mechanically and once for real, is the churn the epic's own Risks section warns
   against; the remainder goes with S02.3.
 
-### S02.3 One retry policy, at the driver
-
-- Move the fresh-text rule into `send`: a turn that ends `FAILED` but produced a NEW
-  assistant message (vs. the pre-send count, which `_send_once` already tracks) is a
-  delivered-then-flaked turn — return it as success-with-flag rather than making every
-  caller re-derive it.
-- Resulting policy table (goes verbatim into `docs/design/runner.md`):
-
-  | Observation | Meaning | Action |
-  | --- | --- | --- |
-  | `FAILED` + label says undelivered | injection never landed | wait, re-send same text (bounded) |
-  | `FAILED` + new assistant text | turn completed, then flaked | trust the text, no retry |
-  | `FAILED`, no label, no new text | unknown; likely undelivered | bounded re-send (the #39 behavior, generalized) |
-  | `TIMEOUT` | may be mid-turn after delivery | NEVER retry (injecting into a busy terminal kills sessions) |
-  | `IDLE` + no new text past settle budget | lying idle | report `TIMEOUT` |
-
-- `SessionModel.generate` shrinks to: send, raise on `TIMEOUT`/no-text, wrap completion.
-  Its downstream tests move/port with it.
-- **One wall-clock budget per send** (audited bug): today `_send_once` stacks a full
-  `turn_timeout_s` in `_wait_idle` plus a second `turn_timeout_s` settle window whose
-  iterations call `_wait_idle` again — a single turn can eat ~8–9 min of a 30-min run.
-  The send gets one ceiling that all inner waits and retry sleeps draw down.
-- Verify: the S00.3 regression tests plus new ones covering each table row (V1); V4 is
-  MANDATORY here — this is the code path that killed runs #30/#34/#39.
-
 ### S02.3b Loop hygiene — DONE (flowbench #67, ahead of E02)
 
 Both audited bugs were removed rather than patched: the loop no longer nudges at all (the
@@ -116,7 +88,7 @@ live check todo-app-005.
 ### S02.6 Error taxonomy
 
 - The broad `except Exception` sites (`close`, `_context_tokens`,
-  `_injection_undelivered`, `transcript.to_jsonable`) become narrow catches with a debug log line;
+  `_resend_allowed`, `transcript.to_jsonable`) become narrow catches with a debug log line;
   where swallowing is correct (teardown, best-effort labels), a comment says *why*
   swallowing is correct, not just that it happens.
 - Verify: `ruff` BLE-style audit clean or explicitly waived per site; V1.
