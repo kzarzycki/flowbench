@@ -156,12 +156,14 @@ class OmnigentDriver(AgentDriver):
         if os.environ.get("ANTHROPIC_API_KEY"):
             raise RuntimeError("ANTHROPIC_API_KEY is set — would defeat subscription billing.")
         import httpx
+
+        # UPSTREAM: https://github.com/omnigent-ai/omnigent/issues/6822 — the SDK has no hosts/runners
+        # namespace; these are the `omnigent host` CLI's helpers (inventory R3).
         from omnigent.host.daemon_launch import (
             launch_or_reuse_daemon_runner,
             wait_for_runner_online,
         )
-        from omnigent_client import OmnigentClient
-        from omnigent_client._sessions_chat import SessionsChat
+        from omnigent_client import OmnigentClient, SessionsChat
 
         self.run_dir.mkdir(parents=True, exist_ok=True)
         if self.git_init and not (self.run_dir / ".git").exists():
@@ -175,6 +177,8 @@ class OmnigentDriver(AgentDriver):
 
         # Create with --disallowedTools so claude asks in plain text (the card
         # otherwise blocks the tmux prompt and deadlocks turn 2+).
+        # UPSTREAM: https://github.com/omnigent-ai/omnigent/issues/6822 — `sessions.create()` cannot
+        # send `terminal_launch_args`; raw POST until the SDK carries it (inventory R1).
         resp = await self._client.sessions._http.post(
             f"{self._client.sessions._base}/v1/sessions",
             data={"metadata": json.dumps(self._create_metadata())},
@@ -252,9 +256,8 @@ class OmnigentDriver(AgentDriver):
         `model_error` — a delivered failure; re-sending could double-deliver) and
         False when the label read itself fails (unknown is not "no label")."""
         try:
-            resp = await self._http.get(f"/v1/sessions/{self._chat.session_id}")
-            resp.raise_for_status()
-            labels = resp.json().get("labels") or {}
+            # `sessions.get` raises on non-2xx — an HTTP error lands here, not in row 3
+            labels = (await self._client.sessions.get(self._chat.session_id)).labels or {}
         except Exception:
             return False
         code = labels.get("omnigent.last_task_error_code")
@@ -480,8 +483,8 @@ class OmnigentDriver(AgentDriver):
         if self._chat is None:
             return None
         try:
-            resp = await self._http.get(f"/v1/sessions/{self._chat.session_id}")
-            raw = (resp.json().get("labels") or {}).get("omnigent.last_context_tokens")
+            labels = (await self._client.sessions.get(self._chat.session_id)).labels or {}
+            raw = labels.get("omnigent.last_context_tokens")
             return int(raw) if raw else None
         except Exception:
             return None
