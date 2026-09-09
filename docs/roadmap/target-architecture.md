@@ -99,9 +99,9 @@ case dir                          run dir (../flowbench-runs/<scenario>/<run-id>
   schema doc. Readers tolerate additive change; breaking change bumps the version.
 - **The simulator seam**: any object with `async generate(prompt) -> .completion`. Kept
   duck-typed on purpose (a Protocol in `types.py` names it without freezing it).
-- **The artifact concern moves out of the driver.** `artifact_name="__none__"` for
-  simulator/judge sessions is the current leak. The driver owns the workspace; the
-  orchestrator (loop/run) owns "which file proves delivery", passed as a probe callable.
+- **The artifact concern is not the driver's.** The driver owns the workspace; the
+  orchestrator (`run.py`) owns "which file proves delivery" and passes it to the loop as a
+  probe callable (`docs/design/runner.md`, "Artifact probe").
 
 ## Scenario contract
 

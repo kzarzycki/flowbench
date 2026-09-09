@@ -60,9 +60,10 @@ uv run python -m scenarios.coding_workflow.run --rescore <run-id>
   run dir's `<flow>/session.json` files in place, with no new session. Helpers:
   `model.py` (`SessionModel`), `flowspec.py` (flows.yaml), `transcript.py`, `watch.py` (`RunWatch`),
   `report/run_report.py`, `testing.py` (offline doubles). Factories are injected;
-  `omni_factories(scenario, *, artifact_name: str | None = "plan.md", git_init=False)` = the real
-  ones (`artifact_name=None` means the case declares no artifact — todo_app binds
-  `artifact_name=None, git_init=True`).
+  `omni_factories(scenario, *, git_init=False)` = the real ones (todo_app binds
+  `git_init=True`). Which file proves delivery is `run_case`'s `artifact_name` (`None` = the
+  case declares no artifact, todo_app); `run_case` turns it into an `artifact_probe` callable
+  for `run_agent_session` — the driver never knows the artifact.
 - `src/flowbench/report/compare.py` — side-by-side flow comparison; a scoreless flow (missing
   scorecard, or one whose `score_flow` raised) renders as a FAILED column, never an abort.
 - `src/flowbench/cli.py` — typer: `compare`.

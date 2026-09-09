@@ -98,9 +98,7 @@ def main() -> None:
         print(json.dumps(result, indent=2))
         return
 
-    make_flow_driver, make_simulator, run_judge = omni_factories(
-        SCENARIO, artifact_name=ARTIFACT_NAME, git_init=True
-    )
+    make_flow_driver, make_simulator, run_judge = omni_factories(SCENARIO, git_init=True)
     result = asyncio.run(
         run_case_n(
             scenario.CASE_DIR(args.case),

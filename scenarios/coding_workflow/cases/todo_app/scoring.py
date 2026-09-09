@@ -84,7 +84,6 @@ def make_grader_omni(flow_dir: Path, *, scenario: str) -> SessionModel:
     return SessionModel(
         OmnigentDriver(
             run_dir=judge_dir,
-            artifact_name="__none__",  # no artifact expected
             model=JUDGE_MODEL,
             skills="none",
             turn_timeout_s=600,  # one long grading turn over the produced code

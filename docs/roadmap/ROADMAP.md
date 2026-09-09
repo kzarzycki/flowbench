@@ -58,7 +58,7 @@ Executes the recorded 2026-07-02 decision: `run_case`, everything omnigent, Insp
   documented policy table; single wall-clock budget per send (nested-timeout bug).
 - S02.3b Loop hygiene — DONE early as flowbench #67 (nudges deleted; driver waits out
   busy children; items paginated).
-- S02.4 Artifact probe out of the driver (kill `artifact_name="__none__"`).
+- S02.4 Artifact probe out of the driver.
 - S02.5 Omnigent public-API migration + `live` pin bump (meta-harness decision:
   `docs/design/decisions/2026-09-09-omnigent-as-the-meta-harness.md`).
 - S02.6 Error taxonomy: narrow the broad `except Exception` sites.

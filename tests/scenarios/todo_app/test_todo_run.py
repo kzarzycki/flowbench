@@ -48,7 +48,6 @@ def test_main_wires_engine_run_case_n(monkeypatch, capsys, tmp_path):
     assert kw["make_flow_driver"].func is engine_run.make_flow_driver_omni
     assert kw["make_flow_driver"].keywords == {
         "scenario": "coding_workflow",
-        "artifact_name": "__none__",
         "git_init": True,
     }
     assert kw["artifact_name"] is None
@@ -163,7 +162,7 @@ def test_make_grader_omni_wires_judge_dir_and_model(tmp_path):
     assert d.model == engine_run.JUDGE_MODEL
     assert d.skills == "none"
     assert d.turn_timeout_s == 600
-    assert d.artifact_name == "__none__"
+    assert not hasattr(d, "artifact_name")
     # web-UI grouping: the grader lands in its run's folder, titled by flow
     assert d.project == "coding_workflow/run-1"
     assert d.session_title == "judge: superpowers"

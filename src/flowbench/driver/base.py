@@ -7,7 +7,6 @@ module that knows omnigent exists is `flowbench.driver.omnigent`.
 from __future__ import annotations
 
 import abc
-from pathlib import Path
 from typing import Any
 
 from flowbench.types import TurnResult
@@ -25,9 +24,6 @@ class AgentDriver(abc.ABC):
     @abc.abstractmethod
     async def capture_session(self) -> dict[str, Any]:
         """The transcript + run fields the normalizer consumes."""
-
-    @abc.abstractmethod
-    def artifact_path(self) -> Path | None: ...
 
     @abc.abstractmethod
     async def close(self) -> None:

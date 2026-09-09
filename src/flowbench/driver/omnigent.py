@@ -78,14 +78,12 @@ def git_init_repo(path: Path) -> None:
 class OmnigentDriver(AgentDriver):
     """Drives a real `claude` REPL via a local omnigent server.
 
-    :param run_dir: absolute cwd the agent writes into (artifact lands here).
-    :param artifact_name: the file the task asks for (existence check).
+    :param run_dir: absolute cwd the agent works in.
     :param server_url: omnigent server base URL.
     :param model: subscription model id/alias to pin (e.g. "sonnet").
     """
 
     run_dir: Path
-    artifact_name: str
     server_url: str = field(
         default_factory=lambda: os.environ.get("OMNIGENT_SERVER", "http://127.0.0.1:6767")
     )
@@ -248,8 +246,8 @@ class OmnigentDriver(AgentDriver):
             return self._timed_out()
 
     def _timed_out(self) -> TurnResult:
-        # nothing is read at expiry; artifact_exists=False means "not observed"
-        return TurnResult(TurnStatus.TIMEOUT, "", False)
+        # nothing is read at expiry
+        return TurnResult(TurnStatus.TIMEOUT, "")
 
     async def _resend_allowed(self) -> bool:
         """Rows 1/3 (docs/design/runner.md): whether a FAILED turn with no new
@@ -311,7 +309,6 @@ class OmnigentDriver(AgentDriver):
         return TurnResult(
             status=status,
             assistant_text=last_assistant_text(items),
-            artifact_exists=(await asyncio.to_thread(self.artifact_path)) is not None,
             flaked=flaked,
             **(self._stall or {}),
         )
@@ -460,13 +457,6 @@ class OmnigentDriver(AgentDriver):
         except Exception:
             return None
 
-    def artifact_path(self) -> Path | None:
-        cand = self.run_dir / self.artifact_name
-        if cand.exists():
-            return cand
-        hits = list(self.run_dir.rglob(self.artifact_name))
-        return hits[0] if hits else None
-
     def _conversation_id(self) -> str | None:
         """The `conv_…` id (carried on every streamed event) used by the omnigent
         web UI route. Survives the run, so it's the handle for browsing AND for
@@ -498,15 +488,11 @@ class OmnigentDriver(AgentDriver):
     async def capture_session(self) -> dict[str, Any]:
         items = await self._list_items()
         items = dedup_items(items)  # clean: drop capture-doubles + control injections
-        artifact = self.artifact_path()
         return {
             "context_tokens": await self._context_tokens(),
             "items": items,
             "events": self._captured,
             "duration_s": round(time.monotonic() - self._started, 1),
-            "artifact_exists": artifact is not None,
-            "artifact_path": str(artifact) if artifact else None,
-            "artifact_text": artifact.read_text() if artifact else None,
             "model": self.model,
             "driver": "omnigent",
             # Handles for resuming the SUT after the run (the session is left alive

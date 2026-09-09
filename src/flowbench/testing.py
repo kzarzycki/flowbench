@@ -5,6 +5,8 @@ live omnigent server."""
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from flowbench.driver import AgentDriver
 from flowbench.types import TurnResult, TurnStatus
 
@@ -29,50 +31,47 @@ class ScriptedDriver:
 
 class FakeDriver(AgentDriver):
     """Replays scripted questions, then reports the plan complete; 'writes' the
-    plan by returning it as capture_session()'s artifact_text."""
+    plan to `run_dir/plan.md` on disk (like a real driver would) when `run_dir`
+    is given, so the orchestrator's `find_artifact` probe finds it."""
 
-    def __init__(self, plan_text, questions):
+    def __init__(self, plan_text, questions, run_dir=None):
         self._plan = plan_text
         self._questions = list(questions)
+        self._run_dir = run_dir
         self.sent = []
         self.closed = False
 
     async def start(self):
-        pass
+        if self._run_dir is not None:
+            Path(self._run_dir).mkdir(parents=True, exist_ok=True)
+            (Path(self._run_dir) / "plan.md").write_text(self._plan or "")
 
     async def send(self, text):
         self.sent.append(text)
         if self._questions:
-            return TurnResult(TurnStatus.IDLE, self._questions.pop(0), False)
+            return TurnResult(TurnStatus.IDLE, self._questions.pop(0))
         return TurnResult(TurnStatus.IDLE, "The plan is complete and written to plan.md.", True)
 
     async def capture_session(self):
         items = [{"type": "message", "role": "user", "content": s} for s in self.sent]
         items.append({"type": "message", "role": "assistant", "content": "plan written"})
-        return {"items": items, "events": [], "artifact_text": self._plan}
-
-    def artifact_path(self):
-        # Truthful for the grace-poll in run_agent_session: this fake's plan
-        # "exists" (returned as artifact_text), so report a path. Fakes that
-        # model a missing artifact override this back to None (issue #18).
-        return "plan.md"
+        return {"items": items, "events": []}
 
     async def close(self):
         self.closed = True
 
 
 class MissingPlanDriver(FakeDriver):
-    """Reports the plan complete but never produced an artifact (flow crashed).
-    artifact_path stays None, so this fake pays run_agent_session's real
-    artifact grace-poll (issue #18) — the one deliberately slow test."""
+    """Reports the plan complete but never produced an artifact (flow crashed):
+    `start()` writes nothing, so `find_artifact` never finds a plan."""
+
+    async def start(self):
+        pass
 
     async def capture_session(self):
         items = [{"type": "message", "role": "user", "content": s} for s in self.sent]
         items.append({"type": "message", "role": "assistant", "content": "no plan"})
-        return {"items": items, "events": [], "artifact_text": None}
-
-    def artifact_path(self):
-        return None
+        return {"items": items, "events": []}
 
 
 class StubSim:
@@ -100,8 +99,8 @@ def n_run_factories(judge_winners):
 
     def make_flow_driver(flow, flow_dir):
         if flow["name"] == "superpowers":
-            return FakeDriver("# SP plan\nunknown flag key returns 404.", [])
-        return FakeDriver("# plain plan\nno unknown-key note.", [])
+            return FakeDriver("# SP plan\nunknown flag key returns 404.", [], run_dir=flow_dir)
+        return FakeDriver("# plain plan\nno unknown-key note.", [], run_dir=flow_dir)
 
     def make_simulator(flow, sim_dir):
         return StubSim(["PLAN_COMPLETE"])

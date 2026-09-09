@@ -10,7 +10,7 @@
    every harness we benchmark. A flow declares `harness` (`claude-native`, `codex-native`, …);
    omnigent owns the launch.
 2. **Exactly one module knows that** — `src/flowbench/driver/omnigent.py` (was `runner/driver.py` until E02 S02.2), behind the
-   `AgentDriver` ABC (`start / send / capture_session / artifact_path / close`). Everything
+   `AgentDriver` ABC (`start / send / capture_session / close`). Everything
    upstream of that seam is omnigent-free at import time, and the offline suite runs against
    `flowbench.testing` doubles through the same seam.
 3. **herdr is not adopted**, and neither is a per-harness CLI driver of our own. Both are

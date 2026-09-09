@@ -21,9 +21,7 @@ def _extract(bundle: bytes, dest: Path) -> Path:
 
 
 def test_render_config_emits_harness_and_skills_filter(tmp_path):
-    d = OmnigentDriver(
-        run_dir=tmp_path, artifact_name="tasks.json", harness="claude-native", skills="none"
-    )
+    d = OmnigentDriver(run_dir=tmp_path, harness="claude-native", skills="none")
     cfg = d.render_config()
     assert "harness: claude-native" in cfg
     assert "skills: none" in cfg
@@ -32,12 +30,12 @@ def test_render_config_emits_harness_and_skills_filter(tmp_path):
 
 def test_render_config_omits_skills_when_all(tmp_path):
     # "all" is omnigent's default, so nothing is written — baseline stays vanilla.
-    d = OmnigentDriver(run_dir=tmp_path, artifact_name="tasks.json")
+    d = OmnigentDriver(run_dir=tmp_path)
     assert "skills:" not in d.render_config()
 
 
 def test_render_config_skills_list_is_flow_yaml(tmp_path):
-    d = OmnigentDriver(run_dir=tmp_path, artifact_name="tasks.json", skills=["a", "b"])
+    d = OmnigentDriver(run_dir=tmp_path, skills=["a", "b"])
     assert "skills: [a, b]" in d.render_config()
 
 
@@ -53,7 +51,6 @@ def test_build_bundle_copies_skill_dirs_and_mcp(tmp_path):
 
     drv = OmnigentDriver(
         run_dir=tmp_path / "ws",
-        artifact_name="tasks.json",
         skills="none",
         skill_dirs=[skills_src / "brainstorming", skills_src / "tdd"],
         mcp_files=[mcp],
@@ -68,7 +65,7 @@ def test_build_bundle_copies_skill_dirs_and_mcp(tmp_path):
 
 def test_build_bundle_baseline_has_no_skills_dir(tmp_path):
     # the baseline flow ships an empty bundle — nothing added.
-    drv = OmnigentDriver(run_dir=tmp_path / "ws", artifact_name="tasks.json")
+    drv = OmnigentDriver(run_dir=tmp_path / "ws")
     out = _extract(drv._build_bundle(), tmp_path / "out")
     assert (out / "config.yaml").exists()
     assert not (out / "skills").exists()

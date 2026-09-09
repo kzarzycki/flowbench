@@ -68,9 +68,8 @@ orchestration on top of the engine — see "Downstream duplication".
    rotation, aggregation, report rendering, and the run watcher are all in
    flowbench-scenarios' swe_planning dir. The recorded extraction trigger ("a second
    scenario forces extraction") fires with the todo_app port. → E01
-2. **Driver god-module + abstraction leaks.** Bundle building, transcript utilities, and
-   artifact probing (`artifact_name="__none__"` for sessions with no artifact) don't
-   belong in the session driver. → S02.2, S02.4
+2. **Driver god-module + abstraction leaks.** Bundle building and transcript utilities
+   don't belong in the session driver. → S02.2
 3. **Private-API reach-ins.** `sessions._http`, `sessions._base`, hand-built
    `SessionsChat`, `omnigent.host.daemon_launch` internals. The 0.1.1 pins exist because of
    this — and the driven server runs from a far newer source checkout, so the pinned client
