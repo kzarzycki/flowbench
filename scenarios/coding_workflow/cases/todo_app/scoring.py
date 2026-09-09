@@ -8,9 +8,9 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from flowbench.driver import OmnigentDriver
 from flowbench.model import SessionModel
 from flowbench.run import JUDGE_MODEL, _project, _title
-from flowbench.driver import OmnigentDriver
 from scenarios.coding_workflow.cases.todo_app import scorers as sc
 from scenarios.coding_workflow.cases.todo_app.acceptance import run_acceptance
 

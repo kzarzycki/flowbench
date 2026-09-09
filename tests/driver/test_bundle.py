@@ -95,6 +95,10 @@ _GOLDEN_CONFIG_HEAD = (
 )
 
 
+def _sha(text: str) -> str:
+    return hashlib.sha256(text.encode()).hexdigest()
+
+
 def _spec(tmp_path, **kw):
     fields = {
         "run_dir": tmp_path,
@@ -125,11 +129,12 @@ def test_golden_render_config_three_variants(tmp_path):
 
 
 def test_golden_bundle_members_and_content_hashes(tmp_path):
+    skill_md, mcp_yaml = "# brainstorming\n", "name: fetch\n"
     sk = tmp_path / "src" / "brainstorming"
     sk.mkdir(parents=True)
-    (sk / "SKILL.md").write_text("# brainstorming\n")
+    (sk / "SKILL.md").write_text(skill_md)
     mcp = tmp_path / "src" / "fetch.yaml"
-    mcp.write_text("name: fetch\n")
+    mcp.write_text(mcp_yaml)
     run_dir = tmp_path / "run"
     spec = _spec(run_dir, skills="none", skill_dirs=[sk], mcp_files=[mcp])
 
@@ -156,14 +161,10 @@ def test_golden_bundle_members_and_content_hashes(tmp_path):
     # config.yaml's hash is run_dir-dependent, so pin it against the function
     # that produced it rather than a literal; the other two are fixed inputs.
     assert by_name["./config.yaml"] == hashlib.sha256(render_config(spec).encode()).hexdigest()
-    assert (
-        by_name["./skills/brainstorming/SKILL.md"]
-        == "06424afda6b6c536d757b831449615a422e4af6a4afeed4332e700987983a96d"
-    )
-    assert (
-        by_name["./tools/mcp/fetch.yaml"]
-        == "e0f82793d4ce8e84327a2939b5dacf6c56834083dd95327422361dfcd1e7d6cf"
-    )
+    # Each copied file's content, unchanged: the same two hashes gates.md
+    # records from origin/master.
+    assert by_name["./skills/brainstorming/SKILL.md"] == _sha(skill_md)
+    assert by_name["./tools/mcp/fetch.yaml"] == _sha(mcp_yaml)
 
 
 def test_golden_session_metadata_six_variants(tmp_path):
