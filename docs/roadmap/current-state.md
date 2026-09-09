@@ -8,16 +8,21 @@ What exists, what works, what is debt. Line counts are `wc -l` on that date.
 
 | Module | Lines | Role |
 | --- | --- | --- |
-| `runner/driver.py` | 575 | `AgentDriver` ABC, `OmnigentDriver` (session lifecycle, send/settle/retry, capture), bundle building, git-init — four concerns in one file (transcript helpers moved out in S01.1; `TurnResult`/`TurnStatus` moved to `types.py` in S02.1, re-exported here) |
+| `driver/omnigent.py` | 484 | `OmnigentDriver`: session lifecycle, send/settle/retry, capture, URLs, `git_init_repo` (S02.2). Above the epic's ~350 target: #68/#76 grew the settle machinery after the epic was written, and S02.3 is where the rest goes — see E02 S02.2 |
+| `driver/bundle.py` | 142 | `render_config` / `build_bundle` / `session_metadata` as pure functions of a `BundleSpec` protocol (S02.2) |
+| `driver/base.py` | 34 | `AgentDriver` ABC (S02.2) |
+| `driver/__init__.py` | 29 | the package's public surface |
+| `runner/driver.py` | 24 | compat re-export, one release (S02.2) |
+| `runner/loop.py` | 22 | compat re-export, one release (S02.2) |
 | `types.py` | 57 | `TurnStatus` (`StrEnum`), `TurnResult`, `UserModel`/`Completion` protocols — the engine's turn-outcome vocabulary (S02.1) |
 | `run.py` | 311 | `run_case`/`run_case_n` orchestrator + omnigent factories (S01.1, lifted from swe_planning) |
 | `report/run_report.py` | 259 | run dir → report.html, single + aggregate (S01.1) |
 | `testing.py` | 112 | offline doubles: FakeDriver, StubSim, ScriptedDriver, n_run_factories (S01.1) |
 | `watch.py` | 100 | `RunWatch` live-run anomaly scanner (S01.1) |
-| `transcript.py` | 89 | message-item helpers + `render_transcript` (S01.1) |
+| `transcript.py` | 106 | message-item helpers + `render_transcript` (S01.1) |
 | `model.py` | 78 | `SessionModel` simulator/judge shim with freshness retry (S01.1) |
 | `flowspec.py` | 36 | flows.yaml loading, kickoff composition (S01.1) |
-| `runner/loop.py` | 134 | mediated DONE-token loop (no nudges since #67: the driver waits out busy children) |
+| `loop.py` | 110 | mediated DONE-token loop (no nudges since #67: the driver waits out busy children); moved out of `runner/` in S02.2 |
 | `report/compare.py` | 91 | side-by-side scorecard table; metric paths hardcoded to todo_app's schema |
 | `cli.py` | 36 | typer app; `compare` is the only command |
 | `runner/judge.py` | 142 | `last_json_object` (string-aware) + prose verdict/scores parsing, aggregation (S01.1) |

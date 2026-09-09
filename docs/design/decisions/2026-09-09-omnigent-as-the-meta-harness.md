@@ -9,7 +9,7 @@
 1. **omnigent is the meta-harness** — the one thing that launches a flow's coding agent, for
    every harness we benchmark. A flow declares `harness` (`claude-native`, `codex-native`, …);
    omnigent owns the launch.
-2. **Exactly one module knows that** — `src/flowbench/runner/driver.py`, behind the
+2. **Exactly one module knows that** — `src/flowbench/driver/omnigent.py` (was `runner/driver.py` until E02 S02.2), behind the
    `AgentDriver` ABC (`start / send / capture_session / artifact_path / close`). Everything
    upstream of that seam is omnigent-free at import time, and the offline suite runs against
    `flowbench.testing` doubles through the same seam.
@@ -109,7 +109,7 @@ defaults.
 
 ## Consequences
 
-- Nothing outside `runner/driver.py` may import omnigent; a new capability arrives as a method
+- Nothing outside `driver/omnigent.py` may import omnigent; a new capability arrives as a method
   on `AgentDriver`, not as an omnigent call at the call site.
 - `TurnResult` and the captured-session dict are the vendor boundary — new omnigent signals
   become fields there (as `stall_reason` / `pane_tail` did) or they do not exist upstream.

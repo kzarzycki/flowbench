@@ -46,9 +46,17 @@ pinned `==0.1.1`.
   with a `flowbench.runner.loop` compat re-export, same one-release policy as the
   driver's.
 - Behavior-preserving; no policy change in this story.
-- Verify: V1, V2; `driver/omnigent.py` under ~350 lines; no scenario imports break
+- Verify: V1, V2, V4 (`verification.md` makes a live run mandatory for any change to
+  `driver.py`/`loop.py`, and this story moves both); no scenario imports break
   (grep both repos for `flowbench.runner.driver` and add a compat re-export for one
-  release of the loop).
+  release of the loop). **Landed at `driver/omnigent.py` = 484 lines, not the ~350
+  written here.** That figure predates #68 (paged `_list_items`, live `/child_sessions`)
+  and #76 (wake-up wait), which added ~90 lines to the settle machinery this story is
+  told to keep ("`OmnigentDriver` keeps: lifecycle, send/settle, capture, URLs").
+  Reaching 350 means splitting that machinery — which S02.3 rewrites anyway, under one
+  wall-clock budget. Splitting the repo's most incident-prone code twice, once
+  mechanically and once for real, is the churn the epic's own Risks section warns
+  against; the remainder goes with S02.3.
 
 ### S02.3 One retry policy, at the driver
 

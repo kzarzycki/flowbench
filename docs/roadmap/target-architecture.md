@@ -27,9 +27,11 @@ and a PR that adds code should add it in the module that owns the concern.
 src/flowbench/
   types.py           # TurnStatus enum, TurnResult, error taxonomy — no magic strings
   driver/
-    __init__.py      # AgentDriver ABC (start/send/capture_session/close)
+    __init__.py      # public surface: re-exports base + bundle + omnigent
+    base.py          # AgentDriver ABC (start/send/capture_session/close)
     omnigent.py      # OmnigentDriver: session lifecycle, send/settle, capture
-    bundle.py        # agent-config rendering + skills/MCP tar bundle build
+    bundle.py        # agent-config rendering, skills/MCP tar bundle build,
+                     # session metadata — pure functions of a BundleSpec
   transcript.py      # item text extraction, dedup, control-message filtering,
                      # markdown transcript rendering (shared by driver, scorers, reports)
   model.py           # SessionModel: async .generate(prompt) over any AgentDriver —
