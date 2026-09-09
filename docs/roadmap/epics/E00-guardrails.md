@@ -50,7 +50,8 @@ if one covers it, else write one against `FakeDriver`-style doubles:
 | Lying idle / settle loop (`driver._send_once`) | idle status with no new assistant message keeps polling, then reports `timeout`, never a stale reply |
 | Undelivered injection retry (`driver.send`) | `failed` + label `runner_error`/"not delivered" → wait and re-send same text, bounded attempts |
 | Read-retry on transient transport (`_read_retry`) | one `httpx.ReadError` during polling does not kill the run; sends are never retried by it |
-| Nudge cap (`loop._MAX_CONSEC_NUDGES`) | a child that never clears `busy` still reaches a simulator turn after 3 nudges |
+| Busy-child wait (`driver._wait_idle` + `_children`) | idle main + busy child (all pages of `/child_sessions`) is still the turn; a child frozen for `stall_s` ends it `stalled/no_progress` |
+| Full item pagination (`driver._list_items`) | settle check and capture read every page, not the first 200 items |
 | DONE with late artifact (`loop` grace poll) | DONE token with missing artifact polls up to `artifact_grace_s` before capture |
 | Control-message filtering (`dedup_items`) | `<task-notification>` items never enter the cleaned transcript |
 | Fresh-text trust on failed turns (issue #39, downstream today) | covered downstream now; moves to the driver in S02.3 — note the migration in the test file |

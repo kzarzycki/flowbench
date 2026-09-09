@@ -66,9 +66,16 @@ done_token, max_turns, deadline_s)`:
   the flow. `flowbench.watch` prints `STALLED (...)` on the same signals.
 - The simulator is any `user_model` with `async generate(prompt)`; the loop
   composes `simulator_system` + conversation tail per call.
-- Self-wait turns (agent parked on its own busy sub-agent, not asking anything)
-  get a free "Continue." nudge, capped at 3 consecutive, so the simulator isn't
-  burned polling.
+- An idle main agent with a busy sub-agent (`GET /v1/sessions/{id}/child_sessions`,
+  per-child `busy`) is still mid-turn: the driver keeps waiting, with the children's
+  `updated_at` folded into the heartbeat, and reports `idle` only once no child is busy
+  (plus one quiet poll, so the inject doesn't land on the task-notification wake-up).
+  The loop therefore never nudges; every idle turn is a real hand-over to the simulator.
+  (#67 — the old "Continue." nudge burned turns and items, and its sentinel collided
+  with a simulator that itself answered "Continue.", freezing the relay cursor.)
+- `_list_items` pages past the server's 200-item cap (#4/#67): an unpaginated read
+  froze the settle check once a session outgrew one page, and every later turn burned
+  the whole turn cap.
 - **The loop closes the driver itself** (finally). Callers close only their
   simulator.
 

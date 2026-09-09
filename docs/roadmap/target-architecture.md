@@ -83,8 +83,8 @@ case dir                          run dir (../flowbench-runs/<scenario>/<run-id>
 2. For each flow, `run.py` spawns the flow session (driver) and a fresh simulator session
    (`SessionModel`), composes the kickoff (`prepend + task + append`, one message), and
    runs `loop.run_agent_session` until the simulator emits the done token or a budget ends
-   the run. The loop's contract: only an `idle` turn is a clean boundary; self-wait turns
-   (agent parked on its own busy sub-agent) get capped free nudges.
+   the run. The loop's contract: only an `idle` turn is a clean boundary, and the driver
+   reports `idle` only once no child sub-agent is busy (it waits, never nudges).
 3. Artifacts, transcript, and raw session land in the flow's subfolder as plain files.
 4. The judge runs as a one-shot session over all flows' transcripts + artifacts, with
    letter labels assigned per trial rotation; the verdict tail is parsed leniently

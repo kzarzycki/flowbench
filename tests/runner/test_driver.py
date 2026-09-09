@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from flowbench.runner.driver import AgentDriver, OmnigentDriver, TurnResult, any_child_busy
+from flowbench.runner.driver import AgentDriver, OmnigentDriver, TurnResult
 from flowbench.transcript import dedup_items, is_control_message, last_assistant_text
 
 
@@ -116,26 +116,6 @@ def test_dedup_items_drops_task_notifications_but_keeps_non_messages():
     assert [_text(i) for i in out if i.get("type") == "message"] == ["real reply"]
 
 
-def _child_ev(cid, busy):
-    return {
-        "__type__": "SessionChildSessionUpdatedEvent",
-        "child_session_id": cid,
-        "child": {"id": cid, "busy": busy},
-    }
-
-
-def test_any_child_busy_tracks_latest_per_child_state():
-    # busy while a sub-agent runs ...
-    assert any_child_busy([_child_ev("c1", True)]) is True
-    # ... not busy once its latest update clears (a later event wins)
-    assert any_child_busy([_child_ev("c1", True), _child_ev("c1", False)]) is False
-    # one of several children still busy => busy
-    assert any_child_busy([_child_ev("c1", False), _child_ev("c2", True)]) is True
-    # non-child events are ignored
-    assert any_child_busy([{"__type__": "SessionUsageEvent"}]) is False
-    assert any_child_busy([]) is False
-
-
 def _role(it):
     return it.get("role", "")
 
@@ -161,6 +141,7 @@ class _FakeChat:
         self._beats = iter(beats)  # exhausted -> last value repeats
         self._last_beat = None
         self.pending = list(pending)
+        self.busy_children = []  # updated_at of each busy sub-agent (see _snapshot)
         self.status = None
 
     async def snapshot(self):
@@ -173,6 +154,7 @@ class _FakeChat:
             "status": self.status,
             "updated_at": self._last_beat,
             "pending_elicitations": self.pending,
+            "busy_children": list(self.busy_children),
         }
 
     def send(self, text):
@@ -189,7 +171,7 @@ class _FakeSessions:
     def __init__(self, batches):
         self._batches = list(batches)
 
-    async def list_items(self, session_id, order, limit):
+    async def list_items(self, session_id, order, limit, after=None):
         if len(self._batches) > 1:
             return self._batches.pop(0)
         return self._batches[0]
@@ -524,3 +506,101 @@ async def test_pane_tail_gives_up_on_a_wedged_tmux(tmp_path, monkeypatch):
     d._http = _Http()
     d._capture_pane = never
     assert await d._pane_tail() is None
+
+
+# --- #67: pagination + waiting out the agent's own sub-agents -----------------
+
+
+async def test_list_items_pages_past_the_server_cap(tmp_path):
+    # todo-app-004: one 200-item page froze the settle check for the rest of the run
+    from types import SimpleNamespace
+
+    from flowbench.runner.driver import _PAGE
+
+    all_items = [{"id": f"it_{i}", "type": "message", "role": "user"} for i in range(_PAGE * 2 + 7)]
+    calls = []
+
+    class _Paged:
+        async def list_items(self, session_id, order, limit, after=None):
+            calls.append(after)
+            start = (
+                0
+                if after is None
+                else next(i for i, it in enumerate(all_items) if it["id"] == after) + 1
+            )
+            return all_items[start : start + limit]
+
+    d = OmnigentDriver(run_dir=tmp_path, artifact_name="plan.md")
+    d._chat = SimpleNamespace(session_id="conv_test")
+    d._client = SimpleNamespace(sessions=_Paged())
+    assert await d._list_items() == all_items
+    assert calls == [None, f"it_{_PAGE - 1}", f"it_{2 * _PAGE - 1}"]
+
+
+async def test_idle_with_busy_child_is_still_this_turn(tmp_path, monkeypatch):
+    # the main agent parks at the prompt while its sub-agent runs; the turn ends
+    # only once no child is busy (no "Continue." nudges, no simulator call)
+    monkeypatch.setattr("flowbench.runner.driver.asyncio.sleep", _instant_sleep)
+    chat = _FakeChat(["running", "idle"])
+    chat.busy_children = [11]
+    polls = {"n": 0}
+    base = chat.snapshot
+
+    async def snapshot():
+        polls["n"] += 1
+        if polls["n"] >= 5:
+            chat.busy_children = []  # child finished
+        return await base()
+
+    chat.snapshot = snapshot
+    d = _settle_driver(tmp_path, chat, [[], [_USER, _REPLY]])
+    result = await d.send("build it")
+    assert result.status == "idle"
+    assert polls["n"] >= 6  # waited through the busy child, plus one quiet poll
+
+
+async def test_frozen_child_stalls_after_stall_s(tmp_path, monkeypatch):
+    # a child that never settles must not hold the turn to the cap: its updated_at
+    # is part of the heartbeat, so a frozen child is a no_progress stall
+    monkeypatch.setattr("flowbench.runner.driver.asyncio.sleep", _instant_sleep)
+    chat = _FakeChat(["running", "idle"], beats=[7])
+    chat.busy_children = [11]
+    d = _settle_driver(tmp_path, chat, [[]])
+    d.stall_s = 0.05
+    d._pane_tail = _pane(None)
+    result = await d.send("build it")
+    assert (result.status, result.stall_reason) == ("stalled", "no_progress")
+
+
+async def test_snapshot_attaches_busy_children_when_idle(tmp_path):
+    from types import SimpleNamespace
+
+    class _Resp:
+        def __init__(self, data):
+            self._d = data
+
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return self._d
+
+    class _Http:
+        urls = []
+
+        async def get(self, url):
+            self.urls.append(url)
+            if "/child_sessions" in url:
+                if "after=" not in url:  # page 1: newest, idle; an older busy child is on page 2
+                    page = {"data": [{"id": "c9", "busy": False, "updated_at": 9}]}
+                    return _Resp({**page, "has_more": True, "last_id": "c9"})
+                return _Resp(
+                    {"data": [{"id": "c1", "busy": True, "updated_at": 5}], "has_more": False}
+                )
+            return _Resp({"status": "idle", "updated_at": 1})
+
+    d = OmnigentDriver(run_dir=tmp_path, artifact_name="plan.md")
+    d._chat = SimpleNamespace(session_id="conv_test")
+    d._http = _Http()
+    assert (await d._snapshot())["busy_children"] == [5]
+    assert any("after=c9" in u for u in _Http.urls)

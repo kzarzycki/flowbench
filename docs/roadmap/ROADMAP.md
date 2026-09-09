@@ -54,8 +54,8 @@ Executes the recorded 2026-07-02 decision: `run_case`, everything omnigent, Insp
 - S02.2 Driver split: `driver/bundle.py`, transcript out; driver = lifecycle only.
 - S02.3 One retry policy at the driver (absorb the issue-#39 fresh-text rule);
   documented policy table; single wall-clock budget per send (nested-timeout bug).
-- S02.3b Loop hygiene: keep harness nudges out of the simulator's relayed context;
-  per-turn child-busy state (both audit-confirmed bugs).
+- S02.3b Loop hygiene — DONE early as flowbench #67 (nudges deleted; driver waits out
+  busy children; items paginated).
 - S02.4 Artifact probe out of the driver (kill `artifact_name="__none__"`).
 - S02.5 Meta-harness decision — **recorded** (2026-09-09,
   `docs/design/decisions/2026-09-09-omnigent-as-the-meta-harness.md`: omnigent stays, herdr and
