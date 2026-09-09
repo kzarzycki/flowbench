@@ -15,7 +15,7 @@ and `flowbench.runner.loop` re-export the old names for one release.
 | `bundle.py` | `render_config` / `build_bundle` / `session_metadata` — pure functions of a `BundleSpec` |
 | `omnigent.py` | `OmnigentDriver`: lifecycle, send/settle, capture, URLs, `git_init_repo` |
 
-- `AgentDriver` (ABC): `start / send / capture_session / artifact_path / close`.
+- `AgentDriver` (ABC): `start / send / capture_session / close`.
   All spawning goes through implementations of this seam; scenarios and tests
   inject fakes.
 - `OmnigentDriver`: spawns a vanilla-Claude-Code agent as an omnigent session
@@ -24,7 +24,9 @@ and `flowbench.runner.loop` re-export the old names for one release.
   billing). `close()` leaves the omnigent session/runner/tmux alive on purpose
   — a human resumes via `conversation_url`; only HTTP clients are closed.
 - `capture_session()` returns plain data: `items`, `events`, `duration_s`,
-  `artifact_*`, `model`, `session_id`, `conversation_url`.
+  `model`, `session_id`, `conversation_url`. The artifact keys
+  (`artifact_exists`/`artifact_path`/`artifact_text`) are added by the loop, not the
+  driver — see "Artifact probe" below.
 
 ### Where a flow's skills live at run time
 
@@ -86,13 +88,23 @@ prints one `[flowbench] turn flaked` line; the loop counts them into
 top of `send`; `_wait_idle`, the settle loop and the retry sleeps all draw it down, a
 re-send happens only while the remaining budget exceeds `send_retry_wait_s`, and every
 inject is preceded by a deadline check. The whole send also runs under
-`asyncio.timeout(turn_timeout_s)`, so a server call, back-off, label read, retry sleep or
-the synchronous `artifact_path()` (run via `asyncio.to_thread`) still in flight at the cap
-is abandoned — the await is cancelled, though a running filesystem thread finishes on its
-own in the background — and the send reports `TIMEOUT` with empty text and
-`artifact_exists=False` ("not observed"). At the cap the status is `RUNNING` (or an undocumented server status,
-verbatim) if the soft loop got there first, `TIMEOUT` if the timer did — both mean the
-turn did not finish.
+`asyncio.timeout(turn_timeout_s)`, so a server call, back-off, label read or retry sleep
+still in flight at the cap is abandoned — the await is cancelled — and the send reports
+`TIMEOUT` with empty text. At the cap the status is `RUNNING` (or an undocumented server
+status, verbatim) if the soft loop got there first, `TIMEOUT` if the timer did — both mean
+the turn did not finish.
+
+**Artifact probe.** The driver knows nothing about artifacts. `run_agent_session` takes
+`artifact_probe: Callable[[], Path | None] | None` — the orchestrator's answer to "which
+file proves this session delivered". With a probe, the DONE branch polls it every 2 s in a
+worker thread (`asyncio.to_thread`) under `asyncio.timeout(artifact_grace_s)`: an agent that
+announces completion while its write is still flushing gets the grace; a hung filesystem
+ends the poll, not the run (the abandoned thread finishes on its own). After
+`capture_session()` the loop probes once more and sets `artifact_exists`, `artifact_path`
+and `artifact_text` on the session — for every session, `False/None/None` without a probe,
+so `session.json` has one shape. `run.py` owns the probe: `find_artifact(run_dir, name)`
+(top-level hit, else first `rglob` hit) bound to the flow dir and the case's
+`artifact_name`; simulator, judge and grader sessions never see one.
 
 ## loop.py — the mediated DONE-token loop
 
@@ -153,13 +165,13 @@ reason. `run_case_n` repeats `run_case` with the flow list rotated per trial (ca
 judge position bias) under `trial-XX/` and aggregates; with no judge across all trials the
 aggregate is `{"counts": {}, "winner": None}` rather than tallying `None` as a flow name.
 The three factories are injected so the whole pipeline runs offline against
-`flowbench.testing` doubles; `omni_factories(scenario, *, artifact_name: str | None =
-"plan.md", git_init=False)` returns the real ones (todo_app binds
-`artifact_name=None` — no artifact, the deliverable is the running app, judged
-black-box by `acceptance.py` — and `git_init=True`). `artifact_name=None` propagates
-through `run_case`/`run_case_n`: no `<flow>/plan.md` is written, no
-`artifact_missing`/`artifact_lines` keys appear in `run.json`, and the artifact
-grace-poll is skipped. `flowbench.run.rescore_run(case_dir, run_root, *, score_flow)`
+`flowbench.testing` doubles (`FakeDriver(plan, questions, run_dir=)` writes its plan to
+`run_dir/plan.md` on `start()`, where the real probe finds it); `omni_factories(scenario, *,
+git_init=False)` returns the real ones (todo_app binds `git_init=True`). The case's
+`artifact_name: str | None = "plan.md"` is a `run_case`/`run_case_n` argument: `None`
+(todo_app — no artifact, the deliverable is the running app, judged black-box by
+`acceptance.py`) means no probe is built, no `<flow>/plan.md` is written and no
+`artifact_missing`/`artifact_lines` keys appear in `run.json`. `flowbench.run.rescore_run(case_dir, run_root, *, score_flow)`
 re-runs a case's `score_flow` over an existing run dir's `<flow>/session.json` files
 — no new session, `session.json`/`transcript.md` untouched — for the CLI's
 `--rescore`.
@@ -177,8 +189,8 @@ Supporting modules, all omnigent-free at import time:
 | `testing.py` | `FakeDriver`, `StubSim`, `MissingPlanDriver`, `ScriptedDriver`, `n_run_factories` |
 
 Case-shaped constants (`MISSING_PLAN`, `SIM_MODEL`, `JUDGE_MODEL`) are still module
-constants of `run.py`; `DONE_TOKEN` and the flow driver's `artifact_name`/`git_init` are
-now per-call overrides (S01.3), defaulting to swe_planning's values. CLI entrypoints
+constants of `run.py`; `DONE_TOKEN`, `artifact_name` and the flow driver's `git_init` are
+per-call overrides (S01.3), defaulting to swe_planning's values. CLI entrypoints
 (`main`) stay scenario-side until S03.x.
 
 ## One execution model

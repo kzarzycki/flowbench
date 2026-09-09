@@ -63,15 +63,6 @@ and paged, with a frozen child a `no_progress` stall), and `_list_items` pages p
 server's 200-item cap. Unit tests in `tests/runner/test_driver.py` / `test_loop.py` (V1);
 live check todo-app-005.
 
-### S02.4 Artifact concern out of the driver
-
-- `artifact_name` leaves `OmnigentDriver`; `run_agent_session` takes an
-  `artifact_probe: Callable[[], Path | None]` (the DONE grace-poll and
-  `TurnResult.artifact_exists` are the only consumers). `run.py`'s factories build the
-  probe from the flow dir; simulator/judge sessions pass no probe instead of
-  `artifact_name="__none__"`.
-- Verify: `rg __none__` → empty in both repos; loop tests updated; V1, V2.
-
 ### S02.5 Omnigent public-API migration
 
 - Inventory every `_`-prefixed attribute access into `omnigent_client` /
