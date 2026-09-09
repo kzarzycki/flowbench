@@ -36,7 +36,6 @@ class TurnResult:
     # undocumented server status passes through verbatim as a diagnostic
     # (decisions #7) — never coerced, never raised on.
     assistant_text: str  # latest assistant-authored text after the turn
-    artifact_exists: bool
     stall_reason: str | None = None  # "prompt" | "no_progress" when stalled
     pane_tail: str | None = None  # last terminal lines at the stall, best effort
     flaked: bool = False  # server reported failed AFTER a new reply landed; text

@@ -18,7 +18,7 @@ from flowbench.types import TurnStatus
 
 
 def test_omnigent_driver_satisfies_interface():
-    d = OmnigentDriver(run_dir=Path("/tmp/x"), artifact_name="account_summary.md")
+    d = OmnigentDriver(run_dir=Path("/tmp/x"))
     assert isinstance(d, AgentDriver)
     for m in ("start", "send", "capture_session", "close"):
         assert hasattr(d, m)
@@ -39,25 +39,25 @@ def test_last_assistant_text_empty_when_none():
 
 
 async def test_close_is_idempotent():
-    d = OmnigentDriver(run_dir=Path("/tmp/x"), artifact_name="a.md")
+    d = OmnigentDriver(run_dir=Path("/tmp/x"))
     await d.close()
     await d.close()  # must not raise
     assert d._closed is True
 
 
-def test_artifact_path_none_when_missing(tmp_path):
-    d = OmnigentDriver(run_dir=tmp_path, artifact_name="account_summary.md")
-    assert d.artifact_path() is None
-    (tmp_path / "account_summary.md").write_text("hi")
-    assert d.artifact_path() == tmp_path / "account_summary.md"
+def test_driver_has_no_artifact_concern(tmp_path):
+    # S02.4: which file proves delivery is the orchestrator's knowledge (run.py's
+    # probe, consumed by the loop) — the driver and its ABC know nothing of it
+    assert not hasattr(AgentDriver, "artifact_path")
+    d = OmnigentDriver(run_dir=tmp_path)  # constructs with no artifact argument
+    assert not hasattr(d, "artifact_name")
+    assert not hasattr(d, "artifact_path")
 
 
 def test_conversation_url_built_from_captured_events(tmp_path):
     # the conv id is scraped from streamed events; the URL is the omnigent UI route
     # a human opens to browse + resume the (still-alive) SUT session.
-    d = OmnigentDriver(
-        run_dir=tmp_path, artifact_name="tasks.json", server_url="http://127.0.0.1:6767"
-    )
+    d = OmnigentDriver(run_dir=tmp_path, server_url="http://127.0.0.1:6767")
     assert d.conversation_url() is None  # nothing captured yet
     d._captured = [
         {"__type__": "SessionUsageEvent"},
@@ -67,8 +67,8 @@ def test_conversation_url_built_from_captured_events(tmp_path):
 
 
 def test_turn_result_shape():
-    r = TurnResult(status=TurnStatus.IDLE, assistant_text="done", artifact_exists=True)
-    assert (r.status, r.assistant_text, r.artifact_exists) == (TurnStatus.IDLE, "done", True)
+    r = TurnResult(status=TurnStatus.IDLE, assistant_text="done")
+    assert (r.status, r.assistant_text) == (TurnStatus.IDLE, "done")
 
 
 # --- bug 1 (doubled messages) + bug 3-adjacent (control injections) -----------
@@ -197,7 +197,7 @@ class _FakeSessions:
 def _settle_driver(tmp_path, chat, batches):
     from types import SimpleNamespace
 
-    d = OmnigentDriver(run_dir=tmp_path, artifact_name="plan.md")
+    d = OmnigentDriver(run_dir=tmp_path)
     d.turn_timeout_s = 1.0
     d.settle_poll_s = 0.01
     d._chat = chat
@@ -279,7 +279,7 @@ async def test_read_retry_survives_transient_errors(tmp_path, monkeypatch):
     import httpx
 
     monkeypatch.setattr("flowbench.driver.omnigent.asyncio.sleep", _instant_sleep)
-    d = OmnigentDriver(run_dir=tmp_path, artifact_name="plan.md")
+    d = OmnigentDriver(run_dir=tmp_path)
     calls = {"n": 0}
 
     async def flaky():
@@ -304,11 +304,11 @@ async def test_send_retries_undelivered_injection(tmp_path, monkeypatch):
     # runner_error "message was not delivered" = the inject never reached the
     # agent (busy terminal behind a lying idle) — re-sending is safe and required
     clock = _fake_clock(monkeypatch)
-    d = OmnigentDriver(run_dir=tmp_path, artifact_name="plan.md")
+    d = OmnigentDriver(run_dir=tmp_path)
     d.turn_timeout_s = 1000
     outcomes = [
-        TurnResult(TurnStatus.FAILED, "", False),
-        TurnResult(TurnStatus.IDLE, "the plan is complete", False),
+        TurnResult(TurnStatus.FAILED, ""),
+        TurnResult(TurnStatus.IDLE, "the plan is complete"),
     ]
     sent = []
 
@@ -329,13 +329,13 @@ async def test_send_retries_undelivered_injection(tmp_path, monkeypatch):
 
 async def test_send_does_not_retry_delivered_failure(tmp_path, monkeypatch):
     _fake_clock(monkeypatch)
-    d = OmnigentDriver(run_dir=tmp_path, artifact_name="plan.md")
+    d = OmnigentDriver(run_dir=tmp_path)
     d.turn_timeout_s = 1000
     sent = []
 
     async def fake_send_once(text, deadline):
         sent.append(text)
-        return TurnResult(TurnStatus.FAILED, "", False)
+        return TurnResult(TurnStatus.FAILED, "")
 
     async def resend_not_allowed():
         return False  # a real failure (e.g. model_error), not an undelivered inject
@@ -349,13 +349,13 @@ async def test_send_does_not_retry_delivered_failure(tmp_path, monkeypatch):
 
 async def test_failed_exhausts_bounded_resends(tmp_path, monkeypatch):
     _fake_clock(monkeypatch)
-    d = OmnigentDriver(run_dir=tmp_path, artifact_name="plan.md")
+    d = OmnigentDriver(run_dir=tmp_path)
     d.turn_timeout_s = 1000
     sent = []
 
     async def fake_send_once(text, deadline):
         sent.append(text)
-        return TurnResult(TurnStatus.FAILED, "", False)
+        return TurnResult(TurnStatus.FAILED, "")
 
     async def resend_allowed():
         return True
@@ -370,16 +370,16 @@ async def test_failed_exhausts_bounded_resends(tmp_path, monkeypatch):
 @pytest.mark.parametrize(
     "result",
     [
-        TurnResult(TurnStatus.TIMEOUT, "", False),
-        TurnResult(TurnStatus.RUNNING, "", False),
-        TurnResult(TurnStatus.STALLED, "", False, stall_reason="prompt"),
+        TurnResult(TurnStatus.TIMEOUT, ""),
+        TurnResult(TurnStatus.RUNNING, ""),
+        TurnResult(TurnStatus.STALLED, "", stall_reason="prompt"),
     ],
 )
 async def test_non_failed_statuses_are_never_resent(tmp_path, monkeypatch, result):
     # rows 4/5: TIMEOUT, RUNNING and STALLED (idle handles its own row-5 timeout
     # transform inside _send_once) return from send() after exactly one _send_once
     _fake_clock(monkeypatch)
-    d = OmnigentDriver(run_dir=tmp_path, artifact_name="plan.md")
+    d = OmnigentDriver(run_dir=tmp_path)
     d.turn_timeout_s = 1000
     sent = []
 
@@ -555,7 +555,7 @@ async def test_resend_needs_budget_for_its_wait(
     tmp_path, monkeypatch, turn_timeout_s, expected_sends
 ):
     _fake_clock(monkeypatch)
-    d = OmnigentDriver(run_dir=tmp_path, artifact_name="plan.md")
+    d = OmnigentDriver(run_dir=tmp_path)
     d.turn_timeout_s = turn_timeout_s
     d.send_retry_wait_s = 30
     d.send_retry_attempts = 3
@@ -563,7 +563,7 @@ async def test_resend_needs_budget_for_its_wait(
 
     async def fake_send_once(text, deadline):
         sent.append(text)
-        return TurnResult(TurnStatus.FAILED, "", False)
+        return TurnResult(TurnStatus.FAILED, "")
 
     async def resend_allowed():
         return True
@@ -599,7 +599,7 @@ async def test_hard_ceiling_cancels_a_hanging_status_read(tmp_path):
     d._snapshot = hang_snapshot
     t0 = time.monotonic()
     result = await d.send("go on")
-    assert result == TurnResult(TurnStatus.TIMEOUT, "", False)
+    assert result == TurnResult(TurnStatus.TIMEOUT, "")
     assert time.monotonic() - t0 < 2.0
     assert "snapshot" in hit
     assert len(injects) == 1
@@ -626,7 +626,7 @@ async def test_hard_ceiling_stops_before_the_first_inject_when_the_initial_read_
     d._list_items = hang_list_items
     t0 = time.monotonic()
     result = await d.send("go on")
-    assert result == TurnResult(TurnStatus.TIMEOUT, "", False)
+    assert result == TurnResult(TurnStatus.TIMEOUT, "")
     assert time.monotonic() - t0 < 2.0
     assert "items" in hit
     assert injects == []
@@ -658,7 +658,7 @@ async def test_hard_ceiling_cancels_a_hanging_post_wait_item_read(tmp_path, monk
     d._list_items = list_items
     t0 = time.monotonic()
     result = await d.send("go on")
-    assert result == TurnResult(TurnStatus.TIMEOUT, "", False)
+    assert result == TurnResult(TurnStatus.TIMEOUT, "")
     assert time.monotonic() - t0 < 2.0
     assert "items" in hit
     assert len(injects) == 1
@@ -690,14 +690,14 @@ async def test_hard_ceiling_cancels_a_hanging_second_page(tmp_path, monkeypatch)
             hit["second_page"] = True
             await _hang()
 
-    d = OmnigentDriver(run_dir=tmp_path, artifact_name="plan.md")
+    d = OmnigentDriver(run_dir=tmp_path)
     d._chat = chat
     d._snapshot = chat.snapshot
     d._client = SimpleNamespace(sessions=_Paged())
     d.turn_timeout_s = 0.1
     t0 = time.monotonic()
     result = await d.send("go on")
-    assert result == TurnResult(TurnStatus.TIMEOUT, "", False)
+    assert result == TurnResult(TurnStatus.TIMEOUT, "")
     assert time.monotonic() - t0 < 2.0
     assert "second_page" in hit
     assert calls["n"] == 3  # pagination reached: a full first page, then the second
@@ -727,7 +727,7 @@ async def test_hard_ceiling_cuts_read_retry_backoff(tmp_path):
     d._snapshot = always_fails
     t0 = time.monotonic()
     result = await d.send("go on")
-    assert result == TurnResult(TurnStatus.TIMEOUT, "", False)
+    assert result == TurnResult(TurnStatus.TIMEOUT, "")
     assert time.monotonic() - t0 < 2.0
     assert calls["n"] >= 1
     assert len(injects) == 1
@@ -755,7 +755,7 @@ async def test_hard_ceiling_cancels_a_hanging_label_read(tmp_path):
     d._client.sessions.get = hanging_get
     t0 = time.monotonic()
     result = await d.send("go on")
-    assert result == TurnResult(TurnStatus.TIMEOUT, "", False)
+    assert result == TurnResult(TurnStatus.TIMEOUT, "")
     assert time.monotonic() - t0 < 2.0
     assert "labels" in hit
     assert len(injects) == 1
@@ -788,7 +788,7 @@ async def test_hard_ceiling_cancels_an_overshooting_retry_sleep(tmp_path, monkey
     d._resend_allowed = resend_allowed
     t0 = time.monotonic()
     result = await d.send("go on")
-    assert result == TurnResult(TurnStatus.TIMEOUT, "", False)
+    assert result == TurnResult(TurnStatus.TIMEOUT, "")
     assert time.monotonic() - t0 < 2.0
     assert hit["slept"] == 0.1  # the sleep WAS eligible; the timer still cut it
     assert len(injects) == 1  # never re-injected
@@ -826,33 +826,10 @@ async def test_hard_ceiling_cancels_the_resend_wait(tmp_path):
     d._resend_allowed = resend_allowed
     t0 = time.monotonic()
     result = await d.send("go on")
-    assert result == TurnResult(TurnStatus.TIMEOUT, "", False)
+    assert result == TurnResult(TurnStatus.TIMEOUT, "")
     assert time.monotonic() - t0 < 2.0
     assert "hang" in hit
     assert len(injects) == 2  # the re-send DID inject; its second wait hung
-
-
-async def test_hard_ceiling_covers_a_slow_filesystem(tmp_path, monkeypatch):
-    monkeypatch.setattr("flowbench.driver.omnigent.asyncio.sleep", _fast_sleep)
-    hit = {}
-    chat = _FakeChat([TurnStatus.RUNNING, TurnStatus.IDLE])
-    d = _settle_driver(tmp_path, chat, [[], [_USER, _REPLY]])
-    d.turn_timeout_s = 0.1
-
-    def slow_artifact_path():
-        hit["fs_started"] = time.monotonic()
-        time.sleep(1.0)
-        hit["fs_done"] = time.monotonic()
-        return None
-
-    d.artifact_path = slow_artifact_path
-    t0 = time.monotonic()
-    result = await d.send("go on")
-    elapsed = time.monotonic() - t0
-    assert result == TurnResult(TurnStatus.TIMEOUT, "", False)
-    assert elapsed < 1.0  # the send did not wait for the thread
-    assert "fs_started" in hit
-    assert "fs_done" not in hit  # the worker is still running, its result discarded
 
 
 async def test_context_tokens_read_is_bounded(tmp_path, monkeypatch):
@@ -865,7 +842,7 @@ async def test_context_tokens_read_is_bounded(tmp_path, monkeypatch):
     async def hanging_get(_session_id):
         await _hang()
 
-    d = OmnigentDriver(run_dir=tmp_path, artifact_name="plan.md")
+    d = OmnigentDriver(run_dir=tmp_path)
     d._chat = _FakeChat([TurnStatus.IDLE])
     d._client = SimpleNamespace(sessions=SimpleNamespace(get=hanging_get))
     t0 = time.monotonic()
@@ -875,14 +852,14 @@ async def test_context_tokens_read_is_bounded(tmp_path, monkeypatch):
 
 async def test_capture_session_includes_context_tokens(tmp_path):
     # cost signal: final context size from session labels lands in the capture
-    d = OmnigentDriver(run_dir=tmp_path, artifact_name="plan.md")
+    d = OmnigentDriver(run_dir=tmp_path)
     d._chat = _FakeChat([TurnStatus.IDLE])
     d._client = _label_client({"omnigent.last_context_tokens": "42072"})
     assert await d._context_tokens() == 42072
 
 
 async def test_context_tokens_none_when_label_missing(tmp_path):
-    d = OmnigentDriver(run_dir=tmp_path, artifact_name="plan.md")
+    d = OmnigentDriver(run_dir=tmp_path)
     d._chat = _FakeChat([TurnStatus.IDLE])
     d._client = _label_client({})
     assert await d._context_tokens() is None
@@ -994,7 +971,7 @@ async def test_snapshot_reads_the_raw_session(tmp_path):
             assert url == "/v1/sessions/conv_x"
             return _Resp()
 
-    d = OmnigentDriver(run_dir=tmp_path, artifact_name="plan.md")
+    d = OmnigentDriver(run_dir=tmp_path)
     d._chat = SimpleNamespace(session_id="conv_x")
     d._http = _Http()
     snap = await d._snapshot()
@@ -1019,7 +996,7 @@ async def test_pane_tail_is_best_effort(tmp_path):
         async def get(self, url):
             raise OSError("runner offline")
 
-    d = OmnigentDriver(run_dir=tmp_path, artifact_name="plan.md")
+    d = OmnigentDriver(run_dir=tmp_path)
     d._chat = SimpleNamespace(session_id="conv_x")
     d._http = _Http()
     assert await d._pane_tail() is None
@@ -1052,7 +1029,7 @@ async def test_pane_tail_captures_tmux(tmp_path, monkeypatch):
         return _Proc()
 
     monkeypatch.setattr("flowbench.driver.omnigent.asyncio.create_subprocess_exec", fake_exec)
-    d = OmnigentDriver(run_dir=tmp_path, artifact_name="plan.md")
+    d = OmnigentDriver(run_dir=tmp_path)
     d._chat = SimpleNamespace(session_id="conv_x")
     d._http = _Http()
     assert await d._pane_tail(lines=2) == "line2\n❯ waiting"
@@ -1083,7 +1060,7 @@ async def test_pane_tail_gives_up_on_a_wedged_tmux(tmp_path, monkeypatch):
         raise TimeoutError
 
     monkeypatch.setattr("flowbench.driver.omnigent.asyncio.wait_for", instant_wait_for)
-    d = OmnigentDriver(run_dir=tmp_path, artifact_name="plan.md")
+    d = OmnigentDriver(run_dir=tmp_path)
     d._chat = SimpleNamespace(session_id="conv_x")
     d._http = _Http()
     d._capture_pane = never
@@ -1112,7 +1089,7 @@ async def test_list_items_pages_past_the_server_cap(tmp_path):
             )
             return all_items[start : start + limit]
 
-    d = OmnigentDriver(run_dir=tmp_path, artifact_name="plan.md")
+    d = OmnigentDriver(run_dir=tmp_path)
     d._chat = SimpleNamespace(session_id="conv_test")
     d._client = SimpleNamespace(sessions=_Paged())
     assert await d._list_items() == all_items
@@ -1182,7 +1159,7 @@ async def test_snapshot_attaches_busy_children_when_idle(tmp_path):
                 )
             return _Resp({"status": TurnStatus.IDLE, "updated_at": 1})
 
-    d = OmnigentDriver(run_dir=tmp_path, artifact_name="plan.md")
+    d = OmnigentDriver(run_dir=tmp_path)
     d._chat = SimpleNamespace(session_id="conv_test")
     d._http = _Http()
     assert (await d._snapshot())["busy_children"] == [5]
@@ -1400,7 +1377,7 @@ def _patch_start(monkeypatch, http):
 
 async def test_start_refuses_when_the_api_key_is_set(tmp_path, monkeypatch):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-nope")  # pragma: allowlist secret
-    d = OmnigentDriver(run_dir=tmp_path / "run", artifact_name="plan.md")
+    d = OmnigentDriver(run_dir=tmp_path / "run")
     with pytest.raises(RuntimeError, match="subscription billing"):
         await d.start()
 
@@ -1410,9 +1387,7 @@ async def test_start_creates_the_session_and_launches_the_runner(tmp_path, monke
     http = _FakeHttp()
     ns, launched = _patch_start(monkeypatch, http)
     run_dir = tmp_path / "run"
-    d = OmnigentDriver(
-        run_dir=run_dir, artifact_name="plan.md", model="sonnet", reasoning_effort="high"
-    )
+    d = OmnigentDriver(run_dir=run_dir, model="sonnet", reasoning_effort="high")
 
     await d.start()
 
@@ -1436,7 +1411,7 @@ async def test_start_creates_the_session_and_launches_the_runner(tmp_path, monke
 async def test_start_skips_reasoning_effort_when_unset(tmp_path, monkeypatch):
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     ns, _ = _patch_start(monkeypatch, _FakeHttp())
-    await OmnigentDriver(run_dir=tmp_path / "run", artifact_name="plan.md").start()
+    await OmnigentDriver(run_dir=tmp_path / "run").start()
     assert ns.effort is None
 
 
@@ -1444,7 +1419,7 @@ async def test_start_git_inits_the_run_dir_once(tmp_path, monkeypatch):
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     _patch_start(monkeypatch, _FakeHttp())
     run_dir = tmp_path / "run"
-    d = OmnigentDriver(run_dir=run_dir, artifact_name="plan.md", git_init=True)
+    d = OmnigentDriver(run_dir=run_dir, git_init=True)
 
     await d.start()
     assert (run_dir / ".git").is_dir()
@@ -1460,7 +1435,7 @@ async def test_start_git_inits_the_run_dir_once(tmp_path, monkeypatch):
 async def test_start_raises_when_no_host_has_claude_native(tmp_path, monkeypatch):
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     _patch_start(monkeypatch, _FakeHttp(hosts=[]))
-    d = OmnigentDriver(run_dir=tmp_path / "run", artifact_name="plan.md")
+    d = OmnigentDriver(run_dir=tmp_path / "run")
     with pytest.raises(RuntimeError, match="no online host with claude-native"):
         await d.start()
 
@@ -1469,7 +1444,7 @@ async def test_start_raises_when_no_host_has_claude_native(tmp_path, monkeypatch
 
 
 async def test_resend_allowed_reads_the_error_labels(tmp_path):
-    d = OmnigentDriver(run_dir=tmp_path, artifact_name="plan.md")
+    d = OmnigentDriver(run_dir=tmp_path)
     d._chat = _FakeChat([TurnStatus.FAILED])
     d._client = _label_client({})  # row 3: no label at all — sim/judge sessions (#39)
     assert await d._resend_allowed() is True
@@ -1489,7 +1464,7 @@ async def test_resend_allowed_reads_the_error_labels(tmp_path):
 
 async def test_resend_allowed_is_false_when_the_read_fails(tmp_path):
     """Unknown means "do not retry" — a blind resend can double-deliver."""
-    d = OmnigentDriver(run_dir=tmp_path, artifact_name="plan.md")
+    d = OmnigentDriver(run_dir=tmp_path)
     d._chat = _FakeChat([TurnStatus.FAILED])
     d._client = _label_client(boom=RuntimeError("transport gone"))
     assert await d._resend_allowed() is False
@@ -1500,7 +1475,7 @@ async def test_resend_allowed_is_false_when_the_status_read_errors(tmp_path):
     `OmnigentError` at >= 400, so this takes the except path, not row 3."""
     from omnigent_client import OmnigentError
 
-    d = OmnigentDriver(run_dir=tmp_path, artifact_name="plan.md")
+    d = OmnigentDriver(run_dir=tmp_path)
     d._chat = _FakeChat([TurnStatus.FAILED])
     d._client = _label_client(boom=OmnigentError("503 service unavailable"))
     assert await d._resend_allowed() is False
@@ -1523,7 +1498,7 @@ async def test_resend_allowed_is_false_on_a_redirect_through_the_real_sdk(tmp_pa
     carries a complete Session JSON, which no redirect does."""
     import httpx
 
-    d = OmnigentDriver(run_dir=tmp_path, artifact_name="plan.md")
+    d = OmnigentDriver(run_dir=tmp_path)
     d._chat = _FakeChat([TurnStatus.FAILED])
     d._client = _real_sdk_client(
         lambda req: httpx.Response(302, headers={"location": "http://elsewhere/"}, text="")
@@ -1559,12 +1534,12 @@ async def test_failed_status_read_error_never_authorizes_a_resend(tmp_path, monk
 
 
 async def test_context_tokens_none_before_a_session_exists(tmp_path):
-    d = OmnigentDriver(run_dir=tmp_path, artifact_name="plan.md")
+    d = OmnigentDriver(run_dir=tmp_path)
     assert await d._context_tokens() is None
 
 
 async def test_context_tokens_none_when_the_read_fails(tmp_path):
-    d = OmnigentDriver(run_dir=tmp_path, artifact_name="plan.md")
+    d = OmnigentDriver(run_dir=tmp_path)
     d._chat = _FakeChat([TurnStatus.IDLE])
     d._client = _label_client(boom=RuntimeError("transport gone"))
     assert await d._context_tokens() is None
@@ -1606,9 +1581,7 @@ async def test_capture_session_returns_the_run_fields(tmp_path):
 
     assert out["items"] == [_USER, _REPLY]  # deduped
     assert out["context_tokens"] == 1234
-    assert out["artifact_exists"] is True
-    assert out["artifact_path"] == str(tmp_path / "plan.md")
-    assert out["artifact_text"] == "# the plan\n"
+    assert not {"artifact_exists", "artifact_path", "artifact_text"} & out.keys()
     assert (out["model"], out["driver"]) == (d.model, "omnigent")
     assert out["session_id"] == "conv_test"
     assert isinstance(out["duration_s"], float)
@@ -1621,7 +1594,7 @@ async def test_close_swallows_a_failing_client(tmp_path):
         async def aclose(self):
             raise RuntimeError("already gone")
 
-    d = OmnigentDriver(run_dir=tmp_path, artifact_name="plan.md")
+    d = OmnigentDriver(run_dir=tmp_path)
     d._http, d._client = _Boom(), None
     await d.close()
     assert d._closed is True

@@ -74,7 +74,6 @@ def test_git_init_repo_ignores_inherited_git_env(tmp_path, monkeypatch):
 def test_render_config_embeds_custom_prompt(tmp_path):
     d = OmnigentDriver(
         run_dir=tmp_path,
-        artifact_name="tasks.json",
         agent_prompt="CUSTOM-AGENT-PROMPT-XYZ",
         agent_description="builds a todo app",
     )
@@ -90,7 +89,7 @@ def test_default_agent_is_vanilla_no_prompt(tmp_path):
     # bug 3: the old default was the spike-1 "account_summarizer" banking persona.
     # The SUT must be vanilla Claude Code — the default carries no leftover
     # persona and emits NO system prompt at all (inert for claude-native anyway).
-    d = OmnigentDriver(run_dir=tmp_path, artifact_name="tasks.json")
+    d = OmnigentDriver(run_dir=tmp_path)
     assert d.agent_name == "claude_code" != "account_summarizer"
     assert d.agent_prompt is None
     cfg = d.render_config()
@@ -110,15 +109,15 @@ def test_git_init_repo_creates_repo(tmp_path):
 def test_driver_accepts_reasoning_effort():
     from pathlib import Path
 
-    d = OmnigentDriver(run_dir=Path("/tmp/x"), artifact_name="plan.md")
+    d = OmnigentDriver(run_dir=Path("/tmp/x"))
     assert d.reasoning_effort is None  # default: unset, base behavior unchanged
-    d2 = OmnigentDriver(run_dir=Path("/tmp/x"), artifact_name="plan.md", reasoning_effort="xhigh")
+    d2 = OmnigentDriver(run_dir=Path("/tmp/x"), reasoning_effort="xhigh")
     assert d2.reasoning_effort == "xhigh"
 
 
 def test_create_metadata_omits_title_and_project_by_default(tmp_path):
     # Defaults unset -> only launch args, no title / labels (server default kept).
-    d = OmnigentDriver(run_dir=tmp_path, artifact_name="plan.md")
+    d = OmnigentDriver(run_dir=tmp_path)
     meta = d._create_metadata()
     args = meta["terminal_launch_args"]
     assert args[:2] == ["--disallowedTools", "AskUserQuestion"]
@@ -130,7 +129,6 @@ def test_create_metadata_omits_title_and_project_by_default(tmp_path):
 def test_create_metadata_includes_title_and_project_when_set(tmp_path):
     d = OmnigentDriver(
         run_dir=tmp_path,
-        artifact_name="plan.md",
         session_title="flow: superpowers",
         project="swe_planning/todo-004",
     )
@@ -145,21 +143,21 @@ def test_create_metadata_includes_title_and_project_when_set(tmp_path):
 def test_create_metadata_codex_native_gets_codex_flags(tmp_path):
     # codex rejects claude-only flags (--disallowedTools etc.) with exit 2,
     # so codex-native sessions get codex's own unattended stance instead.
-    d = OmnigentDriver(run_dir=tmp_path, artifact_name="plan.md", harness="codex-native")
+    d = OmnigentDriver(run_dir=tmp_path, harness="codex-native")
     args = d._create_metadata()["terminal_launch_args"]
     assert args == ["--ask-for-approval", "never", "--sandbox", "workspace-write"]
 
 
 def test_create_metadata_unknown_harness_gets_no_flags(tmp_path):
     # No foreign flags for harnesses we haven't mapped: empty is the safe default.
-    d = OmnigentDriver(run_dir=tmp_path, artifact_name="plan.md", harness="qwen-native")
+    d = OmnigentDriver(run_dir=tmp_path, harness="qwen-native")
     assert d._create_metadata()["terminal_launch_args"] == []
 
 
 def test_create_metadata_claude_native_flags(tmp_path):
     # The exact flag list every claude-native flow launches with: no allowlist, no
     # prompts (#52) — identical for every flow, so comparability holds.
-    d = OmnigentDriver(run_dir=tmp_path, artifact_name="plan.md", harness="claude-native")
+    d = OmnigentDriver(run_dir=tmp_path, harness="claude-native")
     args = d._create_metadata()["terminal_launch_args"]
     assert args == [
         "--disallowedTools",

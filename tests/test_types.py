@@ -1,3 +1,4 @@
+import dataclasses
 import json
 import typing
 
@@ -32,7 +33,12 @@ def test_json_round_trip():
 
 
 def test_turn_result_status_compares_to_literal():
-    assert TurnResult(TurnStatus.IDLE, "", False).status == "idle"
+    assert TurnResult(TurnStatus.IDLE, "").status == "idle"
+
+
+def test_turn_result_has_no_artifact_field():
+    # S02.4: the artifact concern lives in the loop/orchestrator, not the turn
+    assert "artifact_exists" not in {f.name for f in dataclasses.fields(TurnResult)}
 
 
 def test_driver_reexports_types():

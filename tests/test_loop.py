@@ -90,8 +90,8 @@ async def test_loop_primes_simulator_once_then_relays_deltas():
     # conversation so far; every later prompt is ONLY the delta since its last
     # reply. Re-sending system+tail each turn cost quadratic tokens (seen live).
     turns = [
-        TurnResult(TurnStatus.IDLE, "what storage should I use?", False),
-        TurnResult(TurnStatus.IDLE, "and what file name?", False),
+        TurnResult(TurnStatus.IDLE, "what storage should I use?"),
+        TurnResult(TurnStatus.IDLE, "and what file name?"),
         TurnResult(TurnStatus.IDLE, "done, tests pass", True),
     ]
     driver = _FakeDriver(turns, {"items": []})
@@ -128,7 +128,7 @@ async def test_loop_continues_past_a_flaked_idle_turn_and_counts_it(flaked_index
     # flaked_index=0 case is the uninitialized-counter trap: `flaked` must exist
     # before the FIRST send, not only inside the in-loop send.
     turns = [
-        TurnResult(TurnStatus.IDLE, "q?", False),
+        TurnResult(TurnStatus.IDLE, "q?"),
         TurnResult(TurnStatus.IDLE, "done", True),
     ]
     turns[flaked_index] = dataclasses.replace(turns[flaked_index], flaked=True)
@@ -153,8 +153,8 @@ async def test_relay_advances_even_when_simulator_says_continue():
     # todo-app-004: the sim's literal "Continue." matched the old nudge sentinel,
     # so sim_seen froze and every later relay resent the whole backlog (quadratic)
     turns = [
-        TurnResult(TurnStatus.IDLE, "Task 1 implementer running", False),
-        TurnResult(TurnStatus.IDLE, "Task 1 done, on to Task 2", False),
+        TurnResult(TurnStatus.IDLE, "Task 1 implementer running"),
+        TurnResult(TurnStatus.IDLE, "Task 1 done, on to Task 2"),
         TurnResult(TurnStatus.IDLE, "all done", True),
     ]
     driver = _FakeDriver(turns, {"items": []})
@@ -187,7 +187,7 @@ def test_is_done_tolerates_wrapped_token():
 
 async def test_loop_answers_then_stops_on_done_token():
     turns = [
-        TurnResult(TurnStatus.IDLE, "What should I store tasks in?", False),
+        TurnResult(TurnStatus.IDLE, "What should I store tasks in?"),
         TurnResult(TurnStatus.IDLE, "Design approved? I built it and tests pass.", True),
     ]
     driver = _FakeDriver(turns, {"items": []})
@@ -211,7 +211,7 @@ async def test_loop_answers_then_stops_on_done_token():
 
 
 async def test_loop_stops_at_max_turns():
-    turns = [TurnResult(TurnStatus.IDLE, "another question?", False)]
+    turns = [TurnResult(TurnStatus.IDLE, "another question?")]
     driver = _FakeDriver(turns, {"items": []})
     user = _StubModel(["keep going"])  # never says DONE
     await run_agent_session(
@@ -229,7 +229,7 @@ async def test_loop_stops_at_max_turns():
 
 
 async def test_loop_bails_on_failed_status():
-    turns = [TurnResult(TurnStatus.FAILED, "", False)]
+    turns = [TurnResult(TurnStatus.FAILED, "")]
     driver = _FakeDriver(turns, {"items": []})
     user = _StubModel(["unused"])
     session = await run_agent_session(
@@ -264,9 +264,7 @@ async def test_done_waits_for_pending_artifact(monkeypatch, tmp_path):
         return None
 
     monkeypatch.setattr("flowbench.loop.asyncio.sleep", _nosleep)
-    driver = _FakeDriver(
-        [TurnResult(TurnStatus.IDLE, "the plan is complete", False)], {"items": []}
-    )
+    driver = _FakeDriver([TurnResult(TurnStatus.IDLE, "the plan is complete")], {"items": []})
     user = _StubModel([DONE_TOKEN])
     session = await run_agent_session(
         driver,
@@ -297,9 +295,7 @@ async def test_done_grace_poll_is_bounded_by_wall_clock():
             time.sleep(1.0)
         return None
 
-    driver = _FakeDriver(
-        [TurnResult(TurnStatus.IDLE, "the plan is complete", False)], {"items": []}
-    )
+    driver = _FakeDriver([TurnResult(TurnStatus.IDLE, "the plan is complete")], {"items": []})
     user = _StubModel([DONE_TOKEN])
     start = time.monotonic()
     session = await run_agent_session(
@@ -325,9 +321,7 @@ async def test_no_probe_skips_poll_and_reports_no_artifact(monkeypatch):
         sleeps.append(s)
 
     monkeypatch.setattr("flowbench.loop.asyncio.sleep", _record_sleep)
-    driver = _FakeDriver(
-        [TurnResult(TurnStatus.IDLE, "the plan is complete", False)], {"items": []}
-    )
+    driver = _FakeDriver([TurnResult(TurnStatus.IDLE, "the plan is complete")], {"items": []})
     user = _StubModel([DONE_TOKEN])
     session = await run_agent_session(
         driver,
@@ -347,7 +341,7 @@ async def test_no_probe_skips_poll_and_reports_no_artifact(monkeypatch):
 
 async def test_loop_records_stall_reason_and_pane(monkeypatch):
     # #54: a stalled first turn stops the loop and lands what the agent waits on
-    turns = [TurnResult(TurnStatus.STALLED, "", False, stall_reason="prompt", pane_tail="❯ y/n?")]
+    turns = [TurnResult(TurnStatus.STALLED, "", stall_reason="prompt", pane_tail="❯ y/n?")]
     driver = _FakeDriver(turns, {"items": []})
     user = _StubModel(["unused"])
     session = await run_agent_session(
