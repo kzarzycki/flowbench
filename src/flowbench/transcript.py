@@ -38,6 +38,19 @@ def n_assistant_messages(items: list[dict]) -> int:
     )
 
 
+def new_assistant_text(items: list[dict], n_before: int) -> str:
+    """Text of the last NON-EMPTY assistant message beyond the first `n_before`
+    assistant messages — i.e. a reply that landed after the inject `n_before` was
+    taken for. "" when none did. An empty new message is not a reply: without
+    this rule `last_assistant_text` would hand back an OLDER reply as this turn's."""
+    msgs = [
+        it
+        for it in items
+        if isinstance(it, dict) and it.get("type") == "message" and it.get("role") == "assistant"
+    ]
+    return last_assistant_text(msgs[n_before:])
+
+
 # Harness control injections that are NOT part of the user/agent conversation —
 # Claude Code surfaces sub-agent completions as role=user `<task-notification>`
 # messages. They must not pollute the transcript or be read as conversation.

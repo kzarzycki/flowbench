@@ -26,7 +26,7 @@ class TurnStatus(StrEnum):
     IDLE = "idle"  # turn settled: the agent is awaiting the user
     RUNNING = "running"  # still mid-turn when the per-turn cap fired (loop.py)
     FAILED = "failed"  # the omnigent session reported failed
-    TIMEOUT = "timeout"  # derived: idle but silent, or _wait_idle's budget expired
+    TIMEOUT = "timeout"  # derived: idle but silent, or the send's budget expired
     STALLED = "stalled"  # derived: a prompt nobody can answer, or no heartbeat
 
 
@@ -39,6 +39,8 @@ class TurnResult:
     artifact_exists: bool
     stall_reason: str | None = None  # "prompt" | "no_progress" when stalled
     pane_tail: str | None = None  # last terminal lines at the stall, best effort
+    flaked: bool = False  # server reported failed AFTER a new reply landed; text
+    # trusted, status IDLE (S02.3)
 
 
 @runtime_checkable

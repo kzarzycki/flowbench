@@ -1,9 +1,11 @@
 """Driver contract, offline. We don't drive a live agent here (Task 1 + Task 7
 cover that); we assert the interface contract and the pure transcript helpers."""
 
+import asyncio
 import io
 import json
 import tarfile
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
@@ -187,7 +189,7 @@ def _settle_driver(tmp_path, chat, batches):
     from types import SimpleNamespace
 
     d = OmnigentDriver(run_dir=tmp_path, artifact_name="plan.md")
-    d.settle_timeout_s = 1.0
+    d.turn_timeout_s = 1.0
     d.settle_poll_s = 0.01
     d._chat = chat
     d._snapshot = chat.snapshot
@@ -195,8 +197,39 @@ def _settle_driver(tmp_path, chat, batches):
     return d
 
 
+class _Clock:
+    def __init__(self):
+        self.t = 0.0
+
+    def now(self):
+        return self.t
+
+    async def sleep(self, s):
+        self.t += s
+
+
+def _fake_clock(monkeypatch):
+    c = _Clock()
+    monkeypatch.setattr("flowbench.driver.omnigent._now", c.now)
+    monkeypatch.setattr("flowbench.driver.omnigent.asyncio.sleep", c.sleep)
+    return c
+
+
 _USER = {"type": "message", "role": "user", "content": "grade these plans"}
 _REPLY = {"type": "message", "role": "assistant", "content": "WINNER: B"}
+_USER2 = {"type": "message", "role": "user", "content": "keep going"}
+_EMPTY_REPLY = {"type": "message", "role": "assistant", "content": "  "}
+_REPLY2 = {"type": "message", "role": "assistant", "content": "WINNER: C"}
+
+_real_sleep = asyncio.sleep
+
+
+async def _fast_sleep(s):
+    await _real_sleep(min(s, 0.001))
+
+
+async def _hang(*a, **k):
+    await asyncio.Event().wait()
 
 
 async def test_send_settles_until_new_assistant_message(tmp_path, monkeypatch):
@@ -218,13 +251,12 @@ async def test_send_settle_expiry_is_a_timeout_not_a_stale_idle(tmp_path, monkey
     # todo-003: settle expired while the agent was still mid-turn behind a lying
     # idle; the old code returned idle+stale text, the loop injected into a busy
     # terminal and the run died. Expiry must read as an unfinished turn.
-    monkeypatch.setattr("flowbench.driver.omnigent.asyncio.sleep", _instant_sleep)
-    # server statuses fed to _snapshot, not driver outputs
-    chat = _FakeChat(
-        [TurnStatus.RUNNING, TurnStatus.IDLE] * 10
-    )  # every _wait_idle sees running->idle (fast path)
+    _fake_clock(monkeypatch)
+    # RUNNING once, then stays IDLE (an alternating sequence would let a later
+    # _wait_idle expire on RUNNING instead of exercising the settle expiry)
+    chat = _FakeChat([TurnStatus.RUNNING, TurnStatus.IDLE])
     d = _settle_driver(tmp_path, chat, [[], [_USER]])  # reply never lands
-    d.settle_timeout_s = 0.05
+    d.turn_timeout_s = 10.0
     result = await d.send("grade these plans")
     assert result.status == TurnStatus.TIMEOUT
 
@@ -262,45 +294,542 @@ async def test_read_retry_survives_transient_errors(tmp_path, monkeypatch):
 async def test_send_retries_undelivered_injection(tmp_path, monkeypatch):
     # runner_error "message was not delivered" = the inject never reached the
     # agent (busy terminal behind a lying idle) — re-sending is safe and required
-    monkeypatch.setattr("flowbench.driver.omnigent.asyncio.sleep", _instant_sleep)
+    clock = _fake_clock(monkeypatch)
     d = OmnigentDriver(run_dir=tmp_path, artifact_name="plan.md")
+    d.turn_timeout_s = 1000
     outcomes = [
         TurnResult(TurnStatus.FAILED, "", False),
         TurnResult(TurnStatus.IDLE, "the plan is complete", False),
     ]
     sent = []
 
-    async def fake_send_once(text):
+    async def fake_send_once(text, deadline):
         sent.append(text)
         return outcomes.pop(0)
 
-    async def undelivered():
+    async def resend_allowed():
         return True
 
     d._send_once = fake_send_once
-    d._injection_undelivered = undelivered
+    d._resend_allowed = resend_allowed
     result = await d.send("go on")
     assert result.status == TurnStatus.IDLE
     assert sent == ["go on", "go on"]  # same text re-sent once
+    assert clock.t == 30.0
 
 
 async def test_send_does_not_retry_delivered_failure(tmp_path, monkeypatch):
-    monkeypatch.setattr("flowbench.driver.omnigent.asyncio.sleep", _instant_sleep)
+    _fake_clock(monkeypatch)
     d = OmnigentDriver(run_dir=tmp_path, artifact_name="plan.md")
+    d.turn_timeout_s = 1000
     sent = []
 
-    async def fake_send_once(text):
+    async def fake_send_once(text, deadline):
         sent.append(text)
         return TurnResult(TurnStatus.FAILED, "", False)
 
-    async def delivered():
-        return False  # a real failure, not an undelivered inject
+    async def resend_not_allowed():
+        return False  # a real failure (e.g. model_error), not an undelivered inject
 
     d._send_once = fake_send_once
-    d._injection_undelivered = delivered
+    d._resend_allowed = resend_not_allowed
     result = await d.send("go on")
     assert result.status == TurnStatus.FAILED
     assert sent == ["go on"]  # no blind retry
+
+
+async def test_failed_exhausts_bounded_resends(tmp_path, monkeypatch):
+    _fake_clock(monkeypatch)
+    d = OmnigentDriver(run_dir=tmp_path, artifact_name="plan.md")
+    d.turn_timeout_s = 1000
+    sent = []
+
+    async def fake_send_once(text, deadline):
+        sent.append(text)
+        return TurnResult(TurnStatus.FAILED, "", False)
+
+    async def resend_allowed():
+        return True
+
+    d._send_once = fake_send_once
+    d._resend_allowed = resend_allowed
+    result = await d.send("go on")
+    assert result.status == TurnStatus.FAILED
+    assert len(sent) == 1 + d.send_retry_attempts
+
+
+@pytest.mark.parametrize(
+    "result",
+    [
+        TurnResult(TurnStatus.TIMEOUT, "", False),
+        TurnResult(TurnStatus.RUNNING, "", False),
+        TurnResult(TurnStatus.STALLED, "", False, stall_reason="prompt"),
+    ],
+)
+async def test_non_failed_statuses_are_never_resent(tmp_path, monkeypatch, result):
+    # rows 4/5: TIMEOUT, RUNNING and STALLED (idle handles its own row-5 timeout
+    # transform inside _send_once) return from send() after exactly one _send_once
+    _fake_clock(monkeypatch)
+    d = OmnigentDriver(run_dir=tmp_path, artifact_name="plan.md")
+    d.turn_timeout_s = 1000
+    sent = []
+
+    async def fake_send_once(text, deadline):
+        sent.append(text)
+        return result
+
+    d._send_once = fake_send_once
+    out = await d.send("go on")
+    assert out is result
+    assert len(sent) == 1
+
+
+async def test_failed_with_new_text_is_a_flaked_idle(tmp_path, capsys):
+    # row 2: the server said failed AFTER the reply landed — trust the text, IDLE
+    chat = _FakeChat([TurnStatus.FAILED])
+    injects = []
+    base_send = chat.send
+
+    def counting_send(text):
+        injects.append(text)
+        return base_send(text)
+
+    chat.send = counting_send
+    d = _settle_driver(tmp_path, chat, [[], [_USER, _REPLY]])
+
+    async def must_not_be_called():
+        raise AssertionError("_resend_allowed must not be called for a flaked idle")
+
+    d._resend_allowed = must_not_be_called
+    result = await d.send("grade these plans")
+    assert (result.status, result.flaked, result.assistant_text) == (
+        TurnStatus.IDLE,
+        True,
+        "WINNER: B",
+    )
+    assert len(injects) == 1
+    assert "turn flaked" in capsys.readouterr().err
+
+
+async def test_failed_with_only_an_empty_new_message_is_not_flaked(tmp_path):
+    # the only NEW assistant message is empty/whitespace; an older non-empty reply
+    # exists but does not count as "new" — this is a re-send candidate, not a flake
+    chat = _FakeChat([TurnStatus.FAILED])
+    d = _settle_driver(tmp_path, chat, [[_USER, _REPLY], [_USER, _REPLY, _USER2, _EMPTY_REPLY]])
+    d.send_retry_attempts = 0
+    result = await d.send("go on")
+    assert result.status == TurnStatus.FAILED
+    assert result.flaked is False
+
+
+async def test_failed_with_a_repeated_identical_reply_is_flaked(tmp_path):
+    # a new reply identical to the previous turn's text IS new text (count-based,
+    # not equality-based)
+    chat = _FakeChat([TurnStatus.FAILED])
+    d = _settle_driver(tmp_path, chat, [[_USER, _REPLY], [_USER, _REPLY, _USER, _REPLY]])
+    result = await d.send("go on")
+    assert (result.status, result.flaked) == (TurnStatus.IDLE, True)
+
+
+async def test_idle_with_only_an_empty_new_message_keeps_settling(tmp_path, monkeypatch):
+    # row 5's predicate (new_assistant_text) is the same one the settle loop
+    # uses: an empty new message must not end the settle early
+    clock = _fake_clock(monkeypatch)
+    chat = _FakeChat([TurnStatus.RUNNING, TurnStatus.IDLE])
+    d = _settle_driver(
+        tmp_path,
+        chat,
+        [[_USER, _REPLY], [_USER, _REPLY, _EMPTY_REPLY], [_USER, _REPLY, _EMPTY_REPLY, _REPLY2]],
+    )
+    d.turn_timeout_s = 100
+    result = await d.send("grade these plans")
+    assert result.status == TurnStatus.IDLE
+    assert result.assistant_text == _REPLY2["content"]
+    assert clock.t < 100  # settled on the real reply, not on the budget
+
+
+async def test_one_budget_per_send(tmp_path, monkeypatch):
+    # pre-S02.3, a second _wait_idle got its OWN fresh turn_timeout_s (≈160 here);
+    # S02.3 gives the whole send one budget
+    clock = _fake_clock(monkeypatch)
+    seq = (
+        [(TurnStatus.RUNNING, [])] * 40
+        + [(TurnStatus.IDLE, [])]
+        + [(TurnStatus.RUNNING, [])] * 10_000
+    )
+    chat = _FakeChat([TurnStatus.RUNNING])
+    chat.snapshot, _ = _seq_snapshot(seq)
+    d = _settle_driver(tmp_path, chat, [[], [_USER]])  # no new text -> keeps settling
+    d.turn_timeout_s = 100
+    result = await d.send("build it")
+    assert result.status == TurnStatus.RUNNING
+    assert clock.t <= 100 + d.settle_poll_s + 1.5
+
+
+async def test_no_inject_when_the_budget_is_gone_before_it(tmp_path, monkeypatch):
+    clock = _Clock()
+    monkeypatch.setattr("flowbench.driver.omnigent._now", clock.now)
+
+    async def overshooting_sleep(s):
+        clock.t += s + 1  # the wait itself overshoots what's left of the budget
+
+    monkeypatch.setattr("flowbench.driver.omnigent.asyncio.sleep", overshooting_sleep)
+
+    chat = _FakeChat([TurnStatus.FAILED])
+    injects = []
+    base_send = chat.send
+
+    def counting_send(text):
+        injects.append(text)
+        return base_send(text)
+
+    chat.send = counting_send
+    d = _settle_driver(tmp_path, chat, [[]])
+    d.turn_timeout_s = 31
+    d.send_retry_wait_s = 30
+
+    async def resend_allowed():
+        return True
+
+    d._resend_allowed = resend_allowed
+    result = await d.send("go on")
+    assert result.status == TurnStatus.TIMEOUT
+    assert len(injects) == 1  # the re-send never injects: budget gone after the wait
+
+
+async def test_no_inject_after_a_slow_initial_read(tmp_path, monkeypatch):
+    clock = _fake_clock(monkeypatch)
+    chat = _FakeChat([TurnStatus.IDLE])
+    injects = []
+    base_send = chat.send
+
+    def counting_send(text):
+        injects.append(text)
+        return base_send(text)
+
+    chat.send = counting_send
+    d = _settle_driver(tmp_path, chat, [[]])
+    d.turn_timeout_s = 10.0
+    real_list_items = d._list_items
+    calls = {"n": 0}
+
+    async def slow_first_read():
+        calls["n"] += 1
+        if calls["n"] == 1:
+            clock.t += d.turn_timeout_s + 1
+            return []
+        return await real_list_items()
+
+    d._list_items = slow_first_read
+    result = await d.send("go on")
+    assert result.status == TurnStatus.TIMEOUT
+    assert injects == []
+
+
+@pytest.mark.parametrize("turn_timeout_s,expected_sends", [(50, 2), (10, 1)])
+async def test_resend_needs_budget_for_its_wait(
+    tmp_path, monkeypatch, turn_timeout_s, expected_sends
+):
+    _fake_clock(monkeypatch)
+    d = OmnigentDriver(run_dir=tmp_path, artifact_name="plan.md")
+    d.turn_timeout_s = turn_timeout_s
+    d.send_retry_wait_s = 30
+    d.send_retry_attempts = 3
+    sent = []
+
+    async def fake_send_once(text, deadline):
+        sent.append(text)
+        return TurnResult(TurnStatus.FAILED, "", False)
+
+    async def resend_allowed():
+        return True
+
+    d._send_once = fake_send_once
+    d._resend_allowed = resend_allowed
+    result = await d.send("go on")
+    assert len(sent) == expected_sends
+    assert result.status == TurnStatus.FAILED
+
+
+# --- hard ceiling: asyncio.timeout cancels whatever is in flight -------------
+
+
+async def test_hard_ceiling_cancels_a_hanging_status_read(tmp_path):
+    hit = {}
+    chat = _FakeChat([TurnStatus.RUNNING])
+    injects = []
+    base_send = chat.send
+
+    def counting_send(text):
+        injects.append(text)
+        return base_send(text)
+
+    chat.send = counting_send
+    d = _settle_driver(tmp_path, chat, [[]])
+    d.turn_timeout_s = 0.1
+
+    async def hang_snapshot():
+        hit["snapshot"] = True
+        await _hang()
+
+    d._snapshot = hang_snapshot
+    t0 = time.monotonic()
+    result = await d.send("go on")
+    assert result == TurnResult(TurnStatus.TIMEOUT, "", False)
+    assert time.monotonic() - t0 < 2.0
+    assert "snapshot" in hit
+    assert len(injects) == 1
+
+
+async def test_hard_ceiling_stops_before_the_first_inject_when_the_initial_read_hangs(tmp_path):
+    hit = {}
+    chat = _FakeChat([TurnStatus.RUNNING])
+    injects = []
+    base_send = chat.send
+
+    def counting_send(text):
+        injects.append(text)
+        return base_send(text)
+
+    chat.send = counting_send
+    d = _settle_driver(tmp_path, chat, [[]])
+    d.turn_timeout_s = 0.1
+
+    async def hang_list_items():
+        hit["items"] = True
+        await _hang()
+
+    d._list_items = hang_list_items
+    t0 = time.monotonic()
+    result = await d.send("go on")
+    assert result == TurnResult(TurnStatus.TIMEOUT, "", False)
+    assert time.monotonic() - t0 < 2.0
+    assert "items" in hit
+    assert injects == []
+
+
+async def test_hard_ceiling_cancels_a_hanging_post_wait_item_read(tmp_path, monkeypatch):
+    monkeypatch.setattr("flowbench.driver.omnigent.asyncio.sleep", _fast_sleep)
+    hit = {}
+    chat = _FakeChat([TurnStatus.RUNNING, TurnStatus.IDLE])
+    injects = []
+    base_send = chat.send
+
+    def counting_send(text):
+        injects.append(text)
+        return base_send(text)
+
+    chat.send = counting_send
+    d = _settle_driver(tmp_path, chat, [[]])
+    d.turn_timeout_s = 0.1
+    calls = {"n": 0}
+
+    async def list_items():
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return []
+        hit["items"] = True
+        await _hang()
+
+    d._list_items = list_items
+    t0 = time.monotonic()
+    result = await d.send("go on")
+    assert result == TurnResult(TurnStatus.TIMEOUT, "", False)
+    assert time.monotonic() - t0 < 2.0
+    assert "items" in hit
+    assert len(injects) == 1
+
+
+async def test_hard_ceiling_cancels_a_hanging_second_page(tmp_path, monkeypatch):
+    monkeypatch.setattr("flowbench.driver.omnigent.asyncio.sleep", _fast_sleep)
+    from flowbench.driver.omnigent import _PAGE
+
+    hit = {}
+    chat = _FakeChat([TurnStatus.RUNNING, TurnStatus.IDLE])
+    injects = []
+    base_send = chat.send
+
+    def counting_send(text):
+        injects.append(text)
+        return base_send(text)
+
+    chat.send = counting_send
+    calls = {"n": 0}
+
+    class _Paged:
+        async def list_items(self, session_id, order, limit, after=None):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                return []  # n_before probe
+            if calls["n"] == 2:
+                return [{"id": f"i{n}", "type": "message", "role": "user"} for n in range(_PAGE)]
+            hit["second_page"] = True
+            await _hang()
+
+    d = OmnigentDriver(run_dir=tmp_path, artifact_name="plan.md")
+    d._chat = chat
+    d._snapshot = chat.snapshot
+    d._client = SimpleNamespace(sessions=_Paged())
+    d.turn_timeout_s = 0.1
+    t0 = time.monotonic()
+    result = await d.send("go on")
+    assert result == TurnResult(TurnStatus.TIMEOUT, "", False)
+    assert time.monotonic() - t0 < 2.0
+    assert "second_page" in hit
+    assert calls["n"] == 3  # pagination reached: a full first page, then the second
+    assert len(injects) == 1
+
+
+async def test_hard_ceiling_cuts_read_retry_backoff(tmp_path):
+    import httpx
+
+    chat = _FakeChat([TurnStatus.RUNNING])
+    injects = []
+    base_send = chat.send
+
+    def counting_send(text):
+        injects.append(text)
+        return base_send(text)
+
+    chat.send = counting_send
+    d = _settle_driver(tmp_path, chat, [[]])
+    d.turn_timeout_s = 0.1
+    calls = {"n": 0}
+
+    async def always_fails():
+        calls["n"] += 1
+        raise httpx.ReadError("down")
+
+    d._snapshot = always_fails
+    t0 = time.monotonic()
+    result = await d.send("go on")
+    assert result == TurnResult(TurnStatus.TIMEOUT, "", False)
+    assert time.monotonic() - t0 < 2.0
+    assert calls["n"] >= 1
+    assert len(injects) == 1
+
+
+async def test_hard_ceiling_cancels_a_hanging_label_read(tmp_path):
+    hit = {}
+    chat = _FakeChat([TurnStatus.FAILED])
+    injects = []
+    base_send = chat.send
+
+    def counting_send(text):
+        injects.append(text)
+        return base_send(text)
+
+    chat.send = counting_send
+    d = _settle_driver(tmp_path, chat, [[]])
+    d.turn_timeout_s = 0.1
+    d.send_retry_wait_s = 0.01  # the 0.1 budget makes the re-send eligible
+
+    class _HangingHttp:
+        async def get(self, _url):
+            hit["labels"] = True
+            await _hang()
+
+    d._http = _HangingHttp()
+    t0 = time.monotonic()
+    result = await d.send("go on")
+    assert result == TurnResult(TurnStatus.TIMEOUT, "", False)
+    assert time.monotonic() - t0 < 2.0
+    assert "labels" in hit
+    assert len(injects) == 1
+
+
+async def test_hard_ceiling_cancels_an_overshooting_retry_sleep(tmp_path, monkeypatch):
+    hit = {}
+
+    async def overshoot_sleep(s):
+        hit["slept"] = s
+        await _real_sleep(s + 1.0)
+
+    monkeypatch.setattr("flowbench.driver.omnigent.asyncio.sleep", overshoot_sleep)
+    chat = _FakeChat([TurnStatus.FAILED])
+    injects = []
+    base_send = chat.send
+
+    def counting_send(text):
+        injects.append(text)
+        return base_send(text)
+
+    chat.send = counting_send
+    d = _settle_driver(tmp_path, chat, [[]])
+    d.turn_timeout_s = 0.3
+    d.send_retry_wait_s = 0.1
+
+    async def resend_allowed():
+        return True
+
+    d._resend_allowed = resend_allowed
+    t0 = time.monotonic()
+    result = await d.send("go on")
+    assert result == TurnResult(TurnStatus.TIMEOUT, "", False)
+    assert time.monotonic() - t0 < 2.0
+    assert hit["slept"] == 0.1  # the sleep WAS eligible; the timer still cut it
+    assert len(injects) == 1  # never re-injected
+
+
+async def test_hard_ceiling_cancels_the_resend_wait(tmp_path):
+    hit = {}
+    chat = _FakeChat([TurnStatus.FAILED])
+    calls = {"n": 0}
+    base_snapshot = chat.snapshot
+
+    async def snapshot():
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return await base_snapshot()
+        hit["hang"] = True
+        await _hang()
+
+    chat.snapshot = snapshot
+    injects = []
+    base_send = chat.send
+
+    def counting_send(text):
+        injects.append(text)
+        return base_send(text)
+
+    chat.send = counting_send
+    d = _settle_driver(tmp_path, chat, [[]])
+    d.turn_timeout_s = 0.6
+    d.send_retry_wait_s = 0.1
+
+    async def resend_allowed():
+        return True
+
+    d._resend_allowed = resend_allowed
+    t0 = time.monotonic()
+    result = await d.send("go on")
+    assert result == TurnResult(TurnStatus.TIMEOUT, "", False)
+    assert time.monotonic() - t0 < 2.0
+    assert "hang" in hit
+    assert len(injects) == 2  # the re-send DID inject; its second wait hung
+
+
+async def test_hard_ceiling_covers_a_slow_filesystem(tmp_path, monkeypatch):
+    monkeypatch.setattr("flowbench.driver.omnigent.asyncio.sleep", _fast_sleep)
+    hit = {}
+    chat = _FakeChat([TurnStatus.RUNNING, TurnStatus.IDLE])
+    d = _settle_driver(tmp_path, chat, [[], [_USER, _REPLY]])
+    d.turn_timeout_s = 0.1
+
+    def slow_artifact_path():
+        hit["fs_started"] = time.monotonic()
+        time.sleep(1.0)
+        hit["fs_done"] = time.monotonic()
+        return None
+
+    d.artifact_path = slow_artifact_path
+    t0 = time.monotonic()
+    result = await d.send("go on")
+    elapsed = time.monotonic() - t0
+    assert result == TurnResult(TurnStatus.TIMEOUT, "", False)
+    assert elapsed < 1.0  # the send did not wait for the thread
+    assert "fs_started" in hit
+    assert "fs_done" not in hit  # the worker is still running, its result discarded
 
 
 async def test_capture_session_includes_context_tokens(tmp_path):
@@ -365,7 +894,7 @@ async def test_other_prompt_signals_stall_too(tmp_path, monkeypatch, key):
 
 async def test_one_poll_prompt_flicker_is_not_a_stall(tmp_path, monkeypatch):
     # a one-poll flicker of a prompt signal must not stall — a real dialog persists
-    monkeypatch.setattr("flowbench.driver.omnigent.asyncio.sleep", _instant_sleep)
+    _fake_clock(monkeypatch)
     import itertools
 
     chat = _FakeChat([TurnStatus.RUNNING], beats=itertools.count())
@@ -377,7 +906,7 @@ async def test_one_poll_prompt_flicker_is_not_a_stall(tmp_path, monkeypatch):
 
     chat.snapshot = snapshot
     d = _settle_driver(tmp_path, chat, [[]])
-    d.turn_timeout_s = 0.1
+    d.turn_timeout_s = 10.0
     result = await d.send("build it")
     assert (result.status, result.stall_reason) == (TurnStatus.RUNNING, None)
 
@@ -396,13 +925,13 @@ async def test_frozen_heartbeat_stalls_after_stall_s(tmp_path, monkeypatch):
 
 
 async def test_moving_heartbeat_is_not_a_stall(tmp_path, monkeypatch):
-    monkeypatch.setattr("flowbench.driver.omnigent.asyncio.sleep", _instant_sleep)
+    _fake_clock(monkeypatch)
     import itertools
 
     chat = _FakeChat([TurnStatus.RUNNING], beats=itertools.count())  # every poll a new updated_at
     d = _settle_driver(tmp_path, chat, [[]])
     d.stall_s = 0.05
-    d.turn_timeout_s = 0.2
+    d.turn_timeout_s = 10.0
     result = await d.send("build it")
     assert (result.status, result.stall_reason) == (TurnStatus.RUNNING, None)
 
@@ -632,14 +1161,14 @@ async def test_failed_session_status_ends_the_turn(tmp_path):
     assert result.status == TurnStatus.FAILED
 
 
-async def test_undocumented_server_status_passes_through(tmp_path):
+async def test_undocumented_server_status_passes_through(tmp_path, monkeypatch):
     # A server status outside the documented vocabulary (idle/running/failed)
     # must reach TurnResult.status unchanged — no exception, no relabelling
-    # (decisions #7, AC10). NOT monkeypatching asyncio.sleep here: the
-    # passthrough is reached only by exhausting turn_timeout_s in real
-    # monotonic time, which _instant_sleep does not fast-forward.
+    # (decisions #7, AC10). The fake clock advances on sleep, so the cap is
+    # reached deterministically without spending real wall-clock time.
+    _fake_clock(monkeypatch)
     d = _settle_driver(tmp_path, _FakeChat(["zombie"]), [[]])
-    d.turn_timeout_s = 0.1
+    d.turn_timeout_s = 10.0
     result = await d.send("build it")
     assert result.status == "zombie"
 
@@ -696,13 +1225,13 @@ async def test_wakeup_already_ran_returns_idle_at_once(tmp_path, monkeypatch):
 async def test_cap_during_wake_wait_is_a_timeout_not_idle(tmp_path, monkeypatch):
     # children clear right before the turn cap, no wake-up seen: the withheld idle
     # must not leak out of the timeout fallthrough
-    monkeypatch.setattr("flowbench.driver.omnigent.asyncio.sleep", _instant_sleep)
+    _fake_clock(monkeypatch)
     IDL = TurnStatus.IDLE
     chat = _FakeChat([IDL])
     chat.snapshot, _ = _seq_snapshot([(IDL, [11]), (IDL, [])])
     d = _settle_driver(tmp_path, chat, [[], [_USER, _REPLY]])
     d.child_wake_s = 999
-    d.turn_timeout_s = 0.05
+    d.turn_timeout_s = 10.0
     result = await d.send("build it")
     assert result.status == TurnStatus.TIMEOUT
 
@@ -710,7 +1239,7 @@ async def test_cap_during_wake_wait_is_a_timeout_not_idle(tmp_path, monkeypatch)
 async def test_queued_own_input_is_not_a_prompt(tmp_path, monkeypatch):
     # pending_inputs = our own message queued behind a running turn (omnigent docs),
     # never a human prompt; the turn just keeps waiting
-    monkeypatch.setattr("flowbench.driver.omnigent.asyncio.sleep", _instant_sleep)
+    _fake_clock(monkeypatch)
     import itertools
 
     chat = _FakeChat([TurnStatus.RUNNING], beats=itertools.count())
@@ -721,7 +1250,7 @@ async def test_queued_own_input_is_not_a_prompt(tmp_path, monkeypatch):
 
     chat.snapshot = snapshot
     d = _settle_driver(tmp_path, chat, [[]])
-    d.turn_timeout_s = 0.1
+    d.turn_timeout_s = 10.0
     result = await d.send("build it")
     assert (result.status, result.stall_reason) == (TurnStatus.RUNNING, None)
 
@@ -913,28 +1442,31 @@ class _LabelHttp:
         return _FakeResponse({"labels": self._labels})
 
 
-async def test_injection_undelivered_reads_the_error_labels(tmp_path):
+async def test_resend_allowed_reads_the_error_labels(tmp_path):
     d = OmnigentDriver(run_dir=tmp_path, artifact_name="plan.md")
     d._chat = _FakeChat([TurnStatus.FAILED])
+    d._http = _LabelHttp({})  # row 3: no label at all — sim/judge sessions (#39)
+    assert await d._resend_allowed() is True
+
     d._http = _LabelHttp(
         {
             "omnigent.last_task_error_code": "runner_error",
             "omnigent.last_task_error_message": "The message was not delivered",
         }
     )
-    assert await d._injection_undelivered() is True
+    assert await d._resend_allowed() is True  # row 1
 
     # a failure that is not the undelivered one: retrying could double-deliver
     d._http = _LabelHttp({"omnigent.last_task_error_code": "model_error"})
-    assert await d._injection_undelivered() is False
+    assert await d._resend_allowed() is False
 
 
-async def test_injection_undelivered_is_false_when_the_read_fails(tmp_path):
+async def test_resend_allowed_is_false_when_the_read_fails(tmp_path):
     """Unknown means "do not retry" — a blind resend can double-deliver."""
     d = OmnigentDriver(run_dir=tmp_path, artifact_name="plan.md")
     d._chat = _FakeChat([TurnStatus.FAILED])
     d._http = _LabelHttp(boom=True)
-    assert await d._injection_undelivered() is False
+    assert await d._resend_allowed() is False
 
 
 async def test_context_tokens_none_before_a_session_exists(tmp_path):
@@ -968,7 +1500,9 @@ async def test_send_once_captures_the_streamed_events(tmp_path, monkeypatch):
     chat.send = _send
     d = _settle_driver(tmp_path, chat, [[_USER, _REPLY]])
     d.turn_timeout_s = 0.01  # the turn boundary is not what this test is about
-    await d._send_once("hi")
+    from flowbench.driver.omnigent import _now
+
+    await d._send_once("hi", _now() + 0.01)
     assert d._captured == [{"__type__": "_Delta", "conversation_id": "conv_xyz"}]
     assert d.conversation_url() == f"{d.server_url}/c/conv_xyz"
 
