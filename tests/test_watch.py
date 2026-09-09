@@ -1,5 +1,7 @@
 import json
 
+import pytest
+
 from flowbench.types import TurnStatus
 from flowbench.watch import RunWatch
 
@@ -70,8 +72,10 @@ def test_run_watch_log_sources_missing_and_rotated(tmp_path):
     assert w._new_log_lines() == ["c"]
 
 
-def test_run_watch_sessions_filters_by_project_and_survives_server_errors(monkeypatch):
+def test_run_watch_sessions_filters_by_project_and_survives_server_errors(monkeypatch, caplog):
+    import http.client
     import io
+    import logging
     import urllib.request
 
     from flowbench import watch as watch_mod
@@ -100,8 +104,33 @@ def test_run_watch_sessions_filters_by_project_and_survives_server_errors(monkey
     def _boom(url, timeout):
         raise OSError("down")
 
+    caplog.set_level(logging.DEBUG, logger="flowbench.watch")
     monkeypatch.setattr(urllib.request, "urlopen", _boom)
     assert w._run_sessions() == []
+    records = [
+        r for r in caplog.records if r.name == "flowbench.watch" and r.levelno == logging.DEBUG
+    ]
+    assert len(records) == 1
+    assert "down" in records[0].getMessage()
+
+    def _http_boom(url, timeout):
+        raise http.client.HTTPException("bad status line")
+
+    monkeypatch.setattr(urllib.request, "urlopen", _http_boom)
+    assert w._run_sessions() == []  # HTTPException
+
+    monkeypatch.setattr(urllib.request, "urlopen", lambda url, timeout: _Resp(b"<html>"))
+    assert w._run_sessions() == []  # not JSON: json.load raises ValueError
+
+    monkeypatch.setattr(urllib.request, "urlopen", lambda url, timeout: _Resp(b"[]"))
+    assert w._run_sessions() == []  # a JSON list: .get raises AttributeError
+
+    def _foreign_boom(url, timeout):
+        raise RuntimeError("driver bug")
+
+    monkeypatch.setattr(urllib.request, "urlopen", _foreign_boom)
+    with pytest.raises(RuntimeError, match="driver bug"):
+        w._run_sessions()
 
 
 def test_run_watch_reports_server_errors_touching_run_sessions(tmp_path):

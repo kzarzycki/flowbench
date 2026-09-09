@@ -1,5 +1,10 @@
 """Phase detection + judge parsing + scorer wrappers — offline."""
 
+import logging
+from pathlib import Path
+
+import pytest
+
 from scenarios.coding_workflow.cases.todo_app import scorers
 from scenarios.coding_workflow.cases.todo_app.fixtures import sessions
 
@@ -304,3 +309,65 @@ def test_collect_code_reads_sources(tmp_path):
     (ws / "todo" / "__main__.py").write_text("MAIN_MARKER = 1")
     code = scorers.collect_code(ws)
     assert "MAIN_MARKER = 1" in code and "__main__.py" in code
+
+
+def test_collect_code_skips_an_unreadable_path(tmp_path, caplog):
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    (ws / "real.py").write_text("REAL_MARKER = 1")
+    (ws / "broken.py").mkdir()  # a directory named *.py: read_text() raises
+
+    caplog.set_level(logging.DEBUG, logger="scenarios.coding_workflow.cases.todo_app.scorers")
+    code = scorers.collect_code(ws)
+
+    assert "REAL_MARKER = 1" in code
+    assert "broken.py" not in code
+    records = [
+        r
+        for r in caplog.records
+        if r.name == "scenarios.coding_workflow.cases.todo_app.scorers"
+        and r.levelno == logging.DEBUG
+    ]
+    assert len(records) == 1
+    message = records[0].getMessage()
+    assert "broken.py" in message
+    assert "IsADirectoryError" in message or "Is a directory" in message
+
+
+def test_collect_code_skips_undecodable_source(tmp_path, caplog):
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    (ws / "ok.py").write_text("OK_MARKER = 1")
+    (ws / "bad.py").write_bytes(b"\xff\xfe\x00bad")  # not UTF-8: read_text() raises
+
+    caplog.set_level(logging.DEBUG, logger="scenarios.coding_workflow.cases.todo_app.scorers")
+    code = scorers.collect_code(ws)
+
+    assert "OK_MARKER = 1" in code
+    assert "bad.py" not in code
+    records = [
+        r
+        for r in caplog.records
+        if r.name == "scenarios.coding_workflow.cases.todo_app.scorers"
+        and r.levelno == logging.DEBUG
+    ]
+    assert len(records) == 1
+    assert "UnicodeDecodeError" in records[0].getMessage()
+
+
+def test_collect_code_reraises_a_foreign_exception(tmp_path, monkeypatch):
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    (ws / "real.py").write_text("REAL_MARKER = 1")
+
+    real_read_text = Path.read_text
+
+    def _boom(self, *args, **kwargs):
+        if self.name == "real.py":
+            raise RuntimeError("boom")
+        return real_read_text(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", _boom)
+
+    with pytest.raises(RuntimeError, match="boom"):
+        scorers.collect_code(ws)

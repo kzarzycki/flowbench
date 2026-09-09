@@ -45,8 +45,8 @@ line-length = 100
 target-version = "py312"
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "W", "B", "UP", "C4", "SIM"]
+select = ["E", "F", "I", "W", "B", "UP", "C4", "SIM", "BLE"]
 ignore = ["E501"]
 
 [tool.coverage.run]
-source = ["src"]
+source = ["src", "scenarios"]

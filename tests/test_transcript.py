@@ -1,3 +1,4 @@
+import logging
 from dataclasses import dataclass
 
 from flowbench.transcript import render_transcript, to_jsonable
@@ -43,6 +44,34 @@ def test_to_jsonable_model_dump_that_raises_falls_back_to_repr():
             return "<Ev broken>"
 
     assert to_jsonable(Ev()) == {"__type__": "Ev", "repr": "<Ev broken>"}
+
+
+def test_to_jsonable_falls_back_on_any_model_dump_error():
+    class Ev:
+        def model_dump(self, mode=None):
+            raise RuntimeError("boom")
+
+        def __repr__(self):
+            return "<Ev broken>"
+
+    assert to_jsonable(Ev()) == {"__type__": "Ev", "repr": "<Ev broken>"}
+
+
+def test_to_jsonable_logs_the_fallback(caplog):
+    class Ev:
+        def model_dump(self, mode=None):
+            raise RuntimeError("boom")
+
+        def __repr__(self):
+            return "<Ev broken>"
+
+    caplog.set_level(logging.DEBUG, logger="flowbench.transcript")
+    to_jsonable(Ev())
+    records = [
+        r for r in caplog.records if r.name == "flowbench.transcript" and r.levelno == logging.DEBUG
+    ]
+    assert len(records) == 1
+    assert "boom" in records[0].getMessage()
 
 
 def test_to_jsonable_dataclass():

@@ -4,11 +4,14 @@ subjective scores stay separate; anything unmeasured is unscored, never a fake 0
 from __future__ import annotations
 
 import json
+import logging
 import numbers
 import re
 from pathlib import Path
 
 from flowbench.runner.judge import last_json_object
+
+log = logging.getLogger(__name__)
 
 # The five deliberately-underspecified points, with question keywords used to
 # OBJECTIVELY detect whether the SUT asked about each (clarifying_coverage). This
@@ -218,7 +221,8 @@ def collect_code(workspace: Path, *, cap: int = 9000) -> str:
     for p in files:
         try:
             body = p.read_text()
-        except Exception:  # noqa: BLE001
+        except (OSError, ValueError) as e:
+            log.debug("skipping unreadable %s: %r", p, e)
             continue
         chunk = f"\n# === {p.relative_to(ws)} ===\n{body}"
         if used + len(chunk) > cap:
