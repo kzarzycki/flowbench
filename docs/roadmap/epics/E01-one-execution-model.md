@@ -1,6 +1,6 @@
 # E01 — One execution model: extract `run_case`, port todo_app, remove Inspect
 
-Milestone M1. This epic *executes an already-recorded decision* (flowbench-scenarios
+Milestone M1 — **done 2026-09-08** (S01.1–S01.5; live gates `todo-app-002`, `todo-014`). This epic *executes an already-recorded decision* (flowbench-scenarios
 `docs/superpowers/specs/2026-07-02-swe-planning-rework-design.md`): one execution model
 (`run_case`), everything omnigent, `claude -p` and Inspect removed. It also fires that
 design's extraction trigger: the primitives were to stay in the swe_planning scenario
@@ -31,7 +31,7 @@ Source of truth today: `flowbench-scenarios/scenarios/swe_planning/`. Mapping:
 
 ## Stories
 
-### S01.1 Lift the generic modules into the engine
+### S01.1 Lift the generic modules into the engine — done
 
 - Create the engine modules per the table. Copy, then adapt imports — do not redesign
   while moving (behavior-preserving; redesign is E02/E03).
@@ -43,7 +43,7 @@ Source of truth today: `flowbench-scenarios/scenarios/swe_planning/`. Mapping:
   factories import lazily, same pattern as `OmnigentDriver.start`):
   `uv run --no-extra live python -c "import flowbench.run, flowbench.model"`.
 
-### S01.2 Paired scenarios PR: swe_planning consumes the engine
+### S01.2 Paired scenarios PR: swe_planning consumes the engine — done
 
 - swe_planning's `run.py`/`helpers.py` shrink to: scenario constants (done token, models),
   its report specifics, and re-exports/imports from `flowbench.*`. Local copies deleted.
@@ -53,7 +53,7 @@ Source of truth today: `flowbench-scenarios/scenarios/swe_planning/`. Mapping:
   3-flow run validates both.
 - Verify: V2; V4 — the live run's `run.json` has the same shape as the previous run's.
 
-### S01.3 Port todo_app to `run_case`
+### S01.3 Port todo_app to `run_case` — done
 
 - Build `scenarios/coding_workflow/cases/todo_app/` in the plain-file case format:
   `task.md` (FIRST_PROMPT), `simulator.md` (profile + reply rules), `knowledge.md`
@@ -89,7 +89,7 @@ Source of truth today: `flowbench-scenarios/scenarios/swe_planning/`. Mapping:
   tests` → empty; V7 (wheel carries no `scenarios/`). Update V4/V5 in
   `../verification.md` for the extra rename in this PR.
 
-### S01.5 Milestone live validation
+### S01.5 Milestone live validation — done
 
 - V5 (baseline vs superpowers) and V4 (`--n 1`) through the post-epic code. Compare
   todo_app's scorecard values with the last Inspect-era run for plausibility (not
