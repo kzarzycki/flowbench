@@ -201,10 +201,10 @@ def test_functions_need_only_the_bundlespec_fields(tmp_path):
 
 
 def test_the_bundle_functions_left_the_driver_module():
-    """A copy-paste-instead-of-move implementation fails this: the names
-    `omnigent.py` holds must be the very objects `bundle.py` defines, and
-    their source must be `bundle.py`."""
+    """A copy-paste-instead-of-move implementation fails this, and so does
+    re-exporting the three from the driver module: `omnigent.py` reaches them
+    through the `bundle` module object, so they are not part of its surface."""
     for name in ("render_config", "build_bundle", "session_metadata"):
-        fn = getattr(omnigent, name)
-        assert fn is getattr(bundle_mod, name)
+        assert name not in vars(omnigent), f"{name} is an attribute of driver/omnigent.py"
+        fn = getattr(bundle_mod, name)
         assert Path(inspect.getsourcefile(fn)).name == "bundle.py"

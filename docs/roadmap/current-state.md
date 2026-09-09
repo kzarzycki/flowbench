@@ -96,7 +96,7 @@ orchestration on top of the engine — see "Downstream duplication".
     retired vocabulary), `OMNIGENT_PROBE_MODEL` (pre-flowbench probe era). Typical
     weak-model session residue: the code moved on, the prose didn't. → S00.1
 11. **Broad exception swallowing.** `close()`, `_context_tokens()`,
-    `_injection_undelivered()`, `_to_jsonable()` catch `Exception` silently. Correct for
+    `_injection_undelivered()`, `transcript.to_jsonable()` catch `Exception` silently. Correct for
     teardown, unjustified elsewhere. → S02.6
 12. **Terminal-scraping fragility (systemic).** Idle detection via tmux pane scraping,
     settle loops, `min_wait=4.0`, poll intervals — all downstream of omnigent lacking

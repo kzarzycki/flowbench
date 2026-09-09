@@ -26,8 +26,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from flowbench.driver import bundle
 from flowbench.driver.base import AgentDriver
-from flowbench.driver.bundle import build_bundle, render_config, session_metadata
 from flowbench.transcript import (
     dedup_items,
     last_assistant_text,
@@ -140,13 +140,13 @@ class OmnigentDriver(AgentDriver):
     # Thin delegates to `.bundle` — the pure functions are the canonical form
     # (S03.1 calls them off a `Flow`); these keep the driver's own surface.
     def render_config(self) -> str:
-        return render_config(self)
+        return bundle.render_config(self)
 
     def _build_bundle(self) -> bytes:
-        return build_bundle(self)
+        return bundle.build_bundle(self)
 
     def _create_metadata(self) -> dict[str, Any]:
-        return session_metadata(self)
+        return bundle.session_metadata(self)
 
     async def start(self) -> None:
         if os.environ.get("ANTHROPIC_API_KEY"):
@@ -167,14 +167,14 @@ class OmnigentDriver(AgentDriver):
         self._client = OmnigentClient(base_url=self.server_url)
 
         host_id = await self._resolve_claude_host()
-        bundle = self._build_bundle()
+        agent_bundle = self._build_bundle()
 
         # Create with --disallowedTools so claude asks in plain text (the card
         # otherwise blocks the tmux prompt and deadlocks turn 2+).
         resp = await self._client.sessions._http.post(
             f"{self._client.sessions._base}/v1/sessions",
             data={"metadata": json.dumps(self._create_metadata())},
-            files={"bundle": ("agent.tar.gz", bundle, "application/gzip")},
+            files={"bundle": ("agent.tar.gz", agent_bundle, "application/gzip")},
         )
         resp.raise_for_status()
         session_id = str(resp.json()["session_id"])

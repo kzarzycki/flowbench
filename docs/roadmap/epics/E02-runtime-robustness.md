@@ -116,7 +116,7 @@ live check todo-app-005.
 ### S02.6 Error taxonomy
 
 - The broad `except Exception` sites (`close`, `_context_tokens`,
-  `_injection_undelivered`, `_to_jsonable`) become narrow catches with a debug log line;
+  `_injection_undelivered`, `transcript.to_jsonable`) become narrow catches with a debug log line;
   where swallowing is correct (teardown, best-effort labels), a comment says *why*
   swallowing is correct, not just that it happens.
 - Verify: `ruff` BLE-style audit clean or explicitly waived per site; V1.

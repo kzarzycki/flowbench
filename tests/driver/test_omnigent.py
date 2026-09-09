@@ -804,9 +804,21 @@ def _patch_start(monkeypatch, http):
     monkeypatch.setattr(
         omnigent_client, "OmnigentClient", lambda **kw: SimpleNamespace(sessions=ns)
     )
-    monkeypatch.setattr(
-        sc, "SessionsChat", lambda **kw: SimpleNamespace(session_id="conv_new", **kw)
-    )
+
+    class _FakeChatSession:
+        """`SessionsChat.session_id` is a property over `self._session.id`
+        (omnigent_client/_sessions_chat.py) — the fake reads it off the session
+        the driver passes, so a driver that stopped passing one would fail."""
+
+        def __init__(self, *, namespace, files_uploader, files_getter, session):
+            self.namespace = namespace
+            self._session = session
+
+        @property
+        def session_id(self):
+            return self._session["id"]
+
+    monkeypatch.setattr(sc, "SessionsChat", _FakeChatSession)
 
     async def _launch(http_, *, host_id, session_id, workspace):
         launched["args"] = (host_id, session_id, workspace)
@@ -851,7 +863,7 @@ async def test_start_creates_the_session_and_launches_the_runner(tmp_path, monke
     assert launched["waited"] == ("runner-1", 90)
     assert ns.model_override == ("4242", "sonnet", True)
     assert ns.effort == ("4242", "high")
-    assert d._chat.session_id == "conv_new"
+    assert d._chat.session_id == "4242"  # off the session the driver fetched
     assert d._runner_id == "runner-1"
 
 
