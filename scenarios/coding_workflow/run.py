@@ -72,7 +72,9 @@ def _parse_args(argv=None) -> argparse.Namespace:
         "--rescore",
         default=None,
         metavar="RUN_ID",
-        help="re-score an existing run's flows in place (no new session); ignores --run-id",
+        help="re-score an existing run's flows in place (no new session); ignores "
+        "--run-id. A flow no longer in flows.yaml is recorded as an error, "
+        "overwriting its scorecard",
     )
     return ap.parse_args(argv)
 

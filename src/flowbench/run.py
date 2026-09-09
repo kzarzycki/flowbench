@@ -440,7 +440,7 @@ def omni_factories(scenario: str, *, artifact_name: str | None = "plan.md", git_
         functools.partial(
             make_flow_driver_omni,
             scenario=scenario,
-            artifact_name=artifact_name or "__none__",
+            artifact_name="__none__" if artifact_name is None else artifact_name,
             git_init=git_init,
         ),
         functools.partial(make_simulator_omni, scenario=scenario),
