@@ -127,8 +127,11 @@ def git_init_repo(path: Path) -> None:
     path.mkdir(parents=True, exist_ok=True)
 
     def run(*a: str):
+        # scrub GIT_* (a git hook calling us exports GIT_DIR/GIT_WORK_TREE/... that
+        # would redirect this nested git at the outer repo, #49)
+        env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
         return subprocess.run(
-            ["git", "-C", str(path), *a], check=True, capture_output=True, text=True
+            ["git", "-C", str(path), *a], check=True, capture_output=True, text=True, env=env
         )
 
     run("init", "-q")
