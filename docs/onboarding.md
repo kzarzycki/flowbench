@@ -134,8 +134,9 @@ detection and the permission-mode read anchor on the input box's own rule (`_is_
 footer's height cannot matter, and the 5-line tail survives only as a fallback for a box that has
 not mounted yet. Nothing to patch — and the script was aiming at the wrong file anyway: it globbed
 a non-editable uv-tool `site-packages` (an editable install has no such tree) and otherwise fell
-back to whichever `omnigent` was importable, which in this repo is the venv client copy — a module
-that never scans a pane (§2).
+back to whichever `omnigent` was importable, which in this repo is the venv copy. That copy does
+ship a bridge module — it just never runs one, because flowbench imports only its client side and
+the pane scanning happens in the server's install (§2).
 
 If a 2nd+-turn injection ever fails this way again, read the bridge in **the server's** install.
 The module moved between versions, so check both paths:
@@ -180,10 +181,12 @@ Four rules learned the hard way:
   per event. The engine ships the class, not a CLI; the private scenarios repo wraps it as
   `uv run python -m scenarios.swe_planning.watch <run_id> --pid <runner-pid>`. For the open
   reference case, drive `RunWatch(...).tick()` yourself or tail the logs from §2.
-- **Expect long turns.** A workflow-heavy flow can spend half an hour in one turn; `stall_s`
-  (heartbeat watchdog) and `turn_timeout_s`/`deadline_s` (budgets) are per-flow fields in the
-  case's `flows.yaml`, and the budget is a first-order variable of the benchmark, so it is
-  declared per case rather than tuned per run.
+- **Expect long turns.** A workflow-heavy flow can spend half an hour in one turn. Two of the
+  three budgets are per-flow fields in the case's `flows.yaml` — `turn_timeout_s` (per-turn cap)
+  and `stall_s` (heartbeat watchdog) — and are declared per case, because a cap the flow can or
+  cannot live inside is a first-order variable of the benchmark. The whole-session budget
+  `deadline_s` is run-level: `--deadline-s` on the scenario runner (default 3600 s), passed
+  through to `run_case`.
 
 Then read the scorecards side by side:
 

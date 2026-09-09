@@ -110,7 +110,7 @@ pinned `==0.1.1`.
   0.12.0 wheel and every later build anchor the prompt scan on the input box's rule
   (`_is_box_rule`), so `scripts/patch_omnigent.py` and every "needs omnigent patched" claim
   are deleted. Correction to the note that stood here: the venv dependency IS the copy the
-  driver imports — but only its client side, and the bridge that scans the pane runs out of
+  driver imports — but the driver uses only its client side, and the bridge that scans the pane runs out of
   the install the *server* uses, so the script's target was wrong regardless of its search
   path. **This does not close S02.5** — the public-API bullets above stay open, and so does
   the `live` pin bump (a runtime change: it needs a live run, not a docs pass).
