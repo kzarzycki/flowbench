@@ -378,7 +378,13 @@ async def test_non_failed_statuses_are_never_resent(tmp_path, monkeypatch, resul
         sent.append(text)
         return result
 
+    async def must_not_be_called():
+        raise AssertionError("_resend_allowed must not be consulted for a non-FAILED status")
+
     d._send_once = fake_send_once
+    # send_retry_wait_s (30) fits the 1000 s budget, so only the status gate stands
+    # between this result and a re-send; a label read here would mean the gate leaked
+    d._resend_allowed = must_not_be_called
     out = await d.send("go on")
     assert out is result
     assert len(sent) == 1

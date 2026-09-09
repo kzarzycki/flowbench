@@ -15,10 +15,7 @@ tracked by an upstream PR.
 `runner/driver.py` today mixes five concerns: the `AgentDriver` ABC, transcript utilities,
 bundle building (config render + tar), the omnigent session lifecycle, and the
 send/settle/retry heuristics. Statuses are magic strings (`"idle"`, `"failed"`,
-`"timeout"`). Retry policy is split: the driver retries *undelivered* injections
-(label-confirmed), while downstream `SessionModel.generate` (issue #39) separately retries
-*failed-with-stale-text* turns because simulator/judge sessions don't reliably set the
-delivery labels. The driver also reaches into `omnigent_client` privates
+`"timeout"`). The driver also reaches into `omnigent_client` privates
 (`sessions._http`, `sessions._base`, hand-built `SessionsChat`), which is why the dep is
 pinned `==0.1.1`.
 
@@ -58,15 +55,9 @@ pinned `==0.1.1`.
   mechanically and once for real, is the churn the epic's own Risks section warns
   against; the remainder goes with S02.3.
 
-### S02.3 One retry policy, at the driver — DONE (flowbench #103)
+### S02.3 One retry policy, at the driver
 
-One retry policy now lives in `OmnigentDriver.send`; the five-row policy table lives
-in `docs/design/runner.md` under "Send/retry policy". Each `send` runs under a single
-`asyncio.timeout(turn_timeout_s)`, so nested waits and retry sleeps can no longer stack
-past one turn's budget. `SessionModel.generate` shrank to send + raise + wrap, and
-`TurnResult` gained a `flaked` flag (`session["flaked_turns"]` on the run). Verified by
-`tests/driver/test_omnigent.py`, `tests/test_model.py`, `tests/test_loop.py`, and the live
-gates recorded in the flowbench-scenarios ledger entry for flowbench #103.
+Contract: `docs/design/runner.md` → "Send/retry policy" (flowbench #103).
 
 ### S02.3b Loop hygiene — DONE (flowbench #67, ahead of E02)
 
@@ -101,7 +92,7 @@ live check todo-app-005.
 ### S02.6 Error taxonomy
 
 - The broad `except Exception` sites (`close`, `_context_tokens`,
-  `_injection_undelivered`, `transcript.to_jsonable`) become narrow catches with a debug log line;
+  `_resend_allowed`, `transcript.to_jsonable`) become narrow catches with a debug log line;
   where swallowing is correct (teardown, best-effort labels), a comment says *why*
   swallowing is correct, not just that it happens.
 - Verify: `ruff` BLE-style audit clean or explicitly waived per site; V1.

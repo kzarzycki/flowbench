@@ -92,7 +92,7 @@ orchestration on top of the engine — see "Downstream duplication".
     retired vocabulary), `OMNIGENT_PROBE_MODEL` (pre-flowbench probe era). Typical
     weak-model session residue: the code moved on, the prose didn't. → S00.1
 10. **Broad exception swallowing.** `close()`, `_context_tokens()`,
-    `_injection_undelivered()`, `transcript.to_jsonable()` catch `Exception` silently. Correct for
+    `_resend_allowed()`, `transcript.to_jsonable()` catch `Exception` silently. Correct for
     teardown, unjustified elsewhere. → S02.6
 11. **Terminal-scraping fragility (systemic).** Idle detection via tmux pane scraping,
     settle loops, `min_wait=4.0`, poll intervals — all downstream of omnigent lacking
@@ -129,8 +129,6 @@ list above:
   subscription guard, the one safety check the repo calls non-negotiable.
 - `_wait_idle` (the lying-idle heuristic that killed live runs) has no direct test; the
   settle tests deliberately stub around it.
-- `_injection_undelivered`'s label parsing (the magic strings gating every send retry)
-  is stubbed in tests, never exercised.
 - `send()` retry exhaustion and the loop's `deadline_s` backstop are never exercised.
 - The scorecard key set is pinned offline (`tests/scenarios/todo_app/test_todo_run.py`) and
   `compare` renders a `run_case`-written run in `tests/test_run.py`; values themselves are

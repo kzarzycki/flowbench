@@ -57,7 +57,7 @@ if one covers it, else write one against `FakeDriver`-style doubles:
 | Fresh-text trust on failed turns (issue #39, downstream today) | covered downstream now; moves to the driver in S02.3 — note the migration in the test file |
 | Subscription guard (`start()`) | `ANTHROPIC_API_KEY` set → `start()` raises before any HTTP call (the whole of `start()` is untested today) |
 | Lying-idle heuristic (`_wait_idle`) | direct test: `idle` before `running` within `min_wait` is not trusted; `failed` returns immediately (settle tests currently stub around this) |
-| Undelivered-label parsing (`_injection_undelivered`) | the `runner_error` + "not delivered" label match is exercised against realistic label payloads, not stubbed |
+| Undelivered-label parsing (`_resend_allowed`) | the `runner_error` + "not delivered" label match is exercised against realistic label payloads, not stubbed |
 | Retry exhaustion (`send`) | all attempts consumed → the failed result is returned, attempts counted correctly |
 | Loop deadline (`deadline_s`) | wall-clock backstop actually stops the loop |
 | Scorecard shape parity | the scorecard the orchestrator writes and the shape `compare` reads are asserted against the same fixture, not two hand-built dicts |
