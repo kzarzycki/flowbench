@@ -65,8 +65,8 @@ in `docs/design/runner.md` under "Send/retry policy". Each `send` runs under a s
 `asyncio.timeout(turn_timeout_s)`, so nested waits and retry sleeps can no longer stack
 past one turn's budget. `SessionModel.generate` shrank to send + raise + wrap, and
 `TurnResult` gained a `flaked` flag (`session["flaked_turns"]` on the run). Verified by
-`tests/driver/test_omnigent.py`, `tests/test_model.py`, `tests/test_loop.py`; live gate
-ids: TBD (ledger).
+`tests/driver/test_omnigent.py`, `tests/test_model.py`, `tests/test_loop.py`, and the live
+gates recorded in the flowbench-scenarios ledger entry for flowbench #103.
 
 ### S02.3b Loop hygiene — DONE (flowbench #67, ahead of E02)
 
