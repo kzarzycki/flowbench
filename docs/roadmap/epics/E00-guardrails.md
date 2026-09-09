@@ -54,7 +54,7 @@ if one covers it, else write one against `FakeDriver`-style doubles:
 | Full item pagination (`driver._list_items`) | settle check and capture read every page, not the first 200 items |
 | DONE with late artifact (`loop` grace poll) | DONE token with missing artifact polls up to `artifact_grace_s` before capture |
 | Control-message filtering (`dedup_items`) | `<task-notification>` items never enter the cleaned transcript |
-| Fresh-text trust on failed turns (issue #39, downstream today) | covered downstream now; moves to the driver in S02.3 — note the migration in the test file |
+| Fresh-text trust on failed turns (`send`, flaked idle) | a `failed` status with a new non-empty assistant message is returned as `IDLE`/`flaked`; an empty new message is not (`tests/driver/test_omnigent.py`) |
 | Subscription guard (`start()`) | `ANTHROPIC_API_KEY` set → `start()` raises before any HTTP call (the whole of `start()` is untested today) |
 | Lying-idle heuristic (`_wait_idle`) | direct test: `idle` before `running` within `min_wait` is not trusted; `failed` returns immediately (settle tests currently stub around this) |
 | Undelivered-label parsing (`_resend_allowed`) | the `runner_error` + "not delivered" label match is exercised against realistic label payloads, not stubbed |

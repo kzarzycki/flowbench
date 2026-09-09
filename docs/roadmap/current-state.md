@@ -20,7 +20,7 @@ What exists, what works, what is debt. Line counts are `wc -l` on that date.
 | `testing.py` | 112 | offline doubles: FakeDriver, StubSim, ScriptedDriver, n_run_factories (S01.1) |
 | `watch.py` | 100 | `RunWatch` live-run anomaly scanner (S01.1) |
 | `transcript.py` | 106 | message-item helpers + `render_transcript` (S01.1) |
-| `model.py` | 52 | `SessionModel` simulator/judge shim; retry policy is the driver's (S02.3) |
+| `model.py` | 52 | `SessionModel` simulator/judge shim: one `send`, raise on a non-idle or empty turn, wrap |
 | `flowspec.py` | 36 | flows.yaml loading, kickoff composition (S01.1) |
 | `loop.py` | 110 | mediated DONE-token loop (no nudges since #67: the driver waits out busy children); moved out of `runner/` in S02.2 |
 | `report/compare.py` | 91 | side-by-side scorecard table; metric paths hardcoded to todo_app's schema |
@@ -115,10 +115,6 @@ list above:
 - `runner/judge.py:18` — `last_json_object` counts braces without string-awareness; a
   judge rationale containing `{` or `}` inside a JSON string mis-slices the object. Fix
   when the parser moves in S01.1.
-- `driver.py:455` — nested timeout budgets: `_send_once` waits up to `turn_timeout_s` in
-  `_wait_idle`, then opens a *second* `turn_timeout_s` settle window whose iterations
-  each call `_wait_idle` again; with send retries a single turn can consume ~8–9 minutes
-  of a 30-minute run deadline. One wall-clock ceiling per send (S02.3).
 - (fixed, flowbench #67) the `Continue.` nudge relay pollution and the cumulative
   `any_child_busy` fold: the driver now waits out busy children (`/child_sessions`, paged)
   and the loop never nudges; `_list_items` pages past the 200-item cap.
@@ -129,7 +125,7 @@ list above:
   subscription guard, the one safety check the repo calls non-negotiable.
 - `_wait_idle` (the lying-idle heuristic that killed live runs) has no direct test; the
   settle tests deliberately stub around it.
-- `send()` retry exhaustion and the loop's `deadline_s` backstop are never exercised.
+- The loop's `deadline_s` backstop is never exercised.
 - The scorecard key set is pinned offline (`tests/scenarios/todo_app/test_todo_run.py`) and
   `compare` renders a `run_case`-written run in `tests/test_run.py`; values themselves are
   only exercised live.

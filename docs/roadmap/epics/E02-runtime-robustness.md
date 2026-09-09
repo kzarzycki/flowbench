@@ -55,10 +55,6 @@ pinned `==0.1.1`.
   mechanically and once for real, is the churn the epic's own Risks section warns
   against; the remainder goes with S02.3.
 
-### S02.3 One retry policy, at the driver
-
-Contract: `docs/design/runner.md` → "Send/retry policy" (flowbench #103).
-
 ### S02.3b Loop hygiene — DONE (flowbench #67, ahead of E02)
 
 Both audited bugs were removed rather than patched: the loop no longer nudges at all (the

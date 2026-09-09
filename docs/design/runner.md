@@ -88,8 +88,9 @@ re-send happens only while the remaining budget exceeds `send_retry_wait_s`, and
 inject is preceded by a deadline check. The whole send also runs under
 `asyncio.timeout(turn_timeout_s)`, so a server call, back-off, label read, retry sleep or
 the synchronous `artifact_path()` (run via `asyncio.to_thread`) still in flight at the cap
-is cancelled and the send reports `TIMEOUT` with empty text and `artifact_exists=False`
-("not observed"). At the cap the status is `RUNNING` (or an undocumented server status,
+is abandoned — the await is cancelled, though a running filesystem thread finishes on its
+own in the background — and the send reports `TIMEOUT` with empty text and
+`artifact_exists=False` ("not observed"). At the cap the status is `RUNNING` (or an undocumented server status,
 verbatim) if the soft loop got there first, `TIMEOUT` if the timer did — both mean the
 turn did not finish.
 
