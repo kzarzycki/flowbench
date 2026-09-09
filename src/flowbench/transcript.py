@@ -6,6 +6,7 @@ can't diverge on what counts as conversation."""
 from __future__ import annotations
 
 import logging
+import re
 
 log = logging.getLogger(__name__)
 
@@ -63,6 +64,25 @@ _CONTROL_PREFIXES = ("<task-notification>",)
 
 def is_control_message(text: str) -> bool:
     return text.lstrip().startswith(_CONTROL_PREFIXES)
+
+
+# The CLI's subscription/rate-limit banner, emitted as an ordinary assistant item with
+# no other signal (every `omnigent.last_task_error_*` label was "" in s025p2-620b16b):
+# Claude Code `You've hit your session limit · resets 6:40pm (Europe/Zurich)` (evidence),
+# `Claude usage limit reached …` / `5-hour limit reached …`; Codex CLI `You've hit your
+# usage limit. Try again at …` (same prefix family, unverified). Anchored to the start
+# and length-capped so an agent *talking about* a limit mid-reply never matches.
+# ponytail: one regex; extend it when a new wording shows up in a run dir.
+_QUOTA_BANNER = re.compile(
+    r"\A\s*(?:You(?:'ve| have) (?:hit|reached) your [\w -]{0,40}?limit\b"
+    r"|(?:Claude )?(?:usage|session|weekly|\d+-hour) limit reached\b)"
+)
+_QUOTA_BANNER_MAX = 240
+
+
+def is_quota_banner(text: str) -> bool:
+    """True when `text` IS a CLI limit banner (not a reply that mentions one)."""
+    return len(text) <= _QUOTA_BANNER_MAX and _QUOTA_BANNER.match(text) is not None
 
 
 def dedup_items(items: list[dict]) -> list[dict]:
