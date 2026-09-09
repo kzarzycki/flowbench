@@ -6,7 +6,7 @@
 
 A benchmark that compares agentic **flows** — different ways of driving a coding agent at a goal
 (vanilla, superpowers, or any bundle of skills/MCPs) — on a fixed **case**, all driven through
-[omnigent](https://github.com/) as the meta-harness. Flows differ only by their bundle, so a
+[omnigent](https://github.com/omnigent-ai/omnigent) as the meta-harness. Flows differ only by their bundle, so a
 comparison is apples-to-apples: same task, same harness, only the workflow changes.
 
 Vocabulary in [`docs/GLOSSARY.md`](docs/GLOSSARY.md):
@@ -25,11 +25,14 @@ uv sync --extra dev --extra live       # live = the omnigent runtime for live ru
 uv run pytest -q                       # offline suite
 
 # after a run, compare flows side by side:
-uv run flowbench compare --run-base ../flowbench-runs/todo-app-eval --run-id <run_id>
+uv run flowbench compare --run-base $RUNS/coding_workflow --run-id <run_id>
 ```
 
-Driving a case live needs [omnigent](https://github.com/) patched in and `ANTHROPIC_API_KEY`
-unset (the runner bills against a Claude subscription, not the API). See `CLAUDE.md`.
+Driving a case live needs a running [omnigent](https://github.com/omnigent-ai/omnigent) server and
+`ANTHROPIC_API_KEY` unset (the runner bills against a Claude subscription, not the API):
+**[`docs/onboarding.md`](docs/onboarding.md)** walks the install, the readiness check and that
+rule. Why omnigent and not herdr or a CLI of our own:
+[`docs/design/decisions/2026-09-09-omnigent-as-the-meta-harness.md`](docs/design/decisions/2026-09-09-omnigent-as-the-meta-harness.md).
 
 ## Status
 

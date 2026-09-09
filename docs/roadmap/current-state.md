@@ -75,9 +75,11 @@ orchestration on top of the engine — see "Downstream duplication".
    artifact probing (`artifact_name="__none__"` for sessions with no artifact) don't
    belong in the session driver. → S02.2, S02.4
 5. **Private-API reach-ins.** `sessions._http`, `sessions._base`, hand-built
-   `SessionsChat`, `omnigent.host.daemon_launch` internals; plus a monkey-patch script
-   (`scripts/patch_omnigent.py`) editing the installed omnigent. The 0.1.1 pins exist
-   because of this. → S02.5
+   `SessionsChat`, `omnigent.host.daemon_launch` internals. The 0.1.1 pins exist because of
+   this — and the driven server runs from a far newer source checkout, so the pinned client
+   and the live server are different versions on purpose
+   (`docs/onboarding.md` §2). The `scripts/patch_omnigent.py` monkey-patch is gone (fixed
+   upstream, 2026-09-09). → S02.5
 6. **Magic strings as contracts.** Turn statuses, omnigent label keys, control-message
    prefixes. → S02.1
 7. **Engine knows one case's scorecard.** `report/compare.py`'s `_METRICS` hardcodes

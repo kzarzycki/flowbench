@@ -7,6 +7,9 @@ bundle of skills/MCPs. Every field is declared and recorded; nothing steers the 
 so a comparison can state exactly which knobs differ.
 
 Vocabulary → **`docs/GLOSSARY.md`** (Scenario → Case → Flow → Run → Scorecard → Comparison).
+Getting a live run working (omnigent install/topology, readiness check, the key rule) →
+**`docs/onboarding.md`**. Why omnigent is the meta-harness →
+`docs/design/decisions/2026-09-09-omnigent-as-the-meta-harness.md`.
 
 ## Engineering loop
 
@@ -26,11 +29,12 @@ so the path is not tracked here — record it in `CLAUDE.local.md` (untracked).
 uv sync --extra dev --extra live        # live = the omnigent runtime for live runs
 uv run pytest -q                        # offline suite (live-agent tests skipped)
 
-# drive the reference case live (needs omnigent patched + ANTHROPIC_API_KEY unset):
+# drive the reference case live (needs a live omnigent server + ANTHROPIC_API_KEY unset —
+# see docs/onboarding.md):
 uv run python -m scenarios.coding_workflow.run --case todo_app --run-id <id>
 
 # compare flows side by side after a run (reads <run_id>/<flow>/scorecard.json):
-uv run flowbench compare --run-base ../flowbench-runs/coding_workflow --run-id <id>
+uv run flowbench compare --run-base $RUNS/coding_workflow --run-id <id>
 ```
 
 ## Layout
@@ -80,10 +84,13 @@ uv run flowbench compare --run-base ../flowbench-runs/coding_workflow --run-id <
 ## Conventions / gotchas
 
 - The agent-eval runner requires `ANTHROPIC_API_KEY` UNSET (subscription billing — the driver
-  guards on it) and omnigent patched.
+  guards on it) and a live omnigent server with `claude-native` configured. No omnigent patch is
+  needed any more (`docs/onboarding.md` §5). Launch live runs with `uv run --extra live`.
 - Wheel ships `src/flowbench` only; in-repo `scenarios` imports work via pytest `pythonpath`
   and cwd.
-- Run-dirs live under a sibling `../flowbench-runs/`, never inside the repo.
+- Run-dirs live beside the checkout that launches the run — `<checkout>/../flowbench-runs/<scenario>/`,
+  never inside the repo. Live runs launch from the scenarios checkout, so `$RUNS` is that
+  sibling; the concrete path is per-developer, recorded in `CLAUDE.local.md` (untracked).
 - The comparison reader is pure `(<run_base>, <run_id>) -> markdown`; a missing/malformed scorecard
   is a FAILED column and the benchmark never aborts on one bad flow.
 
