@@ -1,4 +1,4 @@
-"""The post-checkout hook binds each worktree to one branch (`.githooks/post-checkout`)."""
+"""The post-checkout hook binds each worktree to one branch (`scripts/one-worktree-one-branch.sh`)."""
 
 import os
 import subprocess
@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-HOOKS = Path(__file__).resolve().parents[1] / ".githooks"
+SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "one-worktree-one-branch.sh"
 ENV = {k: v for k, v in os.environ.items() if k not in {"GIT_REBIND", "GIT_DIR", "GIT_WORK_TREE"}}
 ENV.update(
     GIT_AUTHOR_NAME="t",
@@ -37,11 +37,20 @@ def commit(cwd: Path, name: str) -> None:
 
 
 @pytest.fixture
-def repo(tmp_path: Path) -> Path:
+def hooks(tmp_path: Path) -> Path:
+    """A bare hooks dir wiring the script in as git's post-checkout, standing in for pre-commit."""
+    d = tmp_path / "hooks"
+    d.mkdir()
+    (d / "post-checkout").symlink_to(SCRIPT)
+    return d
+
+
+@pytest.fixture
+def repo(tmp_path: Path, hooks: Path) -> Path:
     r = tmp_path / "repo"
     r.mkdir()
     git(r, "init", "-q", "-b", "master")
-    git(r, "config", "core.hooksPath", str(HOOKS))
+    git(r, "config", "core.hooksPath", str(hooks))
     commit(r, "f")
     git(r, "switch", "-q", "master")  # first branch checkout binds the main worktree
     return r
@@ -54,11 +63,13 @@ def test_main_worktree_rejects_other_branch(repo: Path):
     assert branch(repo) == "master"
 
 
-def test_fresh_clone_binds_default_branch_without_bootstrap(repo: Path, tmp_path: Path):
+def test_fresh_clone_binds_default_branch_without_bootstrap(
+    repo: Path, tmp_path: Path, hooks: Path
+):
     git(repo, "branch", "feat/a")
     clone = tmp_path / "clone"
     git(tmp_path, "clone", "-q", str(repo), str(clone))
-    git(clone, "config", "core.hooksPath", str(HOOKS))
+    git(clone, "config", "core.hooksPath", str(hooks))
     res = git(clone, "switch", "feat/a")  # first checkout after activation
     assert res.returncode != 0 and branch(clone) == "master"
 

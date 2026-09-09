@@ -1,6 +1,6 @@
 # Managed by Copier — edit the template, then `copier update`.
 # Run locally: pre-commit run --all-files   ·   Update pins: pre-commit autoupdate
-default_install_hook_types: [pre-commit, commit-msg, pre-push]
+default_install_hook_types: [pre-commit, commit-msg, pre-push, post-checkout]
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v6.0.0
@@ -75,3 +75,11 @@ repos:
         language: system
         pass_filenames: false
         stages: [pre-push]
+      # One worktree, one branch — see docs/onboarding.md.
+      - id: one-worktree-one-branch
+        name: one worktree, one branch (post-checkout)
+        entry: scripts/one-worktree-one-branch.sh
+        language: script
+        pass_filenames: false
+        always_run: true
+        stages: [post-checkout]

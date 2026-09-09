@@ -20,7 +20,7 @@ with it.
 Offline first, before any of the above:
 
 ```bash
-git config core.hooksPath .githooks   # once per clone — see "One worktree, one branch"
+pre-commit install                    # once per clone — hooks incl. "One worktree, one branch"
 uv sync --extra dev --extra live      # live = the omnigent client the driver imports
 uv run pytest -q                      # live-agent tests skip themselves without RUN_LIVE_AGENT=1
 ```
@@ -32,7 +32,7 @@ one of their working trees. So: the main checkout stays on `master`, every branc
 sibling worktree (`../flowbench--<slug>`, sibling not nested — scenarios resolves the engine by
 relative path), and the worktree is removed when the branch merges.
 
-`.githooks/post-checkout` enforces it: the main checkout is bound to the default branch, a
+`scripts/one-worktree-one-branch.sh` (a pre-commit `post-checkout` hook) enforces it: the main checkout is bound to the default branch, a
 linked worktree to the first branch checked out in it, and any later switch to another branch
 is reverted and fails. Git has no pre-checkout hook, so the switch happens and is undone; the
 net effect is a block (a `checkout -B`/`switch -C` that reset the target branch is undone too).
