@@ -29,7 +29,12 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from flowbench.transcript import dedup_items, last_assistant_text, n_assistant_messages
+from flowbench.transcript import (
+    dedup_items,
+    last_assistant_text,
+    n_assistant_messages,
+    to_jsonable,
+)
 from flowbench.types import TurnResult, TurnStatus  # re-export, one-release compat
 
 # raw-session fields that mean "the agent is waiting on a human"
@@ -59,9 +64,6 @@ class AgentDriver(abc.ABC):
     @abc.abstractmethod
     async def close(self) -> None:
         """Tear down. MUST be idempotent (safe to call after a failure)."""
-
-
-# --- transcript helpers (pure; shared with the normalizer's notion of text) ---
 
 
 # --- the real driver -------------------------------------------------------
@@ -359,7 +361,7 @@ class OmnigentDriver(AgentDriver):
         n_before = n_assistant_messages(await self._list_items())
         self._stall = None
         async for ev in self._chat.send(text):  # inject; envelope completes fast
-            self._captured.append(_to_jsonable(ev))
+            self._captured.append(to_jsonable(ev))
         status = await self._wait_idle()
         items = await self._list_items()
         # Settle: an idle status with no NEW assistant message is either the
@@ -601,17 +603,3 @@ class OmnigentDriver(AgentDriver):
                     await closer.aclose()
             except Exception:
                 pass
-
-
-def _to_jsonable(ev: object) -> dict:
-    import dataclasses
-
-    fn = getattr(ev, "model_dump", None)
-    if callable(fn):
-        try:
-            return {"__type__": type(ev).__name__, **fn(mode="json")}
-        except Exception:
-            pass
-    if dataclasses.is_dataclass(ev):
-        return {"__type__": type(ev).__name__, **dataclasses.asdict(ev)}
-    return {"__type__": type(ev).__name__, "repr": repr(ev)[:300]}
