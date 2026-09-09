@@ -123,9 +123,9 @@ async def test_relay_advances_even_when_simulator_says_continue():
     # todo-app-004: the sim's literal "Continue." matched the old nudge sentinel,
     # so sim_seen froze and every later relay resent the whole backlog (quadratic)
     turns = [
-        TurnResult("idle", "Task 1 implementer running", False),
-        TurnResult("idle", "Task 1 done, on to Task 2", False),
-        TurnResult("idle", "all done", True),
+        TurnResult(TurnStatus.IDLE, "Task 1 implementer running", False),
+        TurnResult(TurnStatus.IDLE, "Task 1 done, on to Task 2", False),
+        TurnResult(TurnStatus.IDLE, "all done", True),
     ]
     driver = _FakeDriver(turns, {"items": []})
     user = _StubModel(["Continue.", "Continue.", DONE_TOKEN])

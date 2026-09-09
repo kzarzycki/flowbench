@@ -552,7 +552,7 @@ async def test_idle_with_busy_child_is_still_this_turn(tmp_path, monkeypatch):
     # the main agent parks at the prompt while its sub-agent runs; the turn ends
     # only once no child is busy (no "Continue." nudges, no simulator call)
     monkeypatch.setattr("flowbench.runner.driver.asyncio.sleep", _instant_sleep)
-    chat = _FakeChat(["running", "idle"])
+    chat = _FakeChat([TurnStatus.RUNNING, TurnStatus.IDLE])
     chat.busy_children = [11]
     polls = {"n": 0}
     base = chat.snapshot
@@ -566,7 +566,7 @@ async def test_idle_with_busy_child_is_still_this_turn(tmp_path, monkeypatch):
     chat.snapshot = snapshot
     d = _settle_driver(tmp_path, chat, [[], [_USER, _REPLY]])
     result = await d.send("build it")
-    assert result.status == "idle"
+    assert result.status == TurnStatus.IDLE
     assert polls["n"] >= 6  # waited through the busy child, plus one quiet poll
 
 
@@ -574,13 +574,13 @@ async def test_frozen_child_stalls_after_stall_s(tmp_path, monkeypatch):
     # a child that never settles must not hold the turn to the cap: its updated_at
     # is part of the heartbeat, so a frozen child is a no_progress stall
     monkeypatch.setattr("flowbench.runner.driver.asyncio.sleep", _instant_sleep)
-    chat = _FakeChat(["running", "idle"], beats=[7])
+    chat = _FakeChat([TurnStatus.RUNNING, TurnStatus.IDLE], beats=[7])
     chat.busy_children = [11]
     d = _settle_driver(tmp_path, chat, [[]])
     d.stall_s = 0.05
     d._pane_tail = _pane(None)
     result = await d.send("build it")
-    assert (result.status, result.stall_reason) == ("stalled", "no_progress")
+    assert (result.status, result.stall_reason) == (TurnStatus.STALLED, "no_progress")
 
 
 async def test_snapshot_attaches_busy_children_when_idle(tmp_path):
@@ -608,13 +608,14 @@ async def test_snapshot_attaches_busy_children_when_idle(tmp_path):
                 return _Resp(
                     {"data": [{"id": "c1", "busy": True, "updated_at": 5}], "has_more": False}
                 )
-            return _Resp({"status": "idle", "updated_at": 1})
+            return _Resp({"status": TurnStatus.IDLE, "updated_at": 1})
 
     d = OmnigentDriver(run_dir=tmp_path, artifact_name="plan.md")
     d._chat = SimpleNamespace(session_id="conv_test")
     d._http = _Http()
     assert (await d._snapshot())["busy_children"] == [5]
     assert any("after=c9" in u for u in _Http.urls)
+
 
 async def test_undocumented_server_status_passes_through(tmp_path):
     # A server status outside the documented vocabulary (idle/running/failed)

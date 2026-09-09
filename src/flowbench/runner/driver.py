@@ -420,7 +420,7 @@ class OmnigentDriver(AgentDriver):
         resp = await self._http.get(f"/v1/sessions/{self._chat.session_id}")
         resp.raise_for_status()
         snap = resp.json()
-        if snap.get("status") == "idle":
+        if snap.get("status") == TurnStatus.IDLE:
             # An idle main agent whose dispatched sub-agent is still running is
             # parked on its OWN work, not awaiting the user: omnigent wakes it with
             # a task-notification when the child finishes. Read the children live

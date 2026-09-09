@@ -37,8 +37,6 @@ class TurnResult:
     # (decisions #7) — never coerced, never raised on.
     assistant_text: str  # latest assistant-authored text after the turn
     artifact_exists: bool
-    child_busy: bool = False  # a dispatched sub-agent is still running (agent is
-    # parked on its OWN work, not awaiting the user)
     stall_reason: str | None = None  # "prompt" | "no_progress" when stalled
     pane_tail: str | None = None  # last terminal lines at the stall, best effort
 
