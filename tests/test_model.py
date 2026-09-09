@@ -6,12 +6,13 @@ import flowbench.model as model_mod
 from flowbench.model import SessionModel
 from flowbench.runner.driver import TurnResult
 from flowbench.testing import ScriptedDriver
+from flowbench.types import TurnStatus
 
 
 def test_generate_trusts_fresh_text_on_failed_turn():
     # the terminal-readiness flake fires AFTER the reply lands (issue #39):
     # failed status with FRESH text is a completed turn, not a failure
-    driver = ScriptedDriver([TurnResult("failed", "the reply", False)])
+    driver = ScriptedDriver([TurnResult(TurnStatus.FAILED, "the reply", False)])
     model = SessionModel(driver)
     out = asyncio.run(model.generate("x"))
     assert out.completion == "the reply"
@@ -24,9 +25,9 @@ def test_generate_retries_stale_text_on_failed_turn(monkeypatch):
     monkeypatch.setattr(model_mod, "GENERATE_RETRY_WAIT_S", 0.0)
     driver = ScriptedDriver(
         [
-            TurnResult("idle", "first reply", False),
-            TurnResult("failed", "first reply", False),  # stale echo
-            TurnResult("idle", "second reply", False),
+            TurnResult(TurnStatus.IDLE, "first reply", False),
+            TurnResult(TurnStatus.FAILED, "first reply", False),  # stale echo
+            TurnResult(TurnStatus.IDLE, "second reply", False),
         ]
     )
     model = SessionModel(driver)
@@ -40,7 +41,7 @@ def test_generate_timeout_raises_without_retry():
     # a timed-out turn may still be mid-flight after delivery — resending there
     # is the known busy-terminal kill; fail immediately, even with fresh text
     for text in ("", "fresh but untrusted"):
-        driver = ScriptedDriver([TurnResult("timeout", text, False)])
+        driver = ScriptedDriver([TurnResult(TurnStatus.TIMEOUT, text, False)])
         model = SessionModel(driver)
         with pytest.raises(RuntimeError, match="timeout"):
             asyncio.run(model.generate("x"))
@@ -50,7 +51,7 @@ def test_generate_timeout_raises_without_retry():
 def test_generate_retries_failed_empty_turn(monkeypatch):
     monkeypatch.setattr(model_mod, "GENERATE_RETRY_WAIT_S", 0.0)
     driver = ScriptedDriver(
-        [TurnResult("failed", "", False), TurnResult("idle", "second try", False)]
+        [TurnResult(TurnStatus.FAILED, "", False), TurnResult(TurnStatus.IDLE, "second try", False)]
     )
     model = SessionModel(driver)
     out = asyncio.run(model.generate("x"))
@@ -60,7 +61,7 @@ def test_generate_retries_failed_empty_turn(monkeypatch):
 
 def test_generate_raises_after_retries_exhausted(monkeypatch):
     monkeypatch.setattr(model_mod, "GENERATE_RETRY_WAIT_S", 0.0)
-    driver = ScriptedDriver([TurnResult("failed", "", False)] * 3)
+    driver = ScriptedDriver([TurnResult(TurnStatus.FAILED, "", False)] * 3)
     model = SessionModel(driver)
     with pytest.raises(RuntimeError, match="3 attempts"):
         asyncio.run(model.generate("x"))
@@ -68,7 +69,7 @@ def test_generate_raises_after_retries_exhausted(monkeypatch):
 
 
 def test_generate_idle_path_single_send():
-    driver = ScriptedDriver([TurnResult("idle", "ok", False)])
+    driver = ScriptedDriver([TurnResult(TurnStatus.IDLE, "ok", False)])
     model = SessionModel(driver)
     out = asyncio.run(model.generate("x"))
     assert out.completion == "ok"
@@ -82,7 +83,7 @@ def test_close_closes_driver_only_after_start():
         async def close(self):
             self.closed = True
 
-    d = _Drv([TurnResult("idle", "hi", False)])
+    d = _Drv([TurnResult(TurnStatus.IDLE, "hi", False)])
     m = SessionModel(d)
     asyncio.run(m.close())
     assert d.closed is False  # never started: nothing to close

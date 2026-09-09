@@ -7,6 +7,7 @@ import pytest
 
 from flowbench.runner.driver import AgentDriver, OmnigentDriver, TurnResult
 from flowbench.transcript import dedup_items, is_control_message, last_assistant_text
+from flowbench.types import TurnStatus
 
 
 def test_omnigent_driver_satisfies_interface():
@@ -59,8 +60,8 @@ def test_conversation_url_built_from_captured_events(tmp_path):
 
 
 def test_turn_result_shape():
-    r = TurnResult(status="idle", assistant_text="done", artifact_exists=True)
-    assert (r.status, r.assistant_text, r.artifact_exists) == ("idle", "done", True)
+    r = TurnResult(status=TurnStatus.IDLE, assistant_text="done", artifact_exists=True)
+    assert (r.status, r.assistant_text, r.artifact_exists) == (TurnStatus.IDLE, "done", True)
 
 
 # --- bug 1 (doubled messages) + bug 3-adjacent (control injections) -----------
@@ -197,11 +198,14 @@ async def test_send_settles_until_new_assistant_message(tmp_path, monkeypatch):
     # live-001: judge status read idle before the runner picked the turn up ->
     # empty verdict. send() must keep polling until a NEW assistant message lands.
     monkeypatch.setattr("flowbench.runner.driver.asyncio.sleep", _instant_sleep)
-    chat = _FakeChat(["running", "idle"] * 10)  # every _wait_idle sees running->idle (fast path)
+    # server statuses fed to _snapshot, not driver outputs
+    chat = _FakeChat(
+        [TurnStatus.RUNNING, TurnStatus.IDLE] * 10
+    )  # every _wait_idle sees running->idle (fast path)
     # batches consumed in call order: n_before probe, post-wait fetch, settle polls
     d = _settle_driver(tmp_path, chat, [[], [_USER], [_USER], [_USER, _REPLY]])
     result = await d.send("grade these plans")
-    assert result.status == "idle"
+    assert result.status == TurnStatus.IDLE
     assert result.assistant_text == "WINNER: B"
 
 
@@ -210,11 +214,14 @@ async def test_send_settle_expiry_is_a_timeout_not_a_stale_idle(tmp_path, monkey
     # idle; the old code returned idle+stale text, the loop injected into a busy
     # terminal and the run died. Expiry must read as an unfinished turn.
     monkeypatch.setattr("flowbench.runner.driver.asyncio.sleep", _instant_sleep)
-    chat = _FakeChat(["running", "idle"] * 10)  # every _wait_idle sees running->idle (fast path)
+    # server statuses fed to _snapshot, not driver outputs
+    chat = _FakeChat(
+        [TurnStatus.RUNNING, TurnStatus.IDLE] * 10
+    )  # every _wait_idle sees running->idle (fast path)
     d = _settle_driver(tmp_path, chat, [[], [_USER]])  # reply never lands
     d.settle_timeout_s = 0.05
     result = await d.send("grade these plans")
-    assert result.status == "timeout"
+    assert result.status == TurnStatus.TIMEOUT
 
 
 async def _instant_sleep(_secs):
@@ -253,8 +260,8 @@ async def test_send_retries_undelivered_injection(tmp_path, monkeypatch):
     monkeypatch.setattr("flowbench.runner.driver.asyncio.sleep", _instant_sleep)
     d = OmnigentDriver(run_dir=tmp_path, artifact_name="plan.md")
     outcomes = [
-        TurnResult("failed", "", False),
-        TurnResult("idle", "the plan is complete", False),
+        TurnResult(TurnStatus.FAILED, "", False),
+        TurnResult(TurnStatus.IDLE, "the plan is complete", False),
     ]
     sent = []
 
@@ -268,7 +275,7 @@ async def test_send_retries_undelivered_injection(tmp_path, monkeypatch):
     d._send_once = fake_send_once
     d._injection_undelivered = undelivered
     result = await d.send("go on")
-    assert result.status == "idle"
+    assert result.status == TurnStatus.IDLE
     assert sent == ["go on", "go on"]  # same text re-sent once
 
 
@@ -279,7 +286,7 @@ async def test_send_does_not_retry_delivered_failure(tmp_path, monkeypatch):
 
     async def fake_send_once(text):
         sent.append(text)
-        return TurnResult("failed", "", False)
+        return TurnResult(TurnStatus.FAILED, "", False)
 
     async def delivered():
         return False  # a real failure, not an undelivered inject
@@ -287,7 +294,7 @@ async def test_send_does_not_retry_delivered_failure(tmp_path, monkeypatch):
     d._send_once = fake_send_once
     d._injection_undelivered = delivered
     result = await d.send("go on")
-    assert result.status == "failed"
+    assert result.status == TurnStatus.FAILED
     assert sent == ["go on"]  # no blind retry
 
 
@@ -302,7 +309,7 @@ async def test_capture_session_includes_context_tokens(tmp_path):
             return _FakeResp()
 
     d = OmnigentDriver(run_dir=tmp_path, artifact_name="plan.md")
-    d._chat = _FakeChat(["idle"])
+    d._chat = _FakeChat([TurnStatus.IDLE])
     d._http = _FakeHttp()
     assert await d._context_tokens() == 42072
 
@@ -317,7 +324,7 @@ async def test_context_tokens_none_when_label_missing(tmp_path):
             return _FakeResp()
 
     d = OmnigentDriver(run_dir=tmp_path, artifact_name="plan.md")
-    d._chat = _FakeChat(["idle"])
+    d._chat = _FakeChat([TurnStatus.IDLE])
     d._http = _FakeHttp()
     assert await d._context_tokens() is None
 
@@ -325,11 +332,11 @@ async def test_context_tokens_none_when_label_missing(tmp_path):
 async def test_pending_elicitation_stalls_the_turn_at_once(tmp_path, monkeypatch):
     # todo-app-001: a permission prompt nobody could answer sat until the turn cap
     monkeypatch.setattr("flowbench.runner.driver.asyncio.sleep", _instant_sleep)
-    chat = _FakeChat(["running"], pending=[{"id": "elicit_1"}])
+    chat = _FakeChat([TurnStatus.RUNNING], pending=[{"id": "elicit_1"}])
     d = _settle_driver(tmp_path, chat, [[]])
     d._pane_tail = _pane("❯ Allow Bash(rm -rf build)? (y/n)")
     result = await d.send("build it")
-    assert (result.status, result.stall_reason) == ("stalled", "prompt")
+    assert (result.status, result.stall_reason) == (TurnStatus.STALLED, "prompt")
     assert "Allow Bash" in result.pane_tail
 
 
@@ -338,7 +345,7 @@ async def test_other_prompt_signals_stall_too(tmp_path, monkeypatch, key):
     # #61: a trust dialog / login shows up as pending_inputs or terminal_pending,
     # not as an elicitation — same instant stall
     monkeypatch.setattr("flowbench.runner.driver.asyncio.sleep", _instant_sleep)
-    chat = _FakeChat(["running"])
+    chat = _FakeChat([TurnStatus.RUNNING])
     base = chat.snapshot
 
     async def snapshot():
@@ -348,7 +355,7 @@ async def test_other_prompt_signals_stall_too(tmp_path, monkeypatch, key):
     d = _settle_driver(tmp_path, chat, [[]])
     d._pane_tail = _pane(None)
     result = await d.send("build it")
-    assert (result.status, result.stall_reason) == ("stalled", "prompt")
+    assert (result.status, result.stall_reason) == (TurnStatus.STALLED, "prompt")
 
 
 async def test_one_poll_prompt_flicker_is_not_a_stall(tmp_path, monkeypatch):
@@ -357,7 +364,7 @@ async def test_one_poll_prompt_flicker_is_not_a_stall(tmp_path, monkeypatch):
     monkeypatch.setattr("flowbench.runner.driver.asyncio.sleep", _instant_sleep)
     import itertools
 
-    chat = _FakeChat(["running"], beats=itertools.count())
+    chat = _FakeChat([TurnStatus.RUNNING], beats=itertools.count())
     base, polls = chat.snapshot, itertools.count()
 
     async def snapshot():
@@ -368,17 +375,17 @@ async def test_one_poll_prompt_flicker_is_not_a_stall(tmp_path, monkeypatch):
     d = _settle_driver(tmp_path, chat, [[]])
     d.turn_timeout_s = 0.1
     result = await d.send("build it")
-    assert (result.status, result.stall_reason) == ("running", None)
+    assert (result.status, result.stall_reason) == (TurnStatus.RUNNING, None)
 
 
 async def test_frozen_heartbeat_stalls_after_stall_s(tmp_path, monkeypatch):
     monkeypatch.setattr("flowbench.runner.driver.asyncio.sleep", _instant_sleep)
-    d = _settle_driver(tmp_path, _FakeChat(["running"], beats=[7]), [[]])
+    d = _settle_driver(tmp_path, _FakeChat([TurnStatus.RUNNING], beats=[7]), [[]])
     d.stall_s = 0.05
     d._pane_tail = _pane(None)
     result = await d.send("build it")
     assert (result.status, result.stall_reason, result.pane_tail) == (
-        "stalled",
+        TurnStatus.STALLED,
         "no_progress",
         None,
     )
@@ -388,12 +395,12 @@ async def test_moving_heartbeat_is_not_a_stall(tmp_path, monkeypatch):
     monkeypatch.setattr("flowbench.runner.driver.asyncio.sleep", _instant_sleep)
     import itertools
 
-    chat = _FakeChat(["running"], beats=itertools.count())  # every poll a new updated_at
+    chat = _FakeChat([TurnStatus.RUNNING], beats=itertools.count())  # every poll a new updated_at
     d = _settle_driver(tmp_path, chat, [[]])
     d.stall_s = 0.05
     d.turn_timeout_s = 0.2
     result = await d.send("build it")
-    assert (result.status, result.stall_reason) == ("running", None)
+    assert (result.status, result.stall_reason) == (TurnStatus.RUNNING, None)
 
 
 async def test_snapshot_reads_the_raw_session(tmp_path):
@@ -405,7 +412,11 @@ async def test_snapshot_reads_the_raw_session(tmp_path):
             pass
 
         def json(self):
-            return {"status": "running", "updated_at": 5, "pending_elicitations": [{"id": "e"}]}
+            return {
+                "status": TurnStatus.RUNNING,
+                "updated_at": 5,
+                "pending_elicitations": [{"id": "e"}],
+            }
 
     class _Http:
         async def get(self, url):
@@ -417,7 +428,7 @@ async def test_snapshot_reads_the_raw_session(tmp_path):
     d._http = _Http()
     snap = await d._snapshot()
     assert (snap["status"], snap["updated_at"], len(snap["pending_elicitations"])) == (
-        "running",
+        TurnStatus.RUNNING,
         5,
         1,
     )
