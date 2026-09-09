@@ -20,12 +20,15 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 import sys
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+
+import httpx
 
 from flowbench.driver import bundle
 from flowbench.driver.base import AgentDriver
@@ -38,6 +41,8 @@ from flowbench.transcript import (
 )
 from flowbench.types import TurnResult, TurnStatus
 
+log = logging.getLogger(__name__)
+
 # raw-session fields that mean "the agent is waiting on a human"
 # Signals that a human is being asked something. NOT `pending_inputs`: omnigent
 # documents that as "un-consumed web-composer user messages" — i.e. OUR posted
@@ -47,6 +52,30 @@ _PAGE = 200  # server-side max page for GET /v1/sessions/{id}/items
 # The SDK's httpx client ignores the constructor `timeout` and reads with the 600 s
 # SSE budget; a label read that hangs must fail in the 60 s the raw client had.
 _LABEL_READ_S = 60.0
+
+
+def _label_read_errors() -> tuple[type[BaseException], ...]:
+    """What a label read (`sessions.get()` + the label lookup) can fail with:
+    `OmnigentError` (>= 400, or a body that is not a JSON object), `httpx.HTTPError`
+    (transport, unwrapped by the SDK), `TimeoutError` (our `_LABEL_READ_S` cap),
+    `KeyError` (a JSON object that is not a complete Session, `Session.from_dict`),
+    and `ValueError`/`TypeError`/`OverflowError` (a label value of the wrong shape,
+    e.g. `int("lots")`, `int(inf)`, or `Session.from_dict`'s own `int()`).
+    Anything else is our bug and propagates. Built lazily: `omnigent_client` is the
+    `live` extra (see `start()`)."""
+    from omnigent_client import OmnigentError
+
+    return (
+        OmnigentError,
+        httpx.HTTPError,
+        TimeoutError,
+        KeyError,
+        ValueError,
+        TypeError,
+        OverflowError,
+    )
+
+
 _now = time.monotonic  # clock seam: the budget tests drive a fake one; never patch
 # time.monotonic itself (asyncio uses it)
 
@@ -260,15 +289,18 @@ class OmnigentDriver(AgentDriver):
             # `sessions.get` raises on >= 400 and on any body that is not a Session
             # (a redirect, the web UI's HTML 200) — all land here, not in row 3
             async with asyncio.timeout(_LABEL_READ_S):
-                labels = (await self._client.sessions.get(self._chat.session_id)).labels or {}
-        except Exception:
+                labels = (await self._client.sessions.get(self._chat.session_id)).labels
+            code = labels.get("omnigent.last_task_error_code")
+            if not code:
+                return True  # row 3
+            msg = labels.get("omnigent.last_task_error_message")
+            # a non-string message (null, number, list, dict) is not the undelivered signal
+            return (
+                code == "runner_error" and isinstance(msg, str) and "not delivered" in msg
+            )  # row 1
+        except _label_read_errors() as e:
+            log.debug("resend check: label read failed: %r", e)
             return False
-        code = labels.get("omnigent.last_task_error_code")
-        if not code:
-            return True  # row 3
-        return code == "runner_error" and (
-            "not delivered" in labels.get("omnigent.last_task_error_message", "")
-        )  # row 1
 
     async def _send_once(self, text: str, deadline: float) -> TurnResult:
         n_before = n_assistant_messages(await self._list_items())
@@ -454,7 +486,9 @@ class OmnigentDriver(AgentDriver):
             # a wedged tmux server must not wedge the watchdog: 5 s, then None
             out = await asyncio.wait_for(self._capture_pane(meta), 5)
             return "\n".join(out.decode(errors="replace").rstrip().splitlines()[-lines:])
-        except Exception:
+        except Exception as e:  # noqa: BLE001 -- best-effort probe: HTTP, JSON shape, tmux and
+            # timeout all mean "could not look"; a probe must never abort the send it observes
+            log.debug("pane tail unavailable: %r", e)
             return None
 
     def _conversation_id(self) -> str | None:
@@ -479,10 +513,11 @@ class OmnigentDriver(AgentDriver):
             return None
         try:
             async with asyncio.timeout(_LABEL_READ_S):
-                labels = (await self._client.sessions.get(self._chat.session_id)).labels or {}
+                labels = (await self._client.sessions.get(self._chat.session_id)).labels
             raw = labels.get("omnigent.last_context_tokens")
             return int(raw) if raw else None
-        except Exception:
+        except _label_read_errors() as e:
+            log.debug("context tokens: label read failed: %r", e)
             return None
 
     async def capture_session(self) -> dict[str, Any]:
@@ -514,5 +549,5 @@ class OmnigentDriver(AgentDriver):
             try:
                 if closer is not None:
                     await closer.aclose()
-            except Exception:
-                pass
+            except Exception as e:  # noqa: BLE001 -- teardown must never mask the real error
+                log.debug("close: %r", e)

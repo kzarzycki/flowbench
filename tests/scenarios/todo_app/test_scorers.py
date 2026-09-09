@@ -1,6 +1,9 @@
 """Phase detection + judge parsing + scorer wrappers — offline."""
 
 import logging
+from pathlib import Path
+
+import pytest
 
 from scenarios.coding_workflow.cases.todo_app import scorers
 from scenarios.coding_workflow.cases.todo_app.fixtures import sessions
@@ -326,4 +329,24 @@ def test_collect_code_skips_an_unreadable_path(tmp_path, caplog):
         and r.levelno == logging.DEBUG
     ]
     assert len(records) == 1
-    assert "broken.py" in records[0].getMessage()
+    message = records[0].getMessage()
+    assert "broken.py" in message
+    assert "IsADirectoryError" in message or "Is a directory" in message
+
+
+def test_collect_code_reraises_a_foreign_exception(tmp_path, monkeypatch):
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    (ws / "real.py").write_text("REAL_MARKER = 1")
+
+    real_read_text = Path.read_text
+
+    def _boom(self, *args, **kwargs):
+        if self.name == "real.py":
+            raise RuntimeError("boom")
+        return real_read_text(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", _boom)
+
+    with pytest.raises(RuntimeError, match="boom"):
+        scorers.collect_code(ws)

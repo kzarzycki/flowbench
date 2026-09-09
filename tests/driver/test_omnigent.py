@@ -4,12 +4,14 @@ cover that); we assert the interface contract and the pure transcript helpers.""
 import asyncio
 import io
 import json
+import logging
 import tarfile
 import time
 from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
 
+import httpx
 import pytest
 
 from flowbench.driver import AgentDriver, OmnigentDriver, TurnResult
@@ -178,7 +180,7 @@ class _FakeSessions:
 
     def __init__(self, batches, labels=None, get_error=None):
         self._batches = list(batches)
-        self._labels = labels
+        self._labels = {} if labels is None else labels
         self._get_error = get_error
 
     async def get(self, session_id):
@@ -870,6 +872,8 @@ def _label_client(labels=None, boom=None):
     (omnigent_client 0.2.0); a >= 400 or non-Session response raises instead of
     returning."""
 
+    labels = {} if labels is None else labels  # the SDK always hands a dict
+
     async def get(session_id):
         if boom is not None:
             raise boom
@@ -1466,7 +1470,7 @@ async def test_resend_allowed_is_false_when_the_read_fails(tmp_path):
     """Unknown means "do not retry" — a blind resend can double-deliver."""
     d = OmnigentDriver(run_dir=tmp_path)
     d._chat = _FakeChat([TurnStatus.FAILED])
-    d._client = _label_client(boom=RuntimeError("transport gone"))
+    d._client = _label_client(boom=httpx.ConnectError("transport gone"))
     assert await d._resend_allowed() is False
 
 
@@ -1541,8 +1545,215 @@ async def test_context_tokens_none_before_a_session_exists(tmp_path):
 async def test_context_tokens_none_when_the_read_fails(tmp_path):
     d = OmnigentDriver(run_dir=tmp_path)
     d._chat = _FakeChat([TurnStatus.IDLE])
-    d._client = _label_client(boom=RuntimeError("transport gone"))
+    d._client = _label_client(boom=httpx.ConnectError("transport gone"))
     assert await d._context_tokens() is None
+
+
+# --- #106: the label reads catch a known tuple, log it, and let our bugs through ----
+
+ABSENT = object()  # sentinel: leave the `labels` key out of the Session body entirely
+
+
+def _session_body(labels):
+    """A complete Session body as `Session.from_dict` needs it (omnigent_client
+    0.2.0); `labels=ABSENT` omits the key."""
+    body = {
+        "id": "c",
+        "agent_id": "a",
+        "status": "idle",
+        "created_at": 0,
+        "updated_at": 0,
+        "title": None,
+        "items": [],
+        "pending_inputs": [],
+    }
+    if labels is not ABSENT:
+        body["labels"] = labels
+    return body
+
+
+def _driver_debug(caplog):
+    return [
+        r
+        for r in caplog.records
+        if r.name == "flowbench.driver.omnigent" and r.levelno == logging.DEBUG
+    ]
+
+
+def _failed_driver(tmp_path, client):
+    d = OmnigentDriver(run_dir=tmp_path, artifact_name="plan.md")
+    d._chat = _FakeChat([TurnStatus.FAILED])
+    d._client = client
+    return d
+
+
+def _read_error(kind):
+    """What `sessions.get()` raises: >= 400 / non-Session body, the driver's own
+    read cap, a JSON object missing a Session field."""
+    if kind == "omnigent":
+        from omnigent_client import OmnigentError
+
+        return OmnigentError("503")
+    if kind == "timeout":
+        return TimeoutError()
+    return KeyError("agent_id")
+
+
+async def test_resend_allowed_reraises_a_foreign_exception(tmp_path):
+    """A driver bug is not an unreadable label: it must surface, not read as False."""
+    d = _failed_driver(tmp_path, _label_client(boom=RuntimeError("driver bug")))
+    with pytest.raises(RuntimeError, match="driver bug"):
+        await d._resend_allowed()
+
+
+async def test_context_tokens_reraises_a_foreign_exception(tmp_path):
+    d = _failed_driver(tmp_path, _label_client(boom=RuntimeError("driver bug")))
+    with pytest.raises(RuntimeError, match="driver bug"):
+        await d._context_tokens()
+
+
+@pytest.mark.parametrize("kind", ["omnigent", "timeout", "keyerror"])
+async def test_resend_allowed_false_on_each_read_error(tmp_path, caplog, kind):
+    caplog.set_level(logging.DEBUG, logger="flowbench.driver.omnigent")
+    boom = _read_error(kind)
+    d = _failed_driver(tmp_path, _label_client(boom=boom))
+    assert await d._resend_allowed() is False
+    records = _driver_debug(caplog)
+    assert len(records) == 1
+    assert repr(boom) in records[0].getMessage()
+
+
+@pytest.mark.parametrize("kind", ["omnigent", "timeout", "keyerror"])
+async def test_context_tokens_none_on_each_read_error(tmp_path, caplog, kind):
+    caplog.set_level(logging.DEBUG, logger="flowbench.driver.omnigent")
+    boom = _read_error(kind)
+    d = _failed_driver(tmp_path, _label_client(boom=boom))
+    assert await d._context_tokens() is None
+    records = _driver_debug(caplog)
+    assert len(records) == 1
+    assert repr(boom) in records[0].getMessage()
+
+
+@pytest.mark.parametrize("message", [None, 7, ["not delivered"], {"not delivered": True}])
+async def test_resend_allowed_false_on_a_non_string_message(tmp_path, caplog, message):
+    """Row 1 needs a *string* saying "not delivered"; any other message shape is
+    not the undelivered signal. The guard decides — nothing is swallowed, so
+    nothing is logged (a list/dict containing the phrase used to pass the `in`
+    test and authorize a re-send)."""
+    caplog.set_level(logging.DEBUG, logger="flowbench.driver.omnigent")
+    d = _failed_driver(
+        tmp_path,
+        _label_client(
+            {
+                "omnigent.last_task_error_code": "runner_error",
+                "omnigent.last_task_error_message": message,
+            }
+        ),
+    )
+    assert await d._resend_allowed() is False
+    assert _driver_debug(caplog) == []
+
+
+@pytest.mark.parametrize("value", ["lots", float("inf"), [1]])
+async def test_context_tokens_none_on_a_garbage_label(tmp_path, caplog, value):
+    """A token label of the wrong shape (ValueError / OverflowError / TypeError from
+    `int()`) is "no cost signal", logged, not a crash of the capture."""
+    caplog.set_level(logging.DEBUG, logger="flowbench.driver.omnigent")
+    d = _failed_driver(tmp_path, _label_client({"omnigent.last_context_tokens": value}))
+    assert await d._context_tokens() is None
+    records = _driver_debug(caplog)
+    assert len(records) == 1
+    assert "Error" in records[0].getMessage()
+
+
+async def test_label_reads_fall_back_on_an_overflowing_session_field(tmp_path):
+    """`Session.from_dict`'s `int(raw["created_at"])` raises OverflowError on
+    `1e400` (parsed as inf) — a schema-drift shape, still an unreadable label."""
+    body = {**_session_body({}), "created_at": 1e400}
+    d = _failed_driver(tmp_path, _real_sdk_client(lambda req: httpx.Response(200, json=body)))
+    assert await d._resend_allowed() is False
+    assert await d._context_tokens() is None
+
+
+@pytest.mark.parametrize(
+    "handler",
+    [
+        lambda req: httpx.Response(503, json={}),
+        lambda req: httpx.Response(200, headers={"content-type": "text/html"}, text="<html>"),
+        lambda req: httpx.Response(200, json={"labels": {}}),  # no Session fields
+    ],
+    ids=["503", "html-200", "no-session-fields"],
+)
+async def test_label_reads_fall_back_through_the_real_sdk(tmp_path, handler):
+    d = _failed_driver(tmp_path, _real_sdk_client(handler))
+    assert await d._resend_allowed() is False
+    assert await d._context_tokens() is None
+
+
+async def test_context_tokens_none_on_a_503_carrying_the_label(tmp_path):
+    """An error response is not a reading, even when its body carries the label."""
+    body = _session_body({"omnigent.last_context_tokens": "123"})
+    d = _failed_driver(tmp_path, _real_sdk_client(lambda req: httpx.Response(503, json=body)))
+    assert await d._context_tokens() is None
+
+
+@pytest.mark.parametrize("labels", [[], ["x"], "", 0, None, ABSENT], ids=repr)
+async def test_resend_allowed_true_when_the_sdk_coerces_labels(tmp_path, labels):
+    """A non-dict / absent `labels` is `{}` before the driver sees it — the
+    coercion is `Session.from_dict`'s, not ours — so row 3 applies: no error
+    label, the sim/judge re-send is allowed."""
+    body = _session_body(labels)
+    d = _failed_driver(tmp_path, _real_sdk_client(lambda req: httpx.Response(200, json=body)))
+    assert await d._resend_allowed() is True
+
+
+async def test_resend_allowed_logs_the_swallowed_error(tmp_path, caplog):
+    caplog.set_level(logging.DEBUG, logger="flowbench.driver.omnigent")
+    d = _failed_driver(tmp_path, _label_client(boom=httpx.ConnectError("transport gone")))
+    assert await d._resend_allowed() is False
+    records = _driver_debug(caplog)
+    assert len(records) == 1
+    assert "transport gone" in records[0].getMessage()
+
+
+async def test_context_tokens_logs_the_swallowed_error(tmp_path, caplog):
+    caplog.set_level(logging.DEBUG, logger="flowbench.driver.omnigent")
+    d = _failed_driver(tmp_path, _label_client(boom=httpx.ConnectError("transport gone")))
+    assert await d._context_tokens() is None
+    records = _driver_debug(caplog)
+    assert len(records) == 1
+    assert "transport gone" in records[0].getMessage()
+
+
+async def test_pane_tail_logs_the_swallowed_error(tmp_path, caplog):
+    caplog.set_level(logging.DEBUG, logger="flowbench.driver.omnigent")
+
+    class _Http:
+        async def get(self, url):
+            raise OSError("runner offline")
+
+    d = OmnigentDriver(run_dir=tmp_path, artifact_name="plan.md")
+    d._chat = SimpleNamespace(session_id="conv_x")
+    d._http = _Http()
+    assert await d._pane_tail() is None
+    records = _driver_debug(caplog)
+    assert len(records) == 1
+    assert "runner offline" in records[0].getMessage()
+
+
+async def test_close_logs_the_swallowed_error(tmp_path, caplog):
+    caplog.set_level(logging.DEBUG, logger="flowbench.driver.omnigent")
+
+    class _Boom:
+        async def aclose(self):
+            raise RuntimeError("already gone")
+
+    d = OmnigentDriver(run_dir=tmp_path, artifact_name="plan.md")
+    d._http, d._client = _Boom(), None
+    await d.close()
+    records = _driver_debug(caplog)
+    assert len(records) == 1
+    assert "already gone" in records[0].getMessage()
 
 
 async def test_send_once_captures_the_streamed_events(tmp_path, monkeypatch):
