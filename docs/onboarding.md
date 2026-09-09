@@ -120,34 +120,19 @@ subscription quota.** When the quota runs out, agents do not error — they stal
 hang until the websocket ping timeout (~20 min), and no artifact lands. Everything stalling at
 once is a quota symptom, not a code bug. Check your quota before a multi-hour run.
 
-## 5. Do I need to patch omnigent? No
+## 5. If a 2nd+ turn fails with "terminal did not become ready"
 
-Older notes in this repo said "needs omnigent patched", and there was a `scripts/patch_omnigent.py`
-to do it (deleted; `git log -- scripts/patch_omnigent.py` has it). History, because the failure
-mode is worth recognising: omnigent's claude-native prompt-ready detector scanned only the last 5
-non-empty tmux lines for the `❯` input glyph, and a tall Claude Code status footer pushed the glyph
-out of that window — every turn after the first failed with "terminal did not become ready". The
-script bumped the window to 12.
-
-Upstream fixed it structurally, in the published releases as well as on `main`: prompt-ready
-detection and the permission-mode read anchor on the input box's own rule (`_is_box_rule`), so the
-footer's height cannot matter, and the 5-line tail survives only as a fallback for a box that has
-not mounted yet. Nothing to patch — and the script was aiming at the wrong file anyway: it globbed
-a non-editable uv-tool `site-packages` (an editable install has no such tree) and otherwise fell
-back to whichever `omnigent` was importable, which in this repo is the venv copy. That copy does
-ship a bridge module — it just never runs one, because flowbench imports only its client side and
-the pane scanning happens in the server's install (§2).
-
-If a 2nd+-turn injection ever fails this way again, read the bridge in **the server's** install.
-The module moved between versions, so check both paths:
+omnigent's claude-native bridge detects the prompt by scanning the tmux pane. Since 0.12.0 it
+anchors on the input box's own rule (`_is_box_rule`), so a tall Claude Code footer cannot hide
+the `❯` glyph. If you see this failure, check the bridge in **the server's** install (not the
+venv client, §2) for `_is_box_rule`; the module moved between versions:
 
 | Version | Bridge module | Process you see in `ps` |
 | --- | --- | --- |
 | ≤ 0.12.0 (published) | `omnigent/claude_native_bridge.py` | `-m omnigent.claude_native_bridge` |
 | 0.13.0.dev0 and later (source) | `omnigent/harnesses/claude_native/bridge.py` | `-m omnigent.harnesses.claude_native.bridge` |
 
-Look for `_is_box_rule` (present = you have the structural fix) before suspecting
-`_PROMPT_SCAN_TAIL_LINES`.
+Missing → the server runs a pre-0.12.0 omnigent; upgrade it.
 
 ## 6. Where runs land
 

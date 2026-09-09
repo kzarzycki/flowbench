@@ -93,8 +93,8 @@ uv run python -m scenarios.coding_workflow.run --rescore <run-id>
 ## Conventions / gotchas
 
 - The agent-eval runner requires `ANTHROPIC_API_KEY` UNSET (subscription billing — the driver
-  guards on it) and a live omnigent server with `claude-native` configured. No omnigent patch is
-  needed any more (`docs/onboarding.md` §5). Launch live runs with `uv run --extra live`.
+  guards on it) and a live omnigent server with `claude-native` configured
+  (`docs/onboarding.md`). Launch live runs with `uv run --extra live`.
 - Wheel ships `src/flowbench` only; in-repo `scenarios` imports work via pytest `pythonpath`
   and cwd.
 - Run-dirs live beside the checkout that launches the run — `<checkout>/../flowbench-runs/<scenario>/`,
