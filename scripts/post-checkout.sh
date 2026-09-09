@@ -5,11 +5,12 @@
 # to any other branch is reverted and fails. Git has no pre-checkout hook, so
 # this runs after the switch and undoes it.
 #
-# Activate once per clone:  git config core.hooksPath .githooks
-# Move a binding on purpose: GIT_REBIND=1 git switch <branch>
+# Installed by pre-commit (`pre-commit install`, post-checkout stage in
+# .pre-commit-config.yaml). Move a binding on purpose: GIT_REBIND=1 git switch <branch>
 #
-# args: <prev HEAD> <new HEAD> <flag>; flag=1 is a branch checkout, 0 a file checkout.
-[ "$3" = "1" ] || exit 0
+# git passes <prev HEAD> <new HEAD> <flag>; pre-commit passes the flag as
+# PRE_COMMIT_CHECKOUT_TYPE instead. flag=1 is a branch checkout, 0 a file checkout.
+[ "${3:-$PRE_COMMIT_CHECKOUT_TYPE}" = "1" ] || exit 0
 branch=$(git symbolic-ref --quiet --short HEAD) || exit 0 # detached (rebase, bisect): allow
 git_dir=$(git rev-parse --git-dir)
 bind_file="$git_dir/worktree-branch" # per-worktree: .git/worktrees/<name>/ for linked ones

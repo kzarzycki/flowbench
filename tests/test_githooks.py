@@ -1,12 +1,13 @@
-"""The post-checkout hook binds each worktree to one branch (`.githooks/post-checkout`)."""
+"""`scripts/post-checkout.sh` binds each worktree to one branch (installed via pre-commit)."""
 
 import os
+import shutil
 import subprocess
 from pathlib import Path
 
 import pytest
 
-HOOKS = Path(__file__).resolve().parents[1] / ".githooks"
+HOOK = Path(__file__).resolve().parents[1] / "scripts" / "post-checkout.sh"
 ENV = {k: v for k, v in os.environ.items() if k not in {"GIT_REBIND", "GIT_DIR", "GIT_WORK_TREE"}}
 ENV.update(
     GIT_AUTHOR_NAME="t",
@@ -36,12 +37,19 @@ def commit(cwd: Path, name: str) -> None:
     git(cwd, "commit", "-qm", name)
 
 
+def install_hook(r: Path) -> None:
+    """Wire the script the way git calls it (positional args); pre-commit wiring is tested apart."""
+    hooks = r / ".git" / "hooks"
+    (hooks / "post-checkout").symlink_to(HOOK)
+
+
 @pytest.fixture
 def repo(tmp_path: Path) -> Path:
     r = tmp_path / "repo"
     r.mkdir()
-    git(r, "init", "-q", "-b", "master")
-    git(r, "config", "core.hooksPath", str(HOOKS))
+    git(r, "init", "-q", "-b", "master", f"--template={tmp_path / 'empty-template'}")
+    (r / ".git" / "hooks").mkdir()
+    install_hook(r)
     commit(r, "f")
     git(r, "switch", "-q", "master")  # first branch checkout binds the main worktree
     return r
@@ -58,7 +66,7 @@ def test_fresh_clone_binds_default_branch_without_bootstrap(repo: Path, tmp_path
     git(repo, "branch", "feat/a")
     clone = tmp_path / "clone"
     git(tmp_path, "clone", "-q", str(repo), str(clone))
-    git(clone, "config", "core.hooksPath", str(HOOKS))
+    install_hook(clone)
     res = git(clone, "switch", "feat/a")  # first checkout after activation
     assert res.returncode != 0 and branch(clone) == "master"
 
@@ -113,3 +121,27 @@ def test_rebind_is_explicit(repo: Path):
     assert res.returncode == 0 and branch(repo) == "feat/x"
     assert git(repo, "switch", "master").returncode != 0
     assert branch(repo) == "feat/x"
+
+
+@pytest.mark.skipif(shutil.which("pre-commit") is None, reason="pre-commit not on PATH")
+def test_pre_commit_wiring_passes_checkout_type(tmp_path: Path):
+    """The real install path: pre-commit's post-checkout stage, flag via PRE_COMMIT_CHECKOUT_TYPE."""
+    r = tmp_path / "pc"
+    r.mkdir()
+    git(r, "init", "-q", "-b", "master", f"--template={tmp_path / 'empty-template'}")
+    (r / ".pre-commit-config.yaml").write_text(
+        "repos:\n  - repo: local\n    hooks:\n      - id: owob\n        name: owob\n"
+        f"        entry: {HOOK}\n        language: script\n        stages: [post-checkout]\n"
+        "        always_run: true\n        pass_filenames: false\n"
+    )
+    commit(r, "f")
+    assert (
+        subprocess.run(
+            ["pre-commit", "install", "-t", "post-checkout"], cwd=r, env=ENV, capture_output=True
+        ).returncode
+        == 0
+    )
+    git(r, "switch", "-q", "master")  # binds
+    assert (r / "f").write_text("2") or git(r, "checkout", "--", "f").returncode == 0  # flag 0
+    res = git(r, "switch", "-c", "feat/x")
+    assert res.returncode != 0 and branch(r) == "master"
