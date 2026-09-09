@@ -1,7 +1,12 @@
 """Driver contract, offline. We don't drive a live agent here (Task 1 + Task 7
 cover that); we assert the interface contract and the pure transcript helpers."""
 
+import io
+import json
+import tarfile
+from dataclasses import dataclass
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -719,3 +724,269 @@ async def test_queued_own_input_is_not_a_prompt(tmp_path, monkeypatch):
     d.turn_timeout_s = 0.1
     result = await d.send("build it")
     assert (result.status, result.stall_reason) == (TurnStatus.RUNNING, None)
+
+
+# --- start(): the session-creation path -------------------------------------
+# Untested until S02.2 pulled the whole file into diff-cover's scope. It is also
+# the code S02.5 has to migrate off omnigent's privates (`sessions._http`,
+# `sessions._base`, hand-built `SessionsChat`), so pinning the calls it makes is
+# the safety net that refactor needs.
+
+
+class _FakeResponse:
+    def __init__(self, payload):
+        self._payload = payload
+        self.raised = False
+
+    def raise_for_status(self):
+        self.raised = True
+
+    def json(self):
+        return self._payload
+
+
+class _FakeHttp:
+    """Stands in for `httpx.AsyncClient` and for `sessions._http`."""
+
+    def __init__(self, hosts=None):
+        self.hosts = (
+            hosts
+            if hosts is not None
+            else [
+                {
+                    "host_id": "h1",
+                    "status": "offline",
+                    "configured_harnesses": {"claude-native": 1},
+                },
+                {"host_id": "h2", "status": "online", "configured_harnesses": {"codex-native": 1}},
+                {"host_id": "h3", "status": "online", "configured_harnesses": {"claude-native": 1}},
+            ]
+        )
+        self.posts = []
+        self.init_kwargs = None
+
+    async def get(self, url):
+        return _FakeResponse({"hosts": self.hosts})
+
+    async def post(self, url, data=None, files=None):
+        self.posts.append((url, data, files))
+        return _FakeResponse({"session_id": 4242})
+
+
+class _FakeSessionsNs:
+    def __init__(self, http):
+        self._http = http
+        self._base = "http://omni"
+        self.model_override = None
+        self.effort = None
+
+    async def get(self, session_id):
+        return {"id": session_id}
+
+    async def set_model_override(self, session_id, *, model_override, silent):
+        self.model_override = (session_id, model_override, silent)
+
+    async def set_reasoning_effort(self, session_id, *, reasoning_effort):
+        self.effort = (session_id, reasoning_effort)
+
+
+def _patch_start(monkeypatch, http):
+    """Wire start()'s five function-local imports to fakes."""
+    import httpx
+    import omnigent.host.daemon_launch as dl
+    import omnigent_client
+    import omnigent_client._sessions_chat as sc
+
+    ns = _FakeSessionsNs(http)
+    launched = {}
+
+    monkeypatch.setattr(httpx, "AsyncClient", lambda **kw: http)
+    monkeypatch.setattr(
+        omnigent_client, "OmnigentClient", lambda **kw: SimpleNamespace(sessions=ns)
+    )
+    monkeypatch.setattr(
+        sc, "SessionsChat", lambda **kw: SimpleNamespace(session_id="conv_new", **kw)
+    )
+
+    async def _launch(http_, *, host_id, session_id, workspace):
+        launched["args"] = (host_id, session_id, workspace)
+        return "runner-1"
+
+    async def _wait(http_, runner_id, timeout_s):
+        launched["waited"] = (runner_id, timeout_s)
+
+    monkeypatch.setattr(dl, "launch_or_reuse_daemon_runner", _launch)
+    monkeypatch.setattr(dl, "wait_for_runner_online", _wait)
+    return ns, launched
+
+
+async def test_start_refuses_when_the_api_key_is_set(tmp_path, monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-nope")  # pragma: allowlist secret
+    d = OmnigentDriver(run_dir=tmp_path / "run", artifact_name="plan.md")
+    with pytest.raises(RuntimeError, match="subscription billing"):
+        await d.start()
+
+
+async def test_start_creates_the_session_and_launches_the_runner(tmp_path, monkeypatch):
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    http = _FakeHttp()
+    ns, launched = _patch_start(monkeypatch, http)
+    run_dir = tmp_path / "run"
+    d = OmnigentDriver(
+        run_dir=run_dir, artifact_name="plan.md", model="sonnet", reasoning_effort="high"
+    )
+
+    await d.start()
+
+    assert run_dir.is_dir()  # created for the agent to write into
+    url, data, files = http.posts[0]
+    assert url == "http://omni/v1/sessions"
+    assert json.loads(data["metadata"]) == d._create_metadata()
+    name, blob, mime = files["bundle"]
+    assert (name, mime) == ("agent.tar.gz", "application/gzip")
+    with tarfile.open(fileobj=io.BytesIO(blob)) as tar:
+        assert tar.getnames()[:2] == [".", "./config.yaml"]
+    # the online claude-native host, not the offline one or the codex one
+    assert launched["args"] == ("h3", "4242", str(run_dir))
+    assert launched["waited"] == ("runner-1", 90)
+    assert ns.model_override == ("4242", "sonnet", True)
+    assert ns.effort == ("4242", "high")
+    assert d._chat.session_id == "conv_new"
+    assert d._runner_id == "runner-1"
+
+
+async def test_start_skips_reasoning_effort_when_unset(tmp_path, monkeypatch):
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    ns, _ = _patch_start(monkeypatch, _FakeHttp())
+    await OmnigentDriver(run_dir=tmp_path / "run", artifact_name="plan.md").start()
+    assert ns.effort is None
+
+
+async def test_start_git_inits_the_run_dir_once(tmp_path, monkeypatch):
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    _patch_start(monkeypatch, _FakeHttp())
+    run_dir = tmp_path / "run"
+    d = OmnigentDriver(run_dir=run_dir, artifact_name="plan.md", git_init=True)
+
+    await d.start()
+    assert (run_dir / ".git").is_dir()
+
+    # already a repo: git_init_repo must not run again (it would re-commit)
+    def _boom(path):  # pragma: no cover - must not be called
+        raise AssertionError("git_init_repo called on an existing repo")
+
+    monkeypatch.setattr("flowbench.driver.omnigent.git_init_repo", _boom)
+    await d.start()
+
+
+async def test_start_raises_when_no_host_has_claude_native(tmp_path, monkeypatch):
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    _patch_start(monkeypatch, _FakeHttp(hosts=[]))
+    d = OmnigentDriver(run_dir=tmp_path / "run", artifact_name="plan.md")
+    with pytest.raises(RuntimeError, match="no online host with claude-native"):
+        await d.start()
+
+
+# --- the paths the file's move pulled into diff-cover's scope ----------------
+
+
+class _LabelHttp:
+    def __init__(self, labels=None, boom=False):
+        self._labels = labels
+        self._boom = boom
+
+    async def get(self, _url):
+        if self._boom:
+            raise RuntimeError("transport gone")
+        return _FakeResponse({"labels": self._labels})
+
+
+async def test_injection_undelivered_reads_the_error_labels(tmp_path):
+    d = OmnigentDriver(run_dir=tmp_path, artifact_name="plan.md")
+    d._chat = _FakeChat([TurnStatus.FAILED])
+    d._http = _LabelHttp(
+        {
+            "omnigent.last_task_error_code": "runner_error",
+            "omnigent.last_task_error_message": "The message was not delivered",
+        }
+    )
+    assert await d._injection_undelivered() is True
+
+    # a failure that is not the undelivered one: retrying could double-deliver
+    d._http = _LabelHttp({"omnigent.last_task_error_code": "model_error"})
+    assert await d._injection_undelivered() is False
+
+
+async def test_injection_undelivered_is_false_when_the_read_fails(tmp_path):
+    """Unknown means "do not retry" — a blind resend can double-deliver."""
+    d = OmnigentDriver(run_dir=tmp_path, artifact_name="plan.md")
+    d._chat = _FakeChat([TurnStatus.FAILED])
+    d._http = _LabelHttp(boom=True)
+    assert await d._injection_undelivered() is False
+
+
+async def test_context_tokens_none_before_a_session_exists(tmp_path):
+    d = OmnigentDriver(run_dir=tmp_path, artifact_name="plan.md")
+    assert await d._context_tokens() is None
+
+
+async def test_context_tokens_none_when_the_read_fails(tmp_path):
+    d = OmnigentDriver(run_dir=tmp_path, artifact_name="plan.md")
+    d._chat = _FakeChat([TurnStatus.IDLE])
+    d._http = _LabelHttp(boom=True)
+    assert await d._context_tokens() is None
+
+
+async def test_send_once_captures_the_streamed_events(tmp_path, monkeypatch):
+    """`events` is what conversation_url is later recovered from."""
+    monkeypatch.setattr("flowbench.driver.omnigent.asyncio.sleep", _instant_sleep)
+
+    @dataclass
+    class _Delta:
+        conversation_id: str
+
+    chat = _FakeChat([TurnStatus.IDLE])
+
+    def _send(_text):
+        async def _gen():
+            yield _Delta("conv_xyz")
+
+        return _gen()
+
+    chat.send = _send
+    d = _settle_driver(tmp_path, chat, [[_USER, _REPLY]])
+    d.turn_timeout_s = 0.01  # the turn boundary is not what this test is about
+    await d._send_once("hi")
+    assert d._captured == [{"__type__": "_Delta", "conversation_id": "conv_xyz"}]
+    assert d.conversation_url() == f"{d.server_url}/c/conv_xyz"
+
+
+async def test_capture_session_returns_the_run_fields(tmp_path):
+    (tmp_path / "plan.md").write_text("# the plan\n")
+    chat = _FakeChat([TurnStatus.IDLE])
+    d = _settle_driver(tmp_path, chat, [[_USER, _USER, _REPLY]])
+    d._http = _LabelHttp({"omnigent.last_context_tokens": "1234"})
+
+    out = await d.capture_session()
+
+    assert out["items"] == [_USER, _REPLY]  # deduped
+    assert out["context_tokens"] == 1234
+    assert out["artifact_exists"] is True
+    assert out["artifact_path"] == str(tmp_path / "plan.md")
+    assert out["artifact_text"] == "# the plan\n"
+    assert (out["model"], out["driver"]) == (d.model, "omnigent")
+    assert out["session_id"] == "conv_test"
+    assert isinstance(out["duration_s"], float)
+
+
+async def test_close_swallows_a_failing_client(tmp_path):
+    """Teardown must never mask the real error that got us here."""
+
+    class _Boom:
+        async def aclose(self):
+            raise RuntimeError("already gone")
+
+    d = OmnigentDriver(run_dir=tmp_path, artifact_name="plan.md")
+    d._http, d._client = _Boom(), None
+    await d.close()
+    assert d._closed is True
