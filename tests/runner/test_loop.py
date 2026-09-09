@@ -115,6 +115,33 @@ async def test_loop_primes_simulator_once_then_relays_deltas():
     assert "and what file name?" in second
     assert "a JSON file" not in second  # its own prior reply is not re-relayed
     assert "done, tests pass" in third
+    assert "and what file name?" not in third  # relayed once, never again
+
+
+async def test_relay_advances_even_when_simulator_says_continue():
+    # todo-app-004: the sim's literal "Continue." matched the old nudge sentinel,
+    # so sim_seen froze and every later relay resent the whole backlog (quadratic)
+    turns = [
+        TurnResult("idle", "Task 1 implementer running", False),
+        TurnResult("idle", "Task 1 done, on to Task 2", False),
+        TurnResult("idle", "all done", True),
+    ]
+    driver = _FakeDriver(turns, {"items": []})
+    user = _StubModel(["Continue.", "Continue.", DONE_TOKEN])
+    await run_agent_session(
+        driver,
+        user,
+        first_prompt=FIRST_PROMPT,
+        simulator_system=SIM_SYSTEM,
+        done_token=DONE_TOKEN,
+        max_turns=10,
+        deadline_s=999,
+        artifact_grace_s=0,
+    )
+    _, second, third = user.seen
+    assert "Task 1 done" in second
+    assert "Task 1 implementer running" not in second
+    assert "Task 1 done" not in third and "Task 1 implementer running" not in third
 
 
 def test_is_done_tolerates_wrapped_token():
@@ -149,80 +176,6 @@ async def test_loop_answers_then_stops_on_done_token():
     assert "tasks.json" in driver.sent[1]
     assert len(user.seen) == 2  # answered once, then said DONE
     assert session["items"] == []
-
-
-async def test_loop_canned_nudges_self_wait_without_simulator():
-    # Agent parks on its own background sub-agent: idle, child_busy, no question.
-    # The loop must nudge with a free "Continue." and NOT call the simulator. Once
-    # the child settles (child_busy False) the simulator runs and can say DONE.
-    turns = [
-        TurnResult("idle", "Task 1 implementer running in the background", False, child_busy=True),
-        TurnResult("idle", "still running, I'll proceed when it reports", False, child_busy=True),
-        TurnResult("idle", "Task 1 done. App complete, tests pass.", True, child_busy=False),
-    ]
-    driver = _FakeDriver(turns, {"items": []})
-    user = _StubModel([DONE_TOKEN])  # only consulted once, at the end
-    await run_agent_session(
-        driver,
-        user,
-        first_prompt=FIRST_PROMPT,
-        simulator_system=SIM_SYSTEM,
-        done_token=DONE_TOKEN,
-        max_turns=10,
-        deadline_s=999,
-        artifact_grace_s=0,
-    )
-    assert driver.sent == [FIRST_PROMPT, "Continue.", "Continue."]
-    assert len(user.seen) == 1  # simulator NOT burned on the 2 self-waits
-    assert driver.closed
-
-
-async def test_loop_forces_simulator_when_child_looks_stuck_busy():
-    # Safeguard: if a child never reports busy=False (capture race), the loop must
-    # not canned-nudge forever — after _MAX_CONSEC_NUDGES it forces a simulator turn
-    # so DONE is still reachable.
-    from flowbench.runner.loop import _MAX_CONSEC_NUDGES
-
-    stuck = TurnResult("idle", "still working in the background", False, child_busy=True)
-    driver = _FakeDriver([stuck], {"items": []})  # every turn looks busy, no question
-    user = _StubModel([DONE_TOKEN])  # forced call ends the run
-    await run_agent_session(
-        driver,
-        user,
-        first_prompt=FIRST_PROMPT,
-        simulator_system=SIM_SYSTEM,
-        done_token=DONE_TOKEN,
-        max_turns=50,
-        deadline_s=999,
-        artifact_grace_s=0,
-    )
-    # first_prompt + exactly _MAX_CONSEC_NUDGES canned nudges, then simulator -> DONE
-    assert driver.sent == [FIRST_PROMPT] + ["Continue."] * _MAX_CONSEC_NUDGES
-    assert len(user.seen) == 1
-    assert driver.closed
-
-
-async def test_loop_simulates_when_agent_asks_even_if_child_busy():
-    # A real question must reach the simulator even while a sub-agent is busy —
-    # the canned path only swallows non-question self-waits.
-    turns = [
-        TurnResult("idle", "Which storage format — json or sqlite?", False, child_busy=True),
-        TurnResult("idle", "built it.", True, child_busy=False),
-    ]
-    driver = _FakeDriver(turns, {"items": []})
-    user = _StubModel(["a JSON file", DONE_TOKEN])
-    await run_agent_session(
-        driver,
-        user,
-        first_prompt=FIRST_PROMPT,
-        simulator_system=SIM_SYSTEM,
-        done_token=DONE_TOKEN,
-        max_turns=10,
-        deadline_s=999,
-        artifact_grace_s=0,
-    )
-    assert "json" in driver.sent[1].lower()  # the simulator's answer, not a canned nudge
-    assert len(user.seen) == 2
 
 
 async def test_loop_stops_at_max_turns():

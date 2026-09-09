@@ -33,6 +33,7 @@ from flowbench.transcript import dedup_items, last_assistant_text, n_assistant_m
 
 # raw-session fields that mean "the agent is waiting on a human"
 _PROMPT_KEYS = ("pending_elicitations", "pending_inputs", "terminal_pending")
+_PAGE = 200  # server-side max page for GET /v1/sessions/{id}/items
 
 
 @dataclass
@@ -40,8 +41,6 @@ class TurnResult:
     status: str  # "idle" (turn settled) | "failed" | "timeout" | "stalled"
     assistant_text: str  # latest assistant-authored text after the turn
     artifact_exists: bool
-    child_busy: bool = False  # a dispatched sub-agent is still running (agent is
-    # parked on its OWN work, not awaiting the user)
     stall_reason: str | None = None  # "prompt" | "no_progress" when stalled
     pane_tail: str | None = None  # last terminal lines at the stall, best effort
 
@@ -68,24 +67,6 @@ class AgentDriver(abc.ABC):
 
 
 # --- transcript helpers (pure; shared with the normalizer's notion of text) ---
-
-
-def any_child_busy(events: list[dict]) -> bool:
-    """True when the agent has a background sub-agent still running, per the latest
-    per-child `busy` state in the captured event stream. omnigent surfaces each
-    sub-agent (Task dispatch) as `SessionChildSessionUpdatedEvent` carrying
-    `child.busy`. An agent that dispatched a sub-agent parks at the prompt (idle)
-    while it runs — it's waiting on its OWN work, not on the user, so the loop can
-    nudge it forward without spending a simulated-user turn."""
-    busy: dict[str, bool] = {}
-    for ev in events:
-        if not isinstance(ev, dict) or ev.get("__type__") != "SessionChildSessionUpdatedEvent":
-            continue
-        child = ev.get("child") or {}
-        cid = ev.get("child_session_id") or child.get("id")
-        if cid is not None:
-            busy[cid] = bool(child.get("busy"))
-    return any(busy.values())
 
 
 # --- the real driver -------------------------------------------------------
@@ -404,7 +385,6 @@ class OmnigentDriver(AgentDriver):
             status=status,
             assistant_text=last_assistant_text(items),
             artifact_exists=self.artifact_path() is not None,
-            child_busy=any_child_busy(self._captured),
             **(self._stall or {}),
         )
 
@@ -424,9 +404,21 @@ class OmnigentDriver(AgentDriver):
                 await asyncio.sleep(2.0 * (i + 1))
 
     async def _list_items(self) -> list[dict]:
-        return await self._read_retry(
-            lambda: self._client.sessions.list_items(self._chat.session_id, order="asc", limit=200)
-        )
+        """The FULL item list. The server caps a page at 200; an unpaginated read
+        froze the settle check once a session outgrew it (todo-app-002/004: every
+        turn past item #200 burned the whole turn cap and returned 'timeout')."""
+        items: list[dict] = []
+        after = None
+        while True:
+            page = await self._read_retry(
+                lambda after=after: self._client.sessions.list_items(
+                    self._chat.session_id, order="asc", limit=_PAGE, after=after
+                )
+            )
+            items.extend(page)
+            if len(page) < _PAGE:
+                return items
+            after = page[-1]["id"]
 
     async def _snapshot(self) -> dict:
         """Raw `GET /v1/sessions/{id}`: status plus the stall signals. Read raw —
@@ -434,15 +426,30 @@ class OmnigentDriver(AgentDriver):
         elicitations, which made the watchdog blind in its first live run."""
         resp = await self._http.get(f"/v1/sessions/{self._chat.session_id}")
         resp.raise_for_status()
-        return resp.json()
+        snap = resp.json()
+        if snap.get("status") == "idle":
+            # An idle main agent whose dispatched sub-agent is still running is
+            # parked on its OWN work, not awaiting the user: omnigent wakes it with
+            # a task-notification when the child finishes. Read the children live
+            # (the event stream races the session end and can miss the settle).
+            resp = await self._http.get(f"/v1/sessions/{self._chat.session_id}/child_sessions")
+            resp.raise_for_status()
+            snap["busy_children"] = [
+                c.get("updated_at") for c in resp.json().get("data", []) if c.get("busy")
+            ]
+        return snap
 
     async def _wait_idle(self, min_wait: float = 4.0) -> str:
         start, seen_running = time.monotonic(), False
         heartbeat, last_beat = None, start
-        st, prompt_polls = None, 0
+        st, prompt_polls, quiet_polls = None, 0, 0
         while time.monotonic() - start < self.turn_timeout_s:
             snap = await self._read_retry(self._snapshot)
             st = snap.get("status")
+            busy_children = snap.get("busy_children") or []
+            if st == "idle" and busy_children:
+                st = "running"  # parked on its own sub-agent: still this turn
+                quiet_polls = 0
             if st == "running":
                 seen_running = True
                 # any prompt nobody can answer: a policy/permission elicitation,
@@ -453,7 +460,7 @@ class OmnigentDriver(AgentDriver):
                 prompt_polls = prompt_polls + 1 if any(snap.get(k) for k in _PROMPT_KEYS) else 0
                 if prompt_polls >= 2:
                     return await self._stalled("prompt")
-                beat = snap.get("updated_at")
+                beat = (snap.get("updated_at"), *busy_children)
                 if beat != heartbeat:
                     heartbeat, last_beat = beat, time.monotonic()
                 elif time.monotonic() - last_beat >= self.stall_s:
@@ -461,7 +468,12 @@ class OmnigentDriver(AgentDriver):
             if st == "failed":
                 return "failed"
             if st == "idle" and (seen_running or time.monotonic() - start >= min_wait):
-                return "idle"
+                # A child just finished -> omnigent is about to inject its
+                # task-notification; one extra quiet poll keeps our inject from
+                # landing on a terminal that is waking up.
+                quiet_polls += 1
+                if heartbeat is None or len(heartbeat) == 1 or quiet_polls >= 2:
+                    return "idle"
             await asyncio.sleep(1.5)
         return st or "timeout"
 
