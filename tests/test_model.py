@@ -2,70 +2,10 @@ import asyncio
 
 import pytest
 
-import flowbench.model as model_mod
 from flowbench.model import SessionModel
 from flowbench.runner.driver import TurnResult
 from flowbench.testing import ScriptedDriver
 from flowbench.types import TurnStatus
-
-
-def test_generate_trusts_fresh_text_on_failed_turn():
-    # the terminal-readiness flake fires AFTER the reply lands (issue #39):
-    # failed status with FRESH text is a completed turn, not a failure
-    driver = ScriptedDriver([TurnResult(TurnStatus.FAILED, "the reply", False)])
-    model = SessionModel(driver)
-    out = asyncio.run(model.generate("x"))
-    assert out.completion == "the reply"
-    assert len(driver.sent) == 1
-
-
-def test_generate_retries_stale_text_on_failed_turn(monkeypatch):
-    # a failed turn whose text equals the PREVIOUS completion is stale — the new
-    # prompt never got a reply; trusting it would corrupt the dialog (gate-1)
-    monkeypatch.setattr(model_mod, "GENERATE_RETRY_WAIT_S", 0.0)
-    driver = ScriptedDriver(
-        [
-            TurnResult(TurnStatus.IDLE, "first reply", False),
-            TurnResult(TurnStatus.FAILED, "first reply", False),  # stale echo
-            TurnResult(TurnStatus.IDLE, "second reply", False),
-        ]
-    )
-    model = SessionModel(driver)
-    assert asyncio.run(model.generate("q1")).completion == "first reply"
-    out = asyncio.run(model.generate("q2"))
-    assert out.completion == "second reply"
-    assert driver.sent == ["q1", "q2", "q2"]
-
-
-def test_generate_timeout_raises_without_retry():
-    # a timed-out turn may still be mid-flight after delivery — resending there
-    # is the known busy-terminal kill; fail immediately, even with fresh text
-    for text in ("", "fresh but untrusted"):
-        driver = ScriptedDriver([TurnResult(TurnStatus.TIMEOUT, text, False)])
-        model = SessionModel(driver)
-        with pytest.raises(RuntimeError, match="timeout"):
-            asyncio.run(model.generate("x"))
-        assert len(driver.sent) == 1
-
-
-def test_generate_retries_failed_empty_turn(monkeypatch):
-    monkeypatch.setattr(model_mod, "GENERATE_RETRY_WAIT_S", 0.0)
-    driver = ScriptedDriver(
-        [TurnResult(TurnStatus.FAILED, "", False), TurnResult(TurnStatus.IDLE, "second try", False)]
-    )
-    model = SessionModel(driver)
-    out = asyncio.run(model.generate("x"))
-    assert out.completion == "second try"
-    assert driver.sent == ["x", "x"]
-
-
-def test_generate_raises_after_retries_exhausted(monkeypatch):
-    monkeypatch.setattr(model_mod, "GENERATE_RETRY_WAIT_S", 0.0)
-    driver = ScriptedDriver([TurnResult(TurnStatus.FAILED, "", False)] * 3)
-    model = SessionModel(driver)
-    with pytest.raises(RuntimeError, match="3 attempts"):
-        asyncio.run(model.generate("x"))
-    assert len(driver.sent) == 3
 
 
 def test_generate_idle_path_single_send():
@@ -73,6 +13,46 @@ def test_generate_idle_path_single_send():
     model = SessionModel(driver)
     out = asyncio.run(model.generate("x"))
     assert out.completion == "ok"
+    assert len(driver.sent) == 1
+
+
+def test_generate_accepts_a_flaked_idle_turn():
+    # the driver already resolved row 2 (FAILED-after-reply-landed) to IDLE with
+    # flaked=True; generate trusts it like any other idle turn (S02.3)
+    driver = ScriptedDriver([TurnResult(TurnStatus.IDLE, "the reply", False, flaked=True)])
+    model = SessionModel(driver)
+    out = asyncio.run(model.generate("x"))
+    assert out.completion == "the reply"
+    assert len(driver.sent) == 1
+
+
+@pytest.mark.parametrize(
+    ("status", "text"),
+    [
+        (TurnStatus.TIMEOUT, "fresh but untrusted"),
+        (TurnStatus.FAILED, ""),
+        (TurnStatus.FAILED, "some text"),
+        (TurnStatus.STALLED, ""),
+    ],
+)
+def test_generate_raises_on_non_idle_without_retry(status, text):
+    # the driver owns retry policy end-to-end; generate never re-sends
+    driver = ScriptedDriver([TurnResult(status, text, False)])
+    model = SessionModel(driver)
+    with pytest.raises(RuntimeError, match=str(status.value)):
+        asyncio.run(model.generate("x"))
+    assert len(driver.sent) == 1
+
+
+@pytest.mark.parametrize("text", ["", "  \n"])
+def test_generate_raises_on_empty_idle_text(text):
+    # NEW guard (S02.3): pre-S02.3 generate returned an empty completion here —
+    # an idle result the driver hands back should always carry new non-empty
+    # text by construction, so this fires only if that invariant breaks
+    driver = ScriptedDriver([TurnResult(TurnStatus.IDLE, text, False)])
+    model = SessionModel(driver)
+    with pytest.raises(RuntimeError, match="no reply"):
+        asyncio.run(model.generate("x"))
     assert len(driver.sent) == 1
 
 

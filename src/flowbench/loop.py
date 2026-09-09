@@ -57,9 +57,11 @@ async def run_agent_session(
 ) -> dict[str, Any]:
     start = time.monotonic()
     convo: list[tuple[str, str]] = []
+    flaked = 0
     try:
         await driver.start()
         result = await driver.send(first_prompt)
+        flaked += result.flaked
         convo.append(("user", first_prompt))
         if result.assistant_text:
             convo.append(("assistant", result.assistant_text))
@@ -67,8 +69,9 @@ async def run_agent_session(
         sim_seen = 0  # convo index up to which the simulator has been relayed
         while turns < max_turns and (time.monotonic() - start) < deadline_s:
             # Only an `idle` turn is a clean boundary where the agent awaits the
-            # user. `failed`/`timeout`/`running` (per-turn cap hit) -> stop and
-            # score whatever was built, rather than inject into a non-ready agent.
+            # user. `failed` here means no reply after the driver's bounded
+            # re-sends; `timeout`/`running` (per-turn cap hit) -> stop and score
+            # whatever was built, rather than inject into a non-ready agent.
             if result.status != TurnStatus.IDLE:
                 break
             # Stateful simulator: prime once with persona+context, then relay
@@ -92,6 +95,7 @@ async def run_agent_session(
                     await asyncio.sleep(2.0)
                 break
             result = await driver.send(reply)
+            flaked += result.flaked
             convo.append(("user", reply))
             sim_seen = len(convo)  # the sim knows everything incl. its own reply
             if result.assistant_text:
@@ -102,6 +106,7 @@ async def run_agent_session(
         # captured session (live-001 shipped an unfinished plan silently).
         session["exit_status"] = result.status
         session["turns"] = turns
+        session["flaked_turns"] = flaked
         if result.status == TurnStatus.STALLED:
             session["stall_reason"] = result.stall_reason
             session["pane_tail"] = result.pane_tail
