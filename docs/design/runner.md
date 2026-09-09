@@ -54,8 +54,18 @@ Baseline is the same picture with an empty `skills/`. Nothing else changes.
 `run_agent_session(driver, user_model, *, first_prompt, simulator_system,
 done_token, max_turns, deadline_s)`:
 
-- Only an `idle` turn is a clean boundary; `failed`/`timeout`/`running`/`stalled`
-  stops the loop and scores what was built. `stalled` is the driver's watchdog
+- Only an `idle` turn is a clean boundary; any other `TurnStatus` stops the loop
+  and scores what was built. The vocabulary lives in `flowbench/types.py`:
+
+  | member | meaning | produced by |
+  | --- | --- | --- |
+  | `IDLE` | turn settled: the agent is awaiting the user | omnigent server |
+  | `RUNNING` | still mid-turn when the per-turn cap fired | omnigent server |
+  | `FAILED` | the omnigent session reported failed | omnigent server |
+  | `TIMEOUT` | idle but silent, or `_wait_idle`'s budget expired | `_wait_idle` |
+  | `STALLED` | a prompt nobody can answer, or no heartbeat | `_send_once` |
+
+  `stalled` is the driver's watchdog
   (`stall_s`, default 300 s): a `running` session waiting on a human (a pending
   elicitation, a pending input, or `terminal_pending` — permission, policy,
   trust or login prompt nobody can answer) ends the turn at once as `prompt`; one whose

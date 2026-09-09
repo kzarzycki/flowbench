@@ -42,6 +42,8 @@ uv run python -m scenarios.coding_workflow.run --rescore <run-id>
 
 ## Layout
 
+- `src/flowbench/types.py` — the engine's vocabulary of turn outcomes: `TurnStatus` (a `StrEnum`),
+  `TurnResult`, and the `UserModel`/`Completion` protocols `run_agent_session` drives.
 - `src/flowbench/runner/` — the agent-eval runtime: `driver.py` (`OmnigentDriver`, per-flow bundle
   skills/MCP, subscription guard), `flow.py` (`Flow` = one configuration; bundle fields today, full schema in S03.1),
   `loop.py` (`run_agent_session` DONE-token loop), `judge.py`.
