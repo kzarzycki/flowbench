@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING
 from flowbench.types import TurnStatus
 
 if TYPE_CHECKING:
-    from flowbench.runner.driver import OmnigentDriver
+    from flowbench.driver import OmnigentDriver
 
 GENERATE_ATTEMPTS = 3  # simulator/judge turns: total sends per prompt (#39)
 GENERATE_RETRY_WAIT_S = 30.0  # matches OmnigentDriver.send_retry_wait_s

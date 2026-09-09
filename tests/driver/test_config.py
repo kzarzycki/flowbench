@@ -4,7 +4,7 @@ vanilla-Claude-Code prompt with NO behavioural steering (bug-3 fix)."""
 import os
 import subprocess
 
-from flowbench.runner.driver import OmnigentDriver, git_init_repo
+from flowbench.driver import OmnigentDriver, git_init_repo
 
 
 def _no_git_env():

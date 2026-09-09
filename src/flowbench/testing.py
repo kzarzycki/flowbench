@@ -5,7 +5,7 @@ live omnigent server."""
 
 from __future__ import annotations
 
-from flowbench.runner.driver import AgentDriver
+from flowbench.driver import AgentDriver
 from flowbench.types import TurnResult, TurnStatus
 
 

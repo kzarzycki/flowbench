@@ -2,8 +2,8 @@
 the user. Asserts the loop answers, stops on the DONE token, respects max_turns,
 and bails on a failed status."""
 
-from flowbench.runner.driver import AgentDriver, TurnResult
-from flowbench.runner.loop import _is_done, render_tail, run_agent_session
+from flowbench.driver import AgentDriver, TurnResult
+from flowbench.loop import _is_done, render_tail, run_agent_session
 from flowbench.types import TurnStatus
 
 # Inline fixture data: an engine test must not depend on a scenario (decision 14,
@@ -233,7 +233,7 @@ async def test_done_waits_for_pending_artifact(monkeypatch):
     async def _nosleep(_s):
         return None
 
-    monkeypatch.setattr("flowbench.runner.loop.asyncio.sleep", _nosleep)
+    monkeypatch.setattr("flowbench.loop.asyncio.sleep", _nosleep)
     driver = _LateArtifactDriver(
         [TurnResult(TurnStatus.IDLE, "the plan is complete", False)], {"items": []}
     )

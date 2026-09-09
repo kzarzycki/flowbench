@@ -1,9 +1,19 @@
 # Runner design
 
-The engine's execution core is `driver.py` + `loop.py`; `run.py` orchestrates a case
-on top of them. Scenarios own content and scenario-specific scoring only.
+The engine's execution core is `flowbench/driver/` + `flowbench/loop.py`; `run.py`
+orchestrates a case on top of them. Scenarios own content and scenario-specific
+scoring only.
 
-## driver.py — the ONE module that knows omnigent exists
+## flowbench/driver/ — the ONE package that knows omnigent exists
+
+Split out of the old `runner/driver.py` in E02 S02.2. `flowbench.runner.driver`
+and `flowbench.runner.loop` re-export the old names for one release.
+
+| Module | Holds |
+| --- | --- |
+| `base.py` | `AgentDriver` ABC |
+| `bundle.py` | `render_config` / `build_bundle` / `session_metadata` — pure functions of a `BundleSpec` |
+| `omnigent.py` | `OmnigentDriver`: lifecycle, send/settle, capture, URLs, `git_init_repo` |
 
 - `AgentDriver` (ABC): `start / send / capture_session / artifact_path / close`.
   All spawning goes through implementations of this seam; scenarios and tests
@@ -18,7 +28,7 @@ on top of them. Scenarios own content and scenario-specific scoring only.
 
 ### Where a flow's skills live at run time
 
-A flow's skills never load from the host `~/.claude`. `OmnigentDriver._build_bundle`
+A flow's skills never load from the host `~/.claude`. `flowbench.driver.bundle.build_bundle`
 copies them into a per-flow tarball, POSTs it to omnigent, and the agent loads them from
 there (`--plugin-dir`); with `skills: "none"` the host skills are hidden. That is what
 makes a flow identical on any machine.

@@ -44,11 +44,16 @@ uv run python -m scenarios.coding_workflow.run --rescore <run-id>
 
 - `src/flowbench/types.py` — the engine's vocabulary of turn outcomes: `TurnStatus` (a `StrEnum`),
   `TurnResult`, and the `UserModel`/`Completion` protocols `run_agent_session` drives.
-- `src/flowbench/runner/` — the agent-eval runtime: `driver.py` (`OmnigentDriver`, per-flow bundle
-  skills/MCP, subscription guard), `flow.py` (`Flow` = one configuration; bundle fields today, full schema in S03.1),
-  `loop.py` (`run_agent_session` DONE-token loop), `judge.py`.
-  Touching `src/flowbench/runner/`? Read `docs/design/runner.md` first (driver/loop
-  contracts, one-execution-model decision).
+- `src/flowbench/driver/` — the agent-eval runtime's spawning half: `base.py` (`AgentDriver` ABC),
+  `omnigent.py` (`OmnigentDriver`: session lifecycle, send/settle, capture, subscription guard),
+  `bundle.py` (`render_config`/`build_bundle`/`session_metadata` — the per-flow skills/MCP bundle,
+  as pure functions of a `BundleSpec`).
+- `src/flowbench/loop.py` — `run_agent_session`, the DONE-token turn loop.
+- `src/flowbench/runner/` — what is left: `flow.py` (`Flow` = one configuration; bundle fields
+  today, full schema in S03.1), `judge.py`, plus `driver.py`/`loop.py` compat re-exports that go
+  away one release after S02.2.
+  Touching `src/flowbench/driver/` or `src/flowbench/loop.py`? Read `docs/design/runner.md`
+  first (driver/loop contracts, one-execution-model decision).
 - `src/flowbench/run.py` — `run_case`/`run_case_n`: the one orchestrator (flows + simulator +
   optional per-flow judge or `score_flow` hook → run dir → `run.json`, `report.html`); also
   `rescore_run(case_dir, run_root, *, score_flow)`, which re-runs `score_flow` over an existing

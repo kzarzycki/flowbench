@@ -87,3 +87,20 @@ def render_transcript(items: list[dict]) -> str:
         lines.append(text.strip())
         lines.append("")
     return "\n".join(lines)
+
+
+def to_jsonable(ev: object) -> dict:
+    """A streamed omnigent event as a plain JSON-able dict, tagged with its type.
+    Pydantic model, dataclass, or anything else (recorded as a truncated repr) —
+    the captured `events` list must survive `json.dump` whatever the client ships."""
+    import dataclasses
+
+    fn = getattr(ev, "model_dump", None)
+    if callable(fn):
+        try:
+            return {"__type__": type(ev).__name__, **fn(mode="json")}
+        except Exception:
+            pass
+    if dataclasses.is_dataclass(ev):
+        return {"__type__": type(ev).__name__, **dataclasses.asdict(ev)}
+    return {"__type__": type(ev).__name__, "repr": repr(ev)[:300]}
