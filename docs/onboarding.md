@@ -67,14 +67,16 @@ your shell ─ uv run python -m scenarios.<scenario>.run
   module too — but **flowbench only ever imports the client side of it**: `omnigent_client` to
   POST a session and poll, and `omnigent.host.daemon_launch` to ask the host daemon for a
   runner. No code path in a flowbench process scans a tmux pane.
-- **(b) the install the server runs from** is what spawns runners and drives the CLI: every
-  runner and bridge process is `~/.local/share/uv/tools/omnigent/bin/python3 -m omnigent.runner._entry`
-  / `-m omnigent.claude_native_bridge` (see for yourself: `ps ax | grep omnigent`). Check which
-  install that is with `cat ~/.local/share/uv/tools/omnigent/uv-receipt.toml` — an `editable =
-  <path>` line means it tracks a source checkout and can be far ahead of the pinned client.
-  **The two versions differ, and the pin does not constrain the server.** When you debug harness
-  behaviour — prompt detection, permission mode, injection — read the server's install, not the
-  venv's.
+- **(b) the install the server runs from** is what spawns runners and drives the CLI. See it
+  for yourself — `ps ax | grep omnigent` shows every runner, harness and bridge process running
+  under that install's interpreter (`~/.local/share/uv/tools/omnigent/bin/python3 -m
+  omnigent.runner._entry`, `-m omnigent.runtime.harnesses._runner`, and the claude-native bridge
+  under whichever module path this version uses — see the table in §5). Which install is it?
+  `cat ~/.local/share/uv/tools/omnigent/uv-receipt.toml`: an `editable = <path>` line means it
+  tracks a source checkout and can be far ahead of the pinned client. **The two versions differ,
+  and the pin does not constrain the server.** When you debug harness behaviour — prompt
+  detection, permission mode, injection — read the server's install, not the venv's, and check
+  `omnigent --version` rather than `pyproject.toml`.
 - The server usually runs as a background service (`launchctl list | grep omni` on macOS);
   its logs are `~/.omnigent/logs/launchd-omnigent.out.log` (server) and
   `~/.omnigent/logs/host-runner/runner-*.log` (runners).
@@ -138,10 +140,10 @@ that never scans a pane (§2).
 If a 2nd+-turn injection ever fails this way again, read the bridge in **the server's** install.
 The module moved between versions, so check both paths:
 
-| Version | Bridge module |
-| --- | --- |
-| ≤ 0.12.0 (published) | `omnigent/claude_native_bridge.py` |
-| 0.13.0.dev0 and later (source) | `omnigent/harnesses/claude_native/bridge.py` |
+| Version | Bridge module | Process you see in `ps` |
+| --- | --- | --- |
+| ≤ 0.12.0 (published) | `omnigent/claude_native_bridge.py` | `-m omnigent.claude_native_bridge` |
+| 0.13.0.dev0 and later (source) | `omnigent/harnesses/claude_native/bridge.py` | `-m omnigent.harnesses.claude_native.bridge` |
 
 Look for `_is_box_rule` (present = you have the structural fix) before suspecting
 `_PROMPT_SCAN_TAIL_LINES`.
