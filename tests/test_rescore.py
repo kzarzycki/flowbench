@@ -86,6 +86,9 @@ def test_rescore_run_n_gt_1_layout_keys_by_trial(tmp_path):
         _write_flow(trial_dir, "superpowers")
         _write_flow(trial_dir, "plain")
         _write_run_json(trial_dir, ["superpowers", "plain"], {"superpowers": {}, "plain": {}})
+    # a trial dir the run never got to write a run.json for (killed mid-run):
+    # skipped, not a crash and not in the result map
+    (run_root / "trial-03").mkdir()
     # aggregate run.json has no flow_stats -> untouched
     aggregate = {"run_id": "run-3", "n": 2, "flows": ["superpowers", "plain"]}
     (run_root / "run.json").write_text(json.dumps(aggregate))
