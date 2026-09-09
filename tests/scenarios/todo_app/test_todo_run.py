@@ -48,11 +48,43 @@ def test_main_wires_engine_run_case_n(monkeypatch, capsys, tmp_path):
     assert kw["make_flow_driver"].func is engine_run.make_flow_driver_omni
     assert kw["make_flow_driver"].keywords == {
         "scenario": "coding_workflow",
-        "artifact_name": "tasks.json",
+        "artifact_name": "__none__",
         "git_init": True,
     }
+    assert kw["artifact_name"] is None
     out = capsys.readouterr().out
     assert json.loads(out.split("\nRun written to:")[0]) == {"x": 1}
+
+
+def test_main_rescore_calls_rescore_run_and_skips_factories(monkeypatch, capsys, tmp_path):
+    (tmp_path / "r1").mkdir()
+    calls = []
+
+    async def fake_rescore_run(case_dir, run_root, *, score_flow):
+        calls.append((case_dir, run_root, score_flow))
+        return {"superpowers": "ok", "plain": "ok"}
+
+    def boom(*args, **kwargs):
+        pytest.fail("factories should not be built on --rescore")
+
+    monkeypatch.setattr("scenarios.coding_workflow.run.rescore_run", fake_rescore_run)
+    monkeypatch.setattr("scenarios.coding_workflow.run.omni_factories", boom)
+    monkeypatch.setattr("scenarios.coding_workflow.run.run_case_n", boom)
+    monkeypatch.setattr("sys.argv", ["run", "--rescore", "r1", "--runs-root", str(tmp_path)])
+    main()
+
+    case_dir, run_root, score_flow = calls[-1]
+    assert Path(case_dir).name == "todo_app"
+    assert run_root == tmp_path / "r1"
+    assert score_flow.func is score_todo_app
+    out = capsys.readouterr().out
+    assert json.loads(out) == {"superpowers": "ok", "plain": "ok"}
+
+
+def test_main_rescore_missing_run_dir_exits(monkeypatch, tmp_path):
+    monkeypatch.setattr("sys.argv", ["run", "--rescore", "nope", "--runs-root", str(tmp_path)])
+    with pytest.raises(SystemExit):
+        main()
 
 
 def test_scenario_and_done_token_constants():

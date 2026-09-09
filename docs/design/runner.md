@@ -97,9 +97,16 @@ reason. `run_case_n` repeats `run_case` with the flow list rotated per trial (ca
 judge position bias) under `trial-XX/` and aggregates; with no judge across all trials the
 aggregate is `{"counts": {}, "winner": None}` rather than tallying `None` as a flow name.
 The three factories are injected so the whole pipeline runs offline against
-`flowbench.testing` doubles; `omni_factories(scenario, *, artifact_name="plan.md",
-git_init=False)` returns the real ones (todo_app binds `artifact_name="tasks.json",
-git_init=True`).
+`flowbench.testing` doubles; `omni_factories(scenario, *, artifact_name: str | None =
+"plan.md", git_init=False)` returns the real ones (todo_app binds
+`artifact_name=None` — no artifact, the deliverable is the running app, judged
+black-box by `acceptance.py` — and `git_init=True`). `artifact_name=None` propagates
+through `run_case`/`run_case_n`: no `<flow>/plan.md` is written, no
+`artifact_missing`/`artifact_lines` keys appear in `run.json`, and the artifact
+grace-poll is skipped. `flowbench.run.rescore_run(case_dir, run_root, *, score_flow)`
+re-runs a case's `score_flow` over an existing run dir's `<flow>/session.json` files
+— no new session, `session.json`/`transcript.md` untouched — for the CLI's
+`--rescore`.
 
 Supporting modules, all omnigent-free at import time:
 

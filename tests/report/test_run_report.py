@@ -128,3 +128,42 @@ def test_flow_card_falls_back_to_session_json_without_flow_stats(tmp_path):
     assert card["exit"] == "idle" and card["turns"] == 3 and card["duration"] == "12s"
     assert card["tokens"] == "1,500" and card["effort"] == "?"
     assert card["plan_lines"] == 3  # None in the fallback -> counted from plan.md
+
+
+def test_flow_card_reads_artifact_lines_from_flow_stats(tmp_path):
+    from flowbench.report.run_report import flow_card
+
+    d = tmp_path / "plain"
+    d.mkdir()
+    (d / "plan.md").write_text("# Plan\n\n- step\n- another\n")
+    (d / "transcript.md").write_text("# Transcript\n\n## user\n\nhi\n")
+    meta = {
+        "models": {"plain": "opus"},
+        "reasoning_effort": {"plain": "xhigh"},
+        "flow_stats": {
+            "plain": {
+                "exit_status": "idle",
+                "turns": 1,
+                "duration_s": 5.0,
+                "artifact_lines": 4,
+                "context_tokens": 100,
+            }
+        },
+    }
+    card = flow_card("plain", tmp_path, False, meta)
+    assert card["plan_lines"] == 4  # picked up from flow_stats.artifact_lines
+
+
+def test_flow_card_no_plan_md_returns_empty_instead_of_raising(tmp_path):
+    from flowbench.report.run_report import flow_card
+
+    d = tmp_path / "plain"
+    d.mkdir()
+    (d / "session.json").write_text(
+        json.dumps({"exit_status": "idle", "turns": 1, "duration_s": 5.0, "context_tokens": 100})
+    )
+    (d / "transcript.md").write_text("# Transcript\n\n## user\n\nhi\n")
+    meta = {"models": {"plain": "opus"}, "reasoning_effort": {}}  # pre-flow_stats run.json
+    card = flow_card("plain", tmp_path, False, meta)
+    assert card["plan_lines"] == 0
+    assert card["plan_html"] == ""

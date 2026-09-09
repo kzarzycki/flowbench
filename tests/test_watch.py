@@ -41,9 +41,18 @@ def test_run_watch_tick_events(tmp_path):
     # trial completion fires once; run completion via run_complete()
     trial = run_root / "trial-01"
     trial.mkdir()
-    (trial / "run.json").write_text(json.dumps({"winner_flow": "plain", "plans_missing": []}))
-    assert any(e.startswith("TRIAL DONE: trial-01 winner=plain") for e in w.tick())
+    (trial / "run.json").write_text(json.dumps({"winner_flow": "plain", "artifact_missing": []}))
+    events = w.tick()
+    assert any(e == "TRIAL DONE: trial-01 winner=plain missing=[]" for e in events)
     assert w.tick() == []
+
+    # a case with no artifact_missing key (artifact_name=None) omits the segment
+    trial2 = run_root / "trial-02"
+    trial2.mkdir()
+    (trial2 / "run.json").write_text(json.dumps({"winner_flow": "plain"}))
+    events = w.tick()
+    assert any(e == "TRIAL DONE: trial-02 winner=plain" and "missing=" not in e for e in events)
+
     assert w.run_complete() is None
     (run_root / "run.json").write_text("{}")
     assert w.run_complete() is not None

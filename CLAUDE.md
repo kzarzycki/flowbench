@@ -35,6 +35,9 @@ uv run python -m scenarios.coding_workflow.run --case todo_app --run-id <id>
 
 # compare flows side by side after a run (reads <run_id>/<flow>/scorecard.json):
 uv run flowbench compare --run-base $RUNS/coding_workflow --run-id <id>
+
+# re-score an existing run's flows without re-driving anything (dead grader, scorer fix):
+uv run python -m scenarios.coding_workflow.run --rescore <run-id>
 ```
 
 ## Layout
@@ -45,10 +48,14 @@ uv run flowbench compare --run-base $RUNS/coding_workflow --run-id <id>
   Touching `src/flowbench/runner/`? Read `docs/design/runner.md` first (driver/loop
   contracts, one-execution-model decision).
 - `src/flowbench/run.py` — `run_case`/`run_case_n`: the one orchestrator (flows + simulator +
-  optional per-flow judge or `score_flow` hook → run dir → `run.json`, `report.html`). Helpers:
+  optional per-flow judge or `score_flow` hook → run dir → `run.json`, `report.html`); also
+  `rescore_run(case_dir, run_root, *, score_flow)`, which re-runs `score_flow` over an existing
+  run dir's `<flow>/session.json` files in place, with no new session. Helpers:
   `model.py` (`SessionModel`), `flowspec.py` (flows.yaml), `transcript.py`, `watch.py` (`RunWatch`),
   `report/run_report.py`, `testing.py` (offline doubles). Factories are injected;
-  `omni_factories(scenario, *, artifact_name="plan.md", git_init=False)` = the real ones.
+  `omni_factories(scenario, *, artifact_name: str | None = "plan.md", git_init=False)` = the real
+  ones (`artifact_name=None` means the case declares no artifact — todo_app binds
+  `artifact_name=None, git_init=True`).
 - `src/flowbench/report/compare.py` — side-by-side flow comparison; a scoreless flow (missing
   scorecard, or one whose `score_flow` raised) renders as a FAILED column, never an abort.
 - `src/flowbench/cli.py` — typer: `compare`.
