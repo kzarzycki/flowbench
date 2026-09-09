@@ -9,12 +9,16 @@ Works standalone in a terminal, or wrapped by an agent Monitor.
 
 from __future__ import annotations
 
+import http.client
 import json
+import logging
 import time
 import urllib.request
 from pathlib import Path
 
 from flowbench.types import TurnStatus
+
+log = logging.getLogger(__name__)
 
 SERVER = "http://127.0.0.1:6767"
 SERVER_LOG = Path.home() / ".omnigent" / "logs" / "launchd-omnigent.out.log"
@@ -65,7 +69,8 @@ class RunWatch:
         try:
             with urllib.request.urlopen(f"{self.server}/v1/sessions?limit=100", timeout=5) as r:
                 data = json.load(r).get("data", [])
-        except Exception:
+        except (OSError, http.client.HTTPException, ValueError, AttributeError) as e:
+            log.debug("sessions read failed, skipping tick: %r", e)
             return []  # server hiccup: skip this tick, never kill the watch
         return [s for s in data if (s.get("labels") or {}).get("omni_project") == self.project]
 

@@ -5,6 +5,10 @@ can't diverge on what counts as conversation."""
 
 from __future__ import annotations
 
+import logging
+
+log = logging.getLogger(__name__)
+
 
 def item_text(item: dict) -> str:
     content = item.get("content")
@@ -112,8 +116,9 @@ def to_jsonable(ev: object) -> dict:
     if callable(fn):
         try:
             return {"__type__": type(ev).__name__, **fn(mode="json")}
-        except Exception:
-            pass
+        except Exception as e:  # noqa: BLE001 -- the capture must survive whatever the
+            # client ships; a recording failure never aborts the turn it records
+            log.debug("model_dump(%s) failed, recording repr: %r", type(ev).__name__, e)
     if dataclasses.is_dataclass(ev):
         return {"__type__": type(ev).__name__, **dataclasses.asdict(ev)}
     return {"__type__": type(ev).__name__, "repr": repr(ev)[:300]}
