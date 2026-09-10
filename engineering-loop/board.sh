@@ -3,6 +3,7 @@
 # and claim the issue for the calling agent session.
 # usage: board.sh <issue-url> <PHASE>
 #   PHASE: TRIAGED|SPEC|SPEC_APPROVED|PLAN|PLAN_APPROVED|IMPLEMENTED|BRANCH_APPROVED|GATES_GREEN|MERGED|PARKED
+#          CLOSED — closed without shipping: Status Done, Phase left at the last phase actually reached
 # env:   AGENT_SESSION=<harness>:<id>   this session's identity (auto: claude-code:$CLAUDE_CODE_SESSION_ID)
 #        AGENT_PARENT_SESSION=<harness>:<id>   the session that spawned this one (optional)
 # Effects: Status + Phase fields set; Session field = AGENT_SESSION (latest wins); once per session an
@@ -25,11 +26,14 @@ case $phase in
   GATES_GREEN)     opt=9f024e85; status=19c88bde ;;
   MERGED)          opt=55791a58; status=c25c871f ;;  # Done
   PARKED)          opt=52181f3c; status=8cde8890 ;;  # Backlog
+  CLOSED)          opt=;         status=c25c871f ;;  # Done, and no phase written
   *) echo "unknown phase: $phase" >&2; exit 2 ;;
 esac
 sid=${AGENT_SESSION:-${CLAUDE_CODE_SESSION_ID:+claude-code:$CLAUDE_CODE_SESSION_ID}}
 item=$(gh project item-add 1 --owner kzarzycki --url "$url" --format json -q .id)
-gh project item-edit --project-id $PROJECT --id "$item" --field-id $PHASE  --single-select-option-id "$opt" >/dev/null
+if [ -n "$opt" ]; then  # CLOSED writes no phase; an `&&` guard would trip `set -e` on the skip
+  gh project item-edit --project-id $PROJECT --id "$item" --field-id $PHASE --single-select-option-id "$opt" >/dev/null
+fi
 gh project item-edit --project-id $PROJECT --id "$item" --field-id $STATUS --single-select-option-id "$status" >/dev/null
 if [ -n "$sid" ]; then
   gh project item-edit --project-id $PROJECT --id "$item" --field-id $SESSION --text "$sid" >/dev/null
@@ -37,4 +41,5 @@ if [ -n "$sid" ]; then
     gh issue comment "$url" --body "session $sid started $(date -u +%Y-%m-%dT%H:%MZ) parent=${AGENT_PARENT_SESSION:-none} cwd=$(basename "$PWD")" >/dev/null
   fi
 fi
-echo "$url → Phase=$phase${sid:+ Session=$sid}"
+what=${opt:+Phase=$phase}; what=${what:-"Status=Done (Phase unchanged)"}
+echo "$url → $what${sid:+ Session=$sid}"
