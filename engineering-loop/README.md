@@ -169,7 +169,8 @@ body), never merge locally (`superpowers:finishing-a-development-branch` with th
 answer pre-made). Standing merge authorization for loop PRs (owner, 2026-07-03) — `gh pr merge
 --squash` once CI is green; red CI is a failed gate (fix, rule 2 cap, else park with
 the PR open). Merged → `MERGED`, PR link on the issue. The ledger entry ships in this
-PR (the scenarios PR when the change is engine-side).
+PR (the scenarios PR when the change is engine-side). Then `git worktree remove` —
+on MERGED or PARKED nothing of the item stays on disk; `.loop/` goes with the tree.
 
 **LIVE (gate 5)** — after a merge touching the runner, a flow, a case or scenario
 orchestration; docs-only skips it. From `$SCENARIOS`: `caffeinate -i uv run --extra
