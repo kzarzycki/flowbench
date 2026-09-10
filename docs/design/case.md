@@ -102,7 +102,7 @@ Presence is always `session["artifact_exists"]` — the probe's answer — never
 | --- | --- | --- | --- |
 | **file at the flow-dir root** | found in place; on DONE the loop grace-polls the probe (`artifact_grace_s`, default 60 s) for a write still flushing | the file's text | panel with the text, `artifact_lines` = its line count, `deliverable_path` = where it was found |
 | **nested file** | copied to `<flow_dir>/<deliverable>`, parents created, so every reader looks in one place | the same text | `deliverable_path` keeps the nested location, so the original is still reachable |
-| **directory** | left where it is — a ported project can be large and copying it would double the run dir | a sorted file listing under `(<name>/ — N files)` | the same listing; `artifact_lines` is 0 (a file measure), so the report counts the listing's lines |
+| **directory** | left where it is — a ported project can be large and copying it would double the run dir | a sorted file listing under `(<name>/ — N files)`, each path relative to the flow dir (`work/port/a.sql`), so a nested directory's files stay locatable | a listing panel; `artifact_lines` is omitted — it is a file measure — so the report counts the listing's lines |
 | **none declared** (`deliverable = None`) | no probe is built, no grace poll | `(no deliverable declared)` — the flows are compared on their conversations alone | no panel, no line count, and no `artifact_missing`/`artifact_lines` keys in `run.json` |
 
 A declared deliverable the flow never produced is not a crash: the judge is shown

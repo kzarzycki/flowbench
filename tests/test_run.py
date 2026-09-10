@@ -1248,9 +1248,12 @@ async def test_directory_deliverable_is_present_with_no_text(tmp_path):
     meta = json.loads((root / "run.json").read_text())
     stats = meta["flow_stats"]["plain"]
     assert stats["deliverable_path"] == "work/port"
-    assert stats["artifact_lines"] == 0
+    assert "artifact_lines" not in stats  # a line count is a file measure
     assert meta["artifact_missing"] == []
-    assert _judge_view(case, session) == "(port/ — 2 files)\na.sql\nb/c.sql"
+    # every listed path is where the reader would open it, from the flow dir
+    assert _judge_view(case, flow_dir, session) == (
+        "(port/ — 2 files)\nwork/port/a.sql\nwork/port/b/c.sql"
+    )
 
 
 async def test_empty_directory_deliverable_is_present_not_missing(tmp_path):
@@ -1274,7 +1277,8 @@ async def test_empty_directory_deliverable_is_present_not_missing(tmp_path):
     meta = json.loads((root / "run.json").read_text())
     assert meta["artifact_missing"] == []  # present, though it holds nothing
     assert meta["flow_stats"]["plain"]["deliverable_path"] == "port"
-    assert _judge_view(case, session) == "(port/ — 0 files)"
+    assert "artifact_lines" not in meta["flow_stats"]["plain"]
+    assert _judge_view(case, root / "plain", session) == "(port/ — 0 files)"
 
 
 async def test_missing_deliverable_marks_the_flow_and_the_judge_entry(tmp_path):
@@ -1361,26 +1365,59 @@ async def test_no_deliverable_with_judge_reports_null_and_no_missing_key(tmp_pat
 
 def test_what_the_judge_is_shown_for_each_deliverable_shape(tmp_path):
     plan_case = PlanCase(CASE_DIR)
-    port = tmp_path / "port"
+    flow_dir = tmp_path
+    port = flow_dir / "port"
     (port / "b").mkdir(parents=True)
     (port / "a.sql").write_text("select 1\n")
     (port / "b" / "c.sql").write_text("select 2\n")
     dir_case = type("DirCase", (Case,), {"deliverable": "port"})(CASE_DIR)
 
     # a file: its text; an empty file: its (empty) text — presence, not truthiness
-    assert _judge_view(plan_case, {"artifact_exists": True, "artifact_text": "# plan\n"}) == (
-        "# plan\n"
-    )
-    assert _judge_view(plan_case, {"artifact_exists": True, "artifact_text": ""}) == ""
+    file_seen = {"artifact_exists": True, "artifact_text": "# plan\n"}
+    assert _judge_view(plan_case, flow_dir, file_seen) == "# plan\n"
+    assert _judge_view(plan_case, flow_dir, {"artifact_exists": True, "artifact_text": ""}) == ""
     # absent: the missing marker
-    assert _judge_view(plan_case, {"artifact_exists": False, "artifact_text": None}) == (
+    assert _judge_view(plan_case, flow_dir, {"artifact_exists": False, "artifact_text": None}) == (
         MISSING_DELIVERABLE("plan.md")
     )
-    # a directory: no text, so a sorted listing
+    # a directory: no text, so a sorted listing, each path relative to the flow dir
     session = {"artifact_exists": True, "artifact_text": None, "artifact_path": str(port)}
-    assert _judge_view(dir_case, session) == "(port/ — 2 files)\na.sql\nb/c.sql"
+    assert _judge_view(dir_case, flow_dir, session) == (
+        "(port/ — 2 files)\nport/a.sql\nport/b/c.sql"
+    )
     # none declared: the conversations are the whole evidence
-    assert _judge_view(Case(CASE_DIR), session) == NO_DELIVERABLE
+    assert _judge_view(Case(CASE_DIR), flow_dir, session) == NO_DELIVERABLE
+
+
+async def test_the_judge_sees_directory_files_by_their_path_in_the_flow_dir(tmp_path):
+    """AC7: a directory listing locates its files for the judge — the paths are
+    relative to the flow dir, so one the agent left nested reads as
+    `work/port/a.sql`, not the bare `a.sql` that could be anywhere."""
+    seen = {}
+
+    async def run_judge(judge_md, entries, judge_dir):
+        seen.update({label: view for label, _transcript, view in entries})
+        return "A is better.\nWINNER: A\nA: ok\nB: ok"
+
+    trees = {
+        "superpowers": {"port/a.sql": "select 1\n", "port/b/c.sql": "select 2\n"},  # top-level
+        "plain": {"work/port/a.sql": "select 1\n"},  # left nested
+    }
+    case = _scored(
+        _case_files(tmp_path / "case", flows=TWO_FLOWS, judge=True), _card, deliverable="port"
+    )
+
+    await run_case(
+        case,
+        run_id="dir-judge",
+        make_flow_driver=lambda flow, flow_dir: TreeDriver(trees[flow["name"]], flow_dir),
+        make_simulator=_sim,
+        run_judge=run_judge,
+        runs_root=tmp_path,
+    )
+
+    assert seen["A"] == "(port/ — 2 files)\nport/a.sql\nport/b/c.sql"
+    assert seen["B"] == "(port/ — 1 files)\nwork/port/a.sql"
 
 
 async def test_the_probe_is_the_cases_find_deliverable(tmp_path, monkeypatch):

@@ -229,8 +229,9 @@ def test_flow_card_directory_deliverable_lists_its_files(tmp_path):
         "plain",
         tmp_path,
         False,
-        # a directory has no artifact_text, so run.json records 0 lines for it
-        _flow_meta(deliverable="port", stats={"artifact_lines": 0, "deliverable_path": "port"}),
+        # a directory has no artifact_text, so run.json records no artifact_lines
+        # for it — the card counts the listing it renders instead
+        _flow_meta(deliverable="port", stats={"deliverable_path": "port"}),
     )
 
     assert card["deliverable_name"] == "port"
@@ -250,14 +251,14 @@ def test_flow_card_finds_a_directory_the_agent_left_nested(tmp_path):
         "plain",
         tmp_path,
         False,
-        _flow_meta(
-            deliverable="port", stats={"artifact_lines": 0, "deliverable_path": "work/port"}
-        ),
+        _flow_meta(deliverable="port", stats={"deliverable_path": "work/port"}),
     )
 
     assert card["deliverable_lines"] == 2  # header + 1 file
     assert "(port/ — 1 files)" in card["deliverable_html"]  # labelled by the declared name
-    assert "a.py" in card["deliverable_html"]
+    # Located, not just named: the path is relative to the flow dir, the same
+    # thing the judge is shown, so the reader can see where the agent left it.
+    assert "work/port/a.py" in card["deliverable_html"]
 
 
 def test_flow_card_empty_file_deliverable_is_zero_lines_but_named(tmp_path):

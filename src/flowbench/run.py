@@ -36,11 +36,15 @@ def MISSING_DELIVERABLE(name: str) -> str:
     return f"(this flow produced no {name} — treat it as a failed run)"
 
 
-def _judge_view(case, session: dict) -> str:
+def _judge_view(case, flow_dir: Path, session: dict) -> str:
     """What the judge reads for one flow. A file deliverable is its text; a
     directory has no text, so it is its sorted file listing; a declared
     deliverable the flow never produced is the missing marker; a case that
     declares none says so, and its flows are compared on the conversations alone.
+
+    Listed paths are relative to the FLOW DIR, not to the directory itself, so a
+    directory the agent left nested reads as `work/port/a.sql` — where the file
+    actually is — rather than a bare `a.sql` that could be anywhere.
 
     Presence is the session's `artifact_exists`, never the truthiness of
     `artifact_text`: an empty file and a directory both have no text."""
@@ -52,7 +56,7 @@ def _judge_view(case, session: dict) -> str:
     if text is not None:
         return text
     root = Path(session["artifact_path"])
-    files = sorted(p.relative_to(root).as_posix() for p in root.rglob("*") if p.is_file())
+    files = sorted(p.relative_to(flow_dir).as_posix() for p in root.rglob("*") if p.is_file())
     return "\n".join([f"({case.deliverable}/ — {len(files)} files)", *files])
 
 
@@ -160,21 +164,24 @@ async def run_case(
             transcript_text = render_transcript(session.get("items") or [])
             (flow_dir / "transcript.md").write_text(transcript_text)
             (flow_dir / "session.json").write_text(json.dumps(session, indent=2, default=str))
-            views[name] = _judge_view(case, session)
+            views[name] = _judge_view(case, flow_dir, session)
             delivered[name] = bool(session.get("artifact_exists"))
             transcripts[name] = transcript_text
+            # A present deliverable with no text is a directory (the same
+            # invariant `_judge_view` reads): `artifact_lines` is a file measure,
+            # so a directory carries no such key rather than a misleading 0.
+            text = session.get("artifact_text")
+            is_directory = bool(session.get("artifact_exists")) and text is None
+            deliverable_stats: dict = {}
+            if has_deliverable:
+                if not is_directory:
+                    deliverable_stats["artifact_lines"] = len((text or "").splitlines())
+                deliverable_stats["deliverable_path"] = deliverable_path
             flow_stats[name] = {
                 "exit_status": session.get("exit_status"),
                 "turns": session.get("turns"),
                 "duration_s": session.get("duration_s"),
-                **(
-                    {
-                        "artifact_lines": len((session.get("artifact_text") or "").splitlines()),
-                        "deliverable_path": deliverable_path,
-                    }
-                    if has_deliverable
-                    else {}
-                ),
+                **deliverable_stats,
                 "context_tokens": session.get("context_tokens"),
             }
             try:

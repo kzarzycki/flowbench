@@ -197,7 +197,10 @@ position bias):
    `artifact_probe` bound from `case.find_deliverable`.
 3. deliverable capture: a nested file is copied to `<flow_dir>/<deliverable>` so every reader
    looks in one place, and where it was *found* is recorded as
-   `flow_stats[flow].deliverable_path`; a directory stays where it is.
+   `flow_stats[flow].deliverable_path`; a directory stays where it is, and carries no
+   `artifact_lines` (a file measure) — it is read as a file listing instead, and the judge's
+   listing writes each path relative to the flow dir so a nested directory's files stay
+   locatable.
 4. `<flow_dir>/transcript.md` and `<flow_dir>/session.json` (the latter carrying `ended_by`).
 5. `case.score(flow, flow_dir, session)` → `<flow_dir>/scorecard.json`. `None` writes no card;
    an exception is recorded as `{"error": ...}` plus `flow_stats[flow].score_error` rather than

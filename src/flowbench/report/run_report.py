@@ -77,7 +77,10 @@ def _deliverable_view(flow_dir: Path, name: str, relative: str | None = None) ->
     written before that path was recorded."""
     path = flow_dir / (relative or name)
     if path.is_dir():
-        files = sorted(p.relative_to(path).as_posix() for p in path.rglob("*") if p.is_file())
+        # Paths relative to the FLOW dir, matching what the judge is shown: a
+        # directory the agent left nested reads `work/port/a.sql`, so the listing
+        # says where the files are and not merely what they are called.
+        files = sorted(p.relative_to(flow_dir).as_posix() for p in path.rglob("*") if p.is_file())
         return "\n".join([f"({name}/ — {len(files)} files)", *files])
     return path.read_text() if path.is_file() else ""
 
