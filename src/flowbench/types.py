@@ -16,7 +16,7 @@ from typing import Protocol, runtime_checkable
 class TurnStatus(StrEnum):
     """The omnigent session-status vocabulary (`idle`/`running`/`failed`, read off
     `GET /v1/sessions/{id}`; documented closed at those three in
-    `omnigent_client/_sessions.py:126-127`) plus flowbench's two derived values.
+    `omnigent_client/_sessions.py:126-127`) plus flowbench's three derived values.
 
     `StrEnum` so every member compares equal to, hashes equal to, and formats/
     serializes as the same plain string the code has always emitted — nothing
@@ -28,6 +28,7 @@ class TurnStatus(StrEnum):
     FAILED = "failed"  # the omnigent session reported failed
     TIMEOUT = "timeout"  # derived: idle but silent, or the send's budget expired
     STALLED = "stalled"  # derived: a prompt nobody can answer, or no heartbeat
+    QUOTA = "quota"  # derived: the CLI's limit banner was the turn's only output (#131)
 
 
 @dataclass

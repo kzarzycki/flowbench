@@ -1,7 +1,9 @@
 import logging
 from dataclasses import dataclass
 
-from flowbench.transcript import render_transcript, to_jsonable
+import pytest
+
+from flowbench.transcript import is_quota_banner, render_transcript, to_jsonable
 
 
 def test_render_transcript_labels_roles_and_skips_empty():
@@ -130,3 +132,36 @@ def test_new_assistant_text_two_new_last_empty_is_the_earlier_ones_text():
         {"type": "message", "role": "assistant", "content": "  "},
     ]
     assert new_assistant_text(items, n_before=1) == "new reply"
+
+
+_BANNER = (
+    "You've hit your session limit · resets 6:40pm (Europe/Zurich)"  # s025p2-620b16b, verbatim
+)
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        _BANNER,
+        "Claude usage limit reached. Your limit will reset at 3pm (Europe/Zurich).",
+        "You have reached your weekly limit",
+        "You've hit your usage limit. Try again at 3:40 PM.",
+        "5-hour limit reached ∙ resets 3pm",
+    ],
+)
+def test_is_quota_banner_true(text):
+    assert is_quota_banner(text)
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "",
+        "I've hit the rate limit on the API, retrying",
+        "Ok. You've hit your session limit",  # not at the start
+        "The rate limit reached by the API was 5 rps, so I retried and then fixed the bug",
+        _BANNER + " " + "x" * 300,  # length cap: a reply that opens like a banner
+    ],
+)
+def test_is_quota_banner_false(text):
+    assert not is_quota_banner(text)

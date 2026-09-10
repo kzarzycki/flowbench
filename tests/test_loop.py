@@ -249,6 +249,30 @@ async def test_loop_bails_on_failed_status():
     assert session["turns"] == 0
 
 
+async def test_loop_stops_on_quota():
+    # #131: the second turn hits the subscription wall — the loop ends the session
+    # with exit_status "quota" and never asks the simulator again
+    banner = "You've hit your session limit · resets 6:40pm (Europe/Zurich)"
+    turns = [TurnResult(TurnStatus.IDLE, "what shape?"), TurnResult(TurnStatus.QUOTA, banner)]
+    driver = _FakeDriver(turns, {"items": []})
+    user = _StubModel(["a CLI", "never relayed"])
+    session = await run_agent_session(
+        driver,
+        user,
+        first_prompt=FIRST_PROMPT,
+        simulator_system=SIM_SYSTEM,
+        done_token=DONE_TOKEN,
+        max_turns=5,
+        deadline_s=999,
+        artifact_grace_s=0,
+    )
+    assert len(user.seen) == 1
+    assert driver.sent == [FIRST_PROMPT, "a CLI"]
+    assert session["exit_status"] == TurnStatus.QUOTA
+    assert session["turns"] == 1
+    assert driver.closed
+
+
 async def test_done_waits_for_pending_artifact(monkeypatch, tmp_path):
     # the agent may claim DONE while its Write is still flushing — the loop
     # grace-polls artifact_probe() before capturing (plan.md landed post-capture live)

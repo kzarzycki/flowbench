@@ -73,6 +73,7 @@ the loop, `SessionModel`, scripts — read `TurnResult.status` and never re-deri
 | `FAILED`, no label, no new text | unknown; likely undelivered | bounded re-send (the #39 behavior, generalized) |
 | `TIMEOUT` | may be mid-turn after delivery | NEVER retry (injecting into a busy terminal kills sessions) |
 | `IDLE` + no new text past settle budget | lying idle | report `TIMEOUT` |
+| any status + the new text is a CLI limit banner | the subscription/rate wall, not a reply | report `QUOTA` with the banner as text; never re-sent |
 
 Precedence and mechanics: "new assistant text" is checked first, so row 2 never reads a
 label; a new reply is `transcript.new_assistant_text(items, n_before)` — a NON-EMPTY
@@ -82,7 +83,13 @@ label read in `_resend_allowed`: no error code, or `runner_error` + "not deliver
 re-send; any other present code (a delivered failure such as `model_error`), or an
 unreadable label → no re-send. A row-2 turn returns as `status=IDLE, flaked=True` and
 prints one `[flowbench] turn flaked` line; the loop counts them into
-`session["flaked_turns"]`.
+`session["flaked_turns"]`. Row 6 is checked before every other row: a banner as the new
+assistant text (`transcript.is_quota_banner` — anchored to the message start, ≤ 240 chars,
+the only signal the server gives; every `omnigent.last_task_error_*` label was empty in
+`s025p2-620b16b`) is `QUOTA` whether the server said failed or idle, so a FAILED + banner is
+not row 2. The driver prints one `[flowbench] quota: <banner>` line, the loop stops the
+session with `exit_status: "quota"`, and `flowbench.watch` prints one `QUOTA: <title> (<id>)
+<banner>` per session (it reads each run session's last item).
 
 **One wall-clock budget per send.** `deadline = now + turn_timeout_s`, taken once at the
 top of `send`; `_wait_idle`, the settle loop and the retry sleeps all draw it down, a
@@ -121,6 +128,7 @@ done_token, max_turns, deadline_s)`:
   | `FAILED` | the omnigent session reported failed | omnigent server |
   | `TIMEOUT` | idle but silent, or the send's budget expired | `send` / `_send_once` |
   | `STALLED` | a prompt nobody can answer, or no heartbeat | `_send_once` |
+  | `QUOTA` | the CLI's limit banner was the turn's only output | `_send_once` |
 
   `stalled` is the driver's watchdog
   (`stall_s`, default 300 s): a `running` session waiting on a human (a pending

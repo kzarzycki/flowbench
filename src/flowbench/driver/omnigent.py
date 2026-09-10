@@ -34,6 +34,7 @@ from flowbench.driver import bundle
 from flowbench.driver.base import AgentDriver
 from flowbench.transcript import (
     dedup_items,
+    is_quota_banner,
     last_assistant_text,
     n_assistant_messages,
     new_assistant_text,
@@ -146,7 +147,8 @@ class OmnigentDriver(AgentDriver):
     # inject likely never landed (busy terminal behind a lying idle, seen live
     # twice) — wait `send_retry_wait_s`, re-send the same text, at most
     # `send_retry_attempts` times, only while the send's budget still covers the
-    # wait. FAILED with a new assistant message is a flaked idle, never re-sent.
+    # wait. FAILED with a new assistant message is a flaked idle, never re-sent —
+    # unless that message is the CLI's limit banner (row 6): QUOTA, never re-sent.
     send_retry_attempts: int = 3
     send_retry_wait_s: float = 30.0
     # Per-flow bundle inputs (see runner.flow.Flow). Defaults reproduce the vanilla
@@ -262,7 +264,7 @@ class OmnigentDriver(AgentDriver):
                 result = await self._send_once(text, deadline)
                 for _ in range(self.send_retry_attempts):
                     if (
-                        result.status != TurnStatus.FAILED  # rows 2, 4, 5: never re-sent
+                        result.status != TurnStatus.FAILED  # rows 2, 4, 5, 6: never re-sent
                         or deadline - _now() <= self.send_retry_wait_s  # no budget to wait for it
                         or not await self._resend_allowed()
                     ):
@@ -324,13 +326,20 @@ class OmnigentDriver(AgentDriver):
             await asyncio.sleep(self.settle_poll_s)
             status = await self._wait_idle(deadline)
             items = await self._list_items()
-        if status == TurnStatus.IDLE and not new_assistant_text(items, n_before):
+        new_text = new_assistant_text(items, n_before)
+        if is_quota_banner(new_text):
+            # The CLI's limit banner is the wall, not a reply (#131): QUOTA whatever
+            # the server said (a FAILED + banner would otherwise be row 2), and never
+            # re-sent — the banner says when it lifts.
+            print(f"[flowbench] quota: {new_text.strip()}", file=sys.stderr)
+            return TurnResult(TurnStatus.QUOTA, new_text.strip())
+        if status == TurnStatus.IDLE and not new_text:
             # Idle but silent past the budget: the turn never completed. Injecting
             # now would hit a busy terminal (message lost, session failed) — fail
             # the turn honestly instead.
             status = TurnStatus.TIMEOUT
         flaked = False
-        if status == TurnStatus.FAILED and new_assistant_text(items, n_before):
+        if status == TurnStatus.FAILED and new_text:
             # row 2: the reply landed, then the server flaked — a completed turn
             status, flaked = TurnStatus.IDLE, True
             print(

@@ -12,6 +12,7 @@ def test_members_are_their_values():
         "FAILED": "failed",
         "TIMEOUT": "timeout",
         "STALLED": "stalled",
+        "QUOTA": "quota",
     }
     for m in TurnStatus:
         assert m == m.value

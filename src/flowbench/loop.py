@@ -79,7 +79,9 @@ async def run_agent_session(
             # Only an `idle` turn is a clean boundary where the agent awaits the
             # user. `failed` here means no reply after the driver's bounded
             # re-sends; `timeout`/`running` (per-turn cap hit) -> stop and score
-            # whatever was built, rather than inject into a non-ready agent.
+            # whatever was built, rather than inject into a non-ready agent;
+            # `quota` (#131): the CLI hit its limit — the banner is not relayed to
+            # the simulator, the session ends and `exit_status` says why.
             if result.status != TurnStatus.IDLE:
                 break
             # Stateful simulator: prime once with persona+context, then relay
