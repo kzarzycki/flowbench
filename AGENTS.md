@@ -105,14 +105,12 @@ uv run python -m scenarios.coding_workflow.run --rescore <run-id>
   and tasks hang under the story or epic they belong to. Work state lives on the Project board
   https://github.com/users/kzarzycki/projects/1 (both repos; `Status` + loop `Phase`), written
   by the engineering loop's `board.sh` — not in issue comments or local notes.
-- The agent-eval runner requires `ANTHROPIC_API_KEY` UNSET (subscription billing — the driver
-  guards on it) and a live omnigent server with `claude-native` configured
-  (`docs/onboarding.md`). Launch live runs with `uv run --extra live`.
+- Live runs need a running omnigent server and `uv run --extra live`; setup is
+  `docs/onboarding.md`.
 - Wheel ships `src/flowbench` only; in-repo `scenarios` imports work via pytest `pythonpath`
   and cwd.
-- Run-dirs live beside the checkout that launches the run — `<checkout>/../flowbench-runs/<scenario>/`,
-  never inside the repo. Live runs launch from the scenarios checkout, so `$RUNS` is that
-  sibling; the concrete path is per-developer, recorded in `CLAUDE.local.md` (untracked).
+- Run-dirs (`$RUNS`) live outside the repo, beside the checkout that launches the run;
+  the path is per-developer, recorded in `CLAUDE.local.md` (untracked).
 - The comparison reader is pure `(<run_base>, <run_id>) -> markdown`; a missing/malformed scorecard
   is a FAILED column and the benchmark never aborts on one bad flow.
 
