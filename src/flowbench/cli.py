@@ -105,7 +105,7 @@ def watch(
     settings = _settings(runs_root=runs_root)
     try:
         run_watch = RunWatch(run_id, runs_root=settings.runs_root)
-    except ValueError as e:
+    except (ValueError, OSError) as e:  # no such run, or the id under two cases
         _die(str(e))
     follow(run_watch, pid=pid, interval=interval, out=lambda line: print(line, flush=True))
 

@@ -62,11 +62,13 @@ class RunWatch:
         """The one `<runs_root>/<case>/<run_id>` dir, so an operator watches a run
         by its id alone: which case wrote it is in the layout, and the session
         label (`<case>/<run_id>`) is read back off the path rather than retyped.
-        Nothing found, or the same id under two cases, is an error naming paths."""
+        Nothing found is a `FileNotFoundError` — the run has not started yet, or the
+        runs root is wrong; the same id under two cases is a `ValueError` naming the
+        paths, because both exist and only the operator can say which (D17)."""
         runs_root = Path(runs_root)
         found = sorted(p for p in runs_root.glob(f"*/{run_id}") if p.is_dir())
         if not found:
-            raise ValueError(f"no run dir {runs_root / '*' / run_id}")
+            raise FileNotFoundError(f"no run dir {runs_root / '*' / run_id}")
         if len(found) > 1:
             raise ValueError(
                 f"run id {run_id} matches {len(found)} cases: " + ", ".join(str(p) for p in found)

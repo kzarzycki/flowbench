@@ -308,7 +308,7 @@ def test_run_watch_locates_the_run_and_derives_the_project(tmp_path):
 def test_run_watch_locate_rejects_missing_and_ambiguous(tmp_path):
     runs_root = _runs_root(tmp_path, "case_a", "r1")
 
-    with pytest.raises(ValueError, match=r"no run dir") as missing:
+    with pytest.raises(FileNotFoundError, match=r"no run dir") as missing:
         RunWatch.locate("nope", runs_root)
     assert str(runs_root / "*" / "nope") in str(missing.value)
 
