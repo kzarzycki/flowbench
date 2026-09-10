@@ -107,7 +107,11 @@ the PR as a draft after the plan). Nothing else is kept.
 
 ## Phases
 
-Each phase ends with `board.sh <url> <PHASE>`. Working files (`spec.md`, `plan.md`,
+Each phase ends with `board.sh <url> <PHASE>`, and a phase is written from the artifact
+that proves it — a merge from a merge commit on the story's own branch, never from a
+closed issue, a superseded story, or a pull request that only mentions the issue number.
+A story closed without shipping takes `board.sh <url> CLOSED`: Status Done, Phase left
+at the last phase it actually reached. Working files (`spec.md`, `plan.md`,
 `decisions.md`, briefs) go to `<worktree>/.loop/`, gitignored, never committed. The
 `superpowers:*` names below are the Claude Code skills that implement a step; on a
 harness without them, do the step as described.
