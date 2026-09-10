@@ -5,7 +5,7 @@ from pathlib import Path
 
 from flowbench.flowspec import load_flows
 
-CASE_DIR = Path(__file__).parent.parent.parent.parent / "scenarios/coding_workflow/cases/todo_app"
+CASE_DIR = Path(__file__).parent.parent.parent.parent / "scenarios/swe_e2e/cases/todo_app"
 SKILLS_DIR = CASE_DIR.parent.parent / "skills"
 
 

@@ -4,9 +4,9 @@ import shutil
 import sys
 from pathlib import Path
 
-from scenarios.coding_workflow.cases.todo_app.acceptance import resolve_invoker, run_acceptance
+from scenarios.swe_e2e.cases.todo_app.acceptance import resolve_invoker, run_acceptance
 
-FIX = Path(__file__).parents[3] / "scenarios/coding_workflow/cases/todo_app/fixtures"
+FIX = Path(__file__).parents[3] / "scenarios/swe_e2e/cases/todo_app/fixtures"
 
 
 def _workspace(tmp_path, which):
@@ -114,7 +114,7 @@ def test_resolve_invoker_prefers_dash_m_for_package_app(tmp_path):
 
 
 def test_acceptance_has_no_error_string_gate():
-    from scenarios.coding_workflow.cases.todo_app import acceptance
+    from scenarios.swe_e2e.cases.todo_app import acceptance
 
     assert "No module named" not in Path(acceptance.__file__).read_text()
 

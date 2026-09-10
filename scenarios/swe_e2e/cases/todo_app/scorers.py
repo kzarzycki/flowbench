@@ -156,7 +156,7 @@ def clarifying_coverage(session: dict, topics: dict[str, list[str]]) -> dict:
     return {"asked": asked, "score": score}
 
 
-# The vendored superpowers set (scenarios/coding_workflow/skills/<name>/), by skill name.
+# The vendored superpowers set (scenarios/swe_e2e/skills/<name>/), by skill name.
 SUPERPOWERS_SKILLS = frozenset(
     p.name for p in (Path(__file__).resolve().parents[2] / "skills").iterdir() if p.is_dir()
 )

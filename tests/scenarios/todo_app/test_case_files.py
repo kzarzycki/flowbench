@@ -4,9 +4,9 @@ Python-source checks in the now-deleted test_task.py."""
 
 from pathlib import Path
 
-from scenarios.coding_workflow.cases.todo_app import scorers
+from scenarios.swe_e2e.cases.todo_app import scorers
 
-CASE_DIR = Path(__file__).parent.parent.parent.parent / "scenarios/coding_workflow/cases/todo_app"
+CASE_DIR = Path(__file__).parent.parent.parent.parent / "scenarios/swe_e2e/cases/todo_app"
 
 
 def test_first_prompt_leaks_only_python_cli():

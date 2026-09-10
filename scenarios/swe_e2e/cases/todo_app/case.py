@@ -1,18 +1,23 @@
-"""todo_app's score_flow hook: `run_case` calls this after each flow's session
-and writes the returned dict to `<flow_dir>/scorecard.json`. Body mirrors the
-Inspect-era solver.py, minus the Inspect scaffolding — black-box acceptance +
-skills/phase detection + clarifying coverage + a low-confidence judge."""
+"""todo_app's runtime shape: a build-shaped case. The deliverable is the running
+app itself — judged black-box by `acceptance.py`, so no file proves delivery — and
+each flow is scored on its own (there is no comparative `judge.md`).
+
+`score_todo_app` is the case's whole grading body: black-box acceptance +
+skills/phase detection + clarifying coverage + a low-confidence judge. `run_case`
+reaches it through `TodoAppCase.score` and writes what it returns to
+`<flow_dir>/scorecard.json`."""
 
 from __future__ import annotations
 
 import json
 from pathlib import Path
 
-from flowbench.driver import OmnigentDriver
+from flowbench.case import Case
+from flowbench.driver import OmnigentDriver, git_init_repo
 from flowbench.model import SessionModel
 from flowbench.run import _project, _title
-from scenarios.coding_workflow.cases.todo_app import scorers as sc
-from scenarios.coding_workflow.cases.todo_app.acceptance import run_acceptance
+from scenarios.swe_e2e.cases.todo_app import scorers as sc
+from scenarios.swe_e2e.cases.todo_app.acceptance import run_acceptance
 
 CASE_DIR = Path(__file__).parent
 
@@ -91,3 +96,30 @@ def make_grader_omni(flow_dir: Path, *, model: str) -> SessionModel:
             project=_project(judge_dir),
         )
     )
+
+
+class TodoAppCase(Case):
+    """The build takes ~an hour of wall clock; the grader is a class attribute so
+    an offline test can hand `score` a canned model instead of an omnigent one."""
+
+    deliverable = None
+    deadline_s = 3600.0
+    grader_factory = staticmethod(make_grader_omni)
+
+    async def setup(self, flow, flow_dir) -> None:
+        """The workflow flows branch and commit, so the flow dir starts as a repo
+        with something in it."""
+        flow_dir = Path(flow_dir)
+        if not (flow_dir / ".git").exists():
+            git_init_repo(flow_dir)
+
+    async def score(self, flow, flow_dir, session) -> dict:
+        # Through the class, never `self.`: a test patching the attribute with a
+        # plain function would otherwise have `self` passed to it as flow_dir.
+        grader_factory = type(self).grader_factory
+        return await score_todo_app(
+            flow,
+            flow_dir,
+            session,
+            make_grader=lambda d: grader_factory(d, model=self.settings.judge_model),
+        )

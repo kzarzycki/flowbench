@@ -14,7 +14,7 @@ flows:
     model: sonnet
     skills: none              # host skills hidden; the bundle ships the vendored set
     turn_timeout_s: 3000
-    skill_dirs:               # (scenarios/coding_workflow/skills/, see VERSION.md)
+    skill_dirs:               # (scenarios/swe_e2e/skills/, see VERSION.md)
       - ../../skills/brainstorming
       - ../../skills/dispatching-parallel-agents
       - ../../skills/executing-plans
