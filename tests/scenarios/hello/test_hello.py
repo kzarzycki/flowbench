@@ -134,6 +134,7 @@ def test_hello_runs_end_to_end_offline(tmp_path, monkeypatch):
 
     session = json.loads((run_root / "claude" / "session.json").read_text())
     assert session["ended_by"] == "done"
+    assert session["turns"] == 1  # one relay: the agent asked, was answered, delivered
     assert session["artifact_exists"] is True
     assert (run_root / "claude" / "hello.txt").read_text() == "Hello, world!\n"
     card = json.loads((run_root / "claude" / "scorecard.json").read_text())

@@ -501,21 +501,24 @@ async def test_ended_by_terminal_status(status, expected):
     assert type(session["ended_by"]) is str
 
 
-async def test_ended_by_terminal_status_beats_done():
-    # the simulator said DONE on turn 1, then the agent's next turn crashed: a
-    # crashed session is not a completed one, so the status wins.
+async def test_ended_by_terminal_status_beats_the_cap():
+    # The one precedence the loop can actually reach: the agent's turn crashed AND
+    # that turn was the last one the cap allowed. A crashed session is not a
+    # completed one, so the status wins over `max_turns`. `max_turns=1` is what
+    # makes this a test — with a cap the run never reaches, either order passes.
     turns = [TurnResult(TurnStatus.IDLE, "what storage?"), TurnResult(TurnStatus.FAILED, "")]
     driver = _FakeDriver(turns, {"items": []})
-    user = _StubModel(["a JSON file", DONE_TOKEN])
+    user = _StubModel(["a JSON file"])
     session = await run_agent_session(
         driver,
         user,
         first_prompt=FIRST_PROMPT,
         simulator_system=SIM_SYSTEM,
-        max_turns=10,
+        max_turns=1,
         deadline_s=999,
         artifact_grace_s=0,
     )
+    assert session["turns"] == 1  # the cap was reached, so the two checks collide
     assert session["ended_by"] == "failed"
 
 
