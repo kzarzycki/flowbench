@@ -2,15 +2,15 @@
 from pathlib import Path
 
 import typer
-from dotenv import load_dotenv
 
 app = typer.Typer()
 
 
 @app.callback()
 def _bootstrap():
-    """Load .env if present (e.g. runner settings)."""
-    load_dotenv()
+    """Compare agentic flows on a fixed case."""
+    # Kept so typer does not promote the lone command to the root: `flowbench
+    # compare` must stay a subcommand.
 
 
 @app.command("compare")
