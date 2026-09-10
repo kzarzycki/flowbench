@@ -139,6 +139,7 @@ def test_run_watch_reports_server_errors_touching_run_sessions(tmp_path):
     log.write_text("")
     (tmp_path / "runs" / "r").mkdir(parents=True)
     w = RunWatch("r", runs_root=tmp_path / "runs", scenario="s", server_log=log)
+    w._last_assistant_text = lambda sid: ""  # offline
     w._run_sessions = lambda: [{"id": "conv_1", "status": TurnStatus.RUNNING, "title": "flow: x"}]
     log.write_text("ERROR runner conv_1 exploded\nERROR unrelated conv_9\n")
     events = w.tick()
@@ -152,6 +153,7 @@ def test_run_watch_reports_stalls_once_per_transition(tmp_path, monkeypatch):
     )
     sess = {"id": "c1", "status": TurnStatus.RUNNING, "title": "flow: x", "updated_at": 900}
     w._run_sessions = lambda: [sess]
+    w._last_assistant_text = lambda sid: ""  # offline
     assert w.tick() == []  # fresh heartbeat, no prompt
 
     sess["pending_elicitations_count"] = 1
@@ -194,6 +196,22 @@ def test_run_watch_quota_banner_once(tmp_path):
     quota = [e for e in events if e.startswith("QUOTA:")]
     assert quota == [f"QUOTA: flow: superpowers (conv_q) {_BANNER}"]
     assert not any(e.startswith("QUOTA:") for e in w.tick())
+
+
+def test_run_watch_reads_items_only_when_the_session_moved(tmp_path):
+    # the item read is one HTTP call per session per CHANGE, not per tick
+    reads = []
+    w = _watch(tmp_path, "WINNER: B")
+    sess = w._run_sessions()[0]
+    sess["updated_at"] = 900
+    w._run_sessions = lambda: [sess]
+    w._last_assistant_text = lambda sid: reads.append(sid) or "WINNER: B"
+    w.tick()
+    w.tick()
+    assert reads == ["conv_q"]
+    sess["updated_at"] = 950
+    w.tick()
+    assert reads == ["conv_q", "conv_q"]
 
 
 @pytest.mark.parametrize("last_text", ["WINNER: B", ""])

@@ -52,6 +52,7 @@ class RunWatch:
         self._session_status: dict[str, str] = {}
         self._session_stall: dict[str, str | None] = {}
         self._session_quota: set[str] = set()
+        self._session_read_at: dict[str, object] = {}  # updated_at at the last item read
         self._trials_done: set[str] = set()
 
     # --- sources -------------------------------------------------------------
@@ -113,8 +114,12 @@ class RunWatch:
                 events.append(f"SESSION FAILED: {s.get('title')} ({s['id']})")
             self._session_status[s["id"]] = cur
             # quota banner (#131): the session's last assistant item IS the CLI's
-            # limit banner — the operator waits for the reset. Once per session.
-            if s["id"] not in self._session_quota:
+            # limit banner — the operator waits for the reset. Once per session, and
+            # the item read happens only when the session moved (`updated_at`
+            # changed) — not one HTTP round-trip per session per tick.
+            at = s.get("updated_at")
+            if s["id"] not in self._session_quota and self._session_read_at.get(s["id"], ...) != at:
+                self._session_read_at[s["id"]] = at
                 banner = self._last_assistant_text(s["id"])
                 if is_quota_banner(banner):
                     self._session_quota.add(s["id"])

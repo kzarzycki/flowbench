@@ -178,8 +178,8 @@ Four rules learned the hard way:
   (`native_turn_error: "Your computer went to sleep mid-response"`). `-i` does not stop
   clamshell sleep — keep the lid open, or run headless.
 - **Watch it.** `flowbench.watch.RunWatch` is an incremental anomaly scanner over a live run
-  (permission prompts, run-scoped server errors, failed sessions, `STALLED (...)`, `QUOTA: ...` — a CLI limit banner: wait for the reset) — one line
-  per event. The engine ships the class, not a CLI; the private scenarios repo wraps it as
+  (permission prompts, run-scoped server errors, failed sessions, `STALLED (...)`,
+  `QUOTA: ...` — a CLI limit banner, wait for the reset) — one line per event. The engine ships the class, not a CLI; the private scenarios repo wraps it as
   `uv run python -m scenarios.swe_planning.watch <run_id> --pid <runner-pid>`. For the open
   reference case, drive `RunWatch(...).tick()` yourself or tail the logs from §2.
 - **Expect long turns.** A workflow-heavy flow can spend half an hour in one turn. Two of the
