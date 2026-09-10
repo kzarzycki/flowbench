@@ -231,6 +231,12 @@ _REPLY = {"type": "message", "role": "assistant", "content": "WINNER: B"}
 _USER2 = {"type": "message", "role": "user", "content": "keep going"}
 _EMPTY_REPLY = {"type": "message", "role": "assistant", "content": "  "}
 _REPLY2 = {"type": "message", "role": "assistant", "content": "WINNER: C"}
+_BANNER_TEXT = "You've hit your session limit · resets 6:40pm (Europe/Zurich)"  # s025p2-620b16b
+_BANNER = {
+    "type": "message",
+    "role": "assistant",
+    "content": [{"type": "output_text", "text": _BANNER_TEXT}],
+}
 
 _real_sleep = asyncio.sleep
 
@@ -375,6 +381,7 @@ async def test_failed_exhausts_bounded_resends(tmp_path, monkeypatch):
         TurnResult(TurnStatus.TIMEOUT, ""),
         TurnResult(TurnStatus.RUNNING, ""),
         TurnResult(TurnStatus.STALLED, "", stall_reason="prompt"),
+        TurnResult(TurnStatus.QUOTA, "You've hit your session limit · resets 6:40pm"),
     ],
 )
 async def test_non_failed_statuses_are_never_resent(tmp_path, monkeypatch, result):
@@ -431,6 +438,45 @@ async def test_failed_with_new_text_is_a_flaked_idle(tmp_path, monkeypatch, caps
     )
     assert len(injects) == 1
     assert "turn flaked" in capsys.readouterr().err
+
+
+async def test_failed_with_a_quota_banner_is_quota_not_flaked(tmp_path, monkeypatch, capsys):
+    # #131: the "reply" is the CLI's session-limit banner and the server said failed —
+    # not row 2 (a flaked idle): the wall, reported as QUOTA, never re-sent
+    _fake_clock(monkeypatch)
+    chat = _FakeChat([TurnStatus.FAILED])
+    injects = []
+    base_send = chat.send
+
+    def counting_send(text):
+        injects.append(text)
+        return base_send(text)
+
+    chat.send = counting_send
+    d = _settle_driver(tmp_path, chat, [[], [_USER, _BANNER]])
+    d.turn_timeout_s = 1000  # a retry-eligible budget, as in the flaked-idle test
+
+    async def must_not_be_called():
+        raise AssertionError("_resend_allowed must not be called for a quota banner")
+
+    d._resend_allowed = must_not_be_called
+    result = await d.send("grade these plans")
+    assert (result.status, result.flaked, result.assistant_text) == (
+        TurnStatus.QUOTA,
+        False,
+        _BANNER_TEXT,
+    )
+    assert len(injects) == 1
+    assert "quota:" in capsys.readouterr().err
+
+
+async def test_idle_with_a_quota_banner_is_quota(tmp_path, monkeypatch):
+    # the server may also settle idle on the banner: still the wall, not a reply
+    monkeypatch.setattr("flowbench.driver.omnigent.asyncio.sleep", _instant_sleep)
+    chat = _FakeChat([TurnStatus.RUNNING, TurnStatus.IDLE])
+    d = _settle_driver(tmp_path, chat, [[], [_USER, _BANNER]])
+    result = await d.send("grade these plans")
+    assert (result.status, result.assistant_text) == (TurnStatus.QUOTA, _BANNER_TEXT)
 
 
 async def test_failed_with_only_an_empty_new_message_is_not_flaked(tmp_path):
