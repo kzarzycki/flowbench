@@ -51,7 +51,7 @@ class FakeDriver(AgentDriver):
         self.sent.append(text)
         if self._questions:
             return TurnResult(TurnStatus.IDLE, self._questions.pop(0))
-        return TurnResult(TurnStatus.IDLE, "The plan is complete and written to plan.md.", True)
+        return TurnResult(TurnStatus.IDLE, "The plan is complete and written to plan.md.")
 
     async def capture_session(self):
         items = [{"type": "message", "role": "user", "content": s} for s in self.sent]

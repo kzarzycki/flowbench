@@ -20,7 +20,7 @@ from flowbench.types import TurnResult, TurnStatus
 
 CASE_DIR = Path(__file__).parents[3] / "scenarios" / "smoke" / "hello"
 FILES = ("task.md", "simulator.md", "knowledge.md", "flows.yaml", "case.py")
-FLOW = {"name": "baseline"}
+FLOW = {"name": "claude"}
 
 ASKED = "Which file do you want, and what should the line say?"
 WROTE = "Wrote it."
@@ -93,7 +93,7 @@ def test_case_files_and_shape():
     assert case.deliverable == "hello.txt"
     assert (case.max_turns, case.deadline_s) == (4, 300.0)
     assert case.has_score_override()
-    assert case.validate() == ["baseline"]
+    assert case.validate() == ["claude"]
 
     (flow,) = load_flows(CASE_DIR / "flows.yaml")
     assert (flow["harness"], flow["model"]) == ("claude-native", "haiku")
@@ -121,7 +121,7 @@ def test_hello_runs_end_to_end_offline(tmp_path, monkeypatch):
     meta = json.loads((run_root / "run.json").read_text())
     assert meta["case"] == "hello"
     assert meta["deliverable"] == "hello.txt"
-    assert meta["flows"] == ["baseline"]
+    assert meta["flows"] == ["claude"]
     assert "scenario" not in meta
 
     # the prime carried the persona, the knowledge and the engine's done token;
@@ -132,18 +132,18 @@ def test_hello_runs_end_to_end_offline(tmp_path, monkeypatch):
     assert "hello.txt" in prime  # knowledge.md rode in behind the persona
     assert relay == f"[assistant] {WROTE}"
 
-    session = json.loads((run_root / "baseline" / "session.json").read_text())
+    session = json.loads((run_root / "claude" / "session.json").read_text())
     assert session["ended_by"] == "done"
     assert session["artifact_exists"] is True
-    assert (run_root / "baseline" / "hello.txt").read_text() == "Hello, world!\n"
-    card = json.loads((run_root / "baseline" / "scorecard.json").read_text())
+    assert (run_root / "claude" / "hello.txt").read_text() == "Hello, world!\n"
+    card = json.loads((run_root / "claude" / "scorecard.json").read_text())
     assert card["objective"]["acceptance"] == 1.0
 
     compared = runner.invoke(
         app, ["compare", "--run-base", str(runs_root / "hello"), "--run-id", "smoke-1"]
     )
     assert compared.exit_code == 0, compared.output
-    assert "| metric | baseline |" in compared.stdout
+    assert "| metric | claude |" in compared.stdout
     assert "| acceptance | 1.0 |" in compared.stdout
 
     watched = runner.invoke(app, ["watch", "smoke-1", "--runs-root", str(runs_root)])
