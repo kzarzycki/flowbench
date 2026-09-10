@@ -84,7 +84,7 @@ orchestration on top of the engine — see "Downstream duplication".
    downstream flows.yaml adds `model`, `reasoning_effort`, `prepend`, `append`,
    `turn_timeout_s` and is passed around as raw dicts. → S03.1
 7. **No `flowbench run`.** Each scenario has its own argparse `__main__`; the engine CLI
-    only compares. → S03.3
+    only compares. → S03.2 (#137)
 8. **Un-versioned metadata.** `run.json`/`scorecard.json` are convention, no
     `schema_version`; readers guess. → S03.4
 9. **Naming/docstring drift.** "An flow" (`flow.py`), "{arm_name:" (`compare.py`,
