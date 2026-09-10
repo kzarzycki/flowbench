@@ -255,3 +255,22 @@ def test_the_fixture_case_declares_plan_md():
     assert case.deliverable == "plan.md"
     assert case.validate() == ["superpowers", "plain"]
     assert case.judge_path.is_file()
+
+
+def test_find_deliverable_picks_the_shallowest_nested_match_then_lexically(tmp_path):
+    """Two nested copies is the normal case, not the exotic one: a subagent working
+    dir holds one and the real deliverable is elsewhere. `rglob` yields in
+    `os.scandir` order, so an unordered pick makes the recorded deliverable_path
+    (and therefore the report and the canonical copy) filesystem-dependent."""
+
+    class C(Case):
+        deliverable = "plan.md"
+
+    flow = tmp_path / "flow"
+    for rel in ("z/plan.md", "a/b/plan.md", "a/plan.md"):
+        p = flow / rel
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(rel)
+    found = C(tmp_path).find_deliverable(flow)
+    assert found is not None
+    assert found.relative_to(flow).as_posix() == "a/plan.md"  # depth 2 beats depth 3; a beats z

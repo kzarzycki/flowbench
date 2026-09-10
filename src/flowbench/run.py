@@ -31,12 +31,19 @@ JUDGE_MODEL = "opus"
 
 def find_artifact(run_dir: Path, name: str) -> Path | None:
     """Which file proves a flow delivered — the orchestrator's knowledge, not
-    the driver's. `run_dir/name` if it landed at the top level, else the first
-    `run_dir.rglob(name)` hit (nested, e.g. under a subagent's cwd), else None."""
+    the driver's. `run_dir/name` if it landed at the top level, else its shallowest
+    nested hit (e.g. under a subagent's cwd), else None. The nested pick is
+    ordered — shallowest, then lexicographic — because `rglob` yields in
+    `os.scandir` order and two nested copies would otherwise resolve differently
+    per machine."""
     top = run_dir / name
     if top.exists():
         return top
-    return next(run_dir.rglob(name), None)
+    matches = sorted(
+        run_dir.rglob(name),
+        key=lambda p: (len(p.relative_to(run_dir).parts), p.as_posix()),
+    )
+    return matches[0] if matches else None
 
 
 async def run_case(

@@ -53,14 +53,24 @@ class Case:
     def find_deliverable(self, flow_dir) -> Path | None:
         """What proves this flow delivered: the declared path at the flow-dir
         root, else its first nested hit (a subagent's cwd, say), else nothing.
-        A case that declares no deliverable never has one."""
+        A case that declares no deliverable never has one.
+
+        The nested pick is ordered — shallowest, then lexicographic — not
+        `rglob`'s first yield, which follows `os.scandir` and so varies by
+        filesystem. Two nested copies is ordinary (a subagent's working dir holds
+        one), and an unordered pick would make the recorded deliverable path, the
+        canonical copy and the rendered report differ between machines."""
         if self.deliverable is None:
             return None
         flow_dir = Path(flow_dir)
         top = flow_dir / self.deliverable
         if top.exists():
             return top
-        return next(flow_dir.rglob(self.deliverable), None)
+        matches = sorted(
+            flow_dir.rglob(self.deliverable),
+            key=lambda p: (len(p.relative_to(flow_dir).parts), p.as_posix()),
+        )
+        return matches[0] if matches else None
 
     async def setup(self, flow, flow_dir) -> None:
         """Runs the case folder's `setup.sh` when it has one."""

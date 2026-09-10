@@ -1005,6 +1005,17 @@ def test_run_case_artifact_none_with_judge_rejected(tmp_path):
     assert not (tmp_path / "runs" / "rejected-run").exists()
 
 
+def test_find_artifact_picks_the_shallowest_nested_match_then_lexically(tmp_path):
+    """Same ordering rule as Case.find_deliverable: rglob's first yield follows
+    os.scandir, so two nested copies would resolve differently per filesystem."""
+    for rel in ("z/plan.md", "a/b/plan.md", "a/plan.md"):
+        p = tmp_path / rel
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(rel)
+    found = run_mod.find_artifact(tmp_path, "plan.md")
+    assert found is not None and found.relative_to(tmp_path).as_posix() == "a/plan.md"
+
+
 def test_find_artifact_missing_top_level_nested(tmp_path):
     assert run_mod.find_artifact(tmp_path, "plan.md") is None
 
