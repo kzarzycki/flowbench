@@ -137,13 +137,34 @@ def load_case(case_dir, settings: Settings | None = None) -> Case:
     from the folder up to the scenarios root, or a plain `Case` when there is none."""
     case_dir = Path(case_dir).resolve()
     path = _find_case_py(case_dir)
-    cls = Case if path is None else _load_case_class(path)
+    if path is None:
+        cls = Case
+    else:
+        _make_scenarios_importable(case_dir)
+        cls = _load_case_class(path)
     case = cls(case_dir, settings=settings)
     if (case_dir / "flows.yaml").is_file():
         # No flows file: there is no flow list to check yet, and the runner raises
         # when it reads one that isn't there.
         check_gradable(case)
     return case
+
+
+def _make_scenarios_importable(case_dir: Path) -> None:
+    """Put the folder that holds `scenarios/` at the front of `sys.path`, so a
+    `case.py` can import its siblings by package path (`from scenarios.x import y`).
+
+    Nothing else does it: under pytest the checkout root is already there, but the
+    installed console script's `sys.path[0]` is the script's own directory and the
+    cwd is never added — so `flowbench run scenarios/…/todo_app` would fail at
+    `import scenarios`. A case with no `scenarios` ancestor has no package path to
+    resolve and adds nothing."""
+    root = scenarios_root(case_dir)
+    if root.name != SCENARIOS_DIR:
+        return
+    parent = str(root.parent)
+    if parent not in sys.path:
+        sys.path.insert(0, parent)
 
 
 def _walk(case_dir: Path) -> Iterator[Path]:
@@ -178,10 +199,14 @@ def _load_case_class(path: Path) -> type[Case]:
     # so a same-size edit inside one second is served stale from `__pycache__` —
     # and `flowbench run --rescore` straight after editing a case is exactly that.
     exec(compile(path.read_text(), str(path), "exec"), module.__dict__)
+    # `__module__` is the filter, not `is not Case`: a `case.py` may legitimately
+    # import a shared base or another scenario's class, and only the subclass this
+    # file *defines* is the case. Counting the imports too made a sibling import
+    # read as "found 2", and a file that only imported one wrongly pass.
     found = [
         obj
         for obj in vars(module).values()
-        if isinstance(obj, type) and issubclass(obj, Case) and obj is not Case
+        if isinstance(obj, type) and issubclass(obj, Case) and obj.__module__ == module_name
     ]
     if len(found) != 1:
         raise ValueError(f"{path}: needs exactly one Case subclass, found {len(found)}")

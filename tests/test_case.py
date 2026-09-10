@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from flowbench.case import Case, load_case, scenarios_root
+from flowbench.case import SCENARIOS_DIR, Case, load_case, scenarios_root
 from flowbench.settings import Settings
 
 CASE_PY = """\
@@ -166,6 +166,123 @@ def test_case_py_imports_siblings_by_package_path(tmp_path, monkeypatch):
     assert type(alpha).__name__ == "AlphaCase"
     assert type(beta).__name__ == "BetaCase"
     assert (alpha.deliverable, beta.deliverable) == ("alpha.md", "beta.md")
+
+
+def _is_scenarios(name: str) -> bool:
+    return name == SCENARIOS_DIR or name.startswith(f"{SCENARIOS_DIR}.")
+
+
+@pytest.fixture
+def isolated_imports(monkeypatch):
+    """`sys.path` and every `scenarios.…` module put back after the test, so a tree
+    under `tmp_path` can own the `scenarios` package name while it runs — and so
+    what the loader inserts is visible instead of pre-supplied."""
+    monkeypatch.setattr(sys, "path", list(sys.path))
+    saved = {name: mod for name, mod in sys.modules.items() if _is_scenarios(name)}
+    for name in saved:
+        del sys.modules[name]
+    yield
+    for name in [n for n in sys.modules if _is_scenarios(n)]:
+        del sys.modules[name]
+    sys.modules.update(saved)
+
+
+SIBLING_CASE_PY = """\
+from flowbench.case import Case
+from scenarios.{pkg}.helper import DELIVERABLE
+
+
+class Sibling(Case):
+    deliverable = DELIVERABLE
+"""
+
+
+def _package(folder: Path) -> Path:
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / "__init__.py").touch()
+    return folder
+
+
+def _importing_case(root: Path, pkg: str) -> Path:
+    """`<root>/scenarios/<pkg>/case.py`, importing its own sibling by package path."""
+    folder = _package(_package(root / SCENARIOS_DIR) / pkg)
+    (folder / "helper.py").write_text(f'DELIVERABLE = "{pkg}.md"\n')
+    (folder / "case.py").write_text(SIBLING_CASE_PY.format(pkg=pkg))
+    return folder
+
+
+def test_load_case_puts_the_scenarios_parent_on_sys_path(tmp_path, isolated_imports):
+    """What the installed console script needs: its `sys.path[0]` is the script's
+    own directory and the cwd is never added, so only the loader can make a
+    case.py's `scenarios.…` import resolve."""
+    case_dir = _importing_case(tmp_path, "alpha")
+    parent = str(tmp_path.resolve())
+    assert parent not in sys.path
+
+    case = load_case(case_dir)
+
+    assert type(case).__name__ == "Sibling"
+    assert case.deliverable == "alpha.md"
+    assert sys.path[0] == parent
+
+    load_case(case_dir)
+
+    assert sys.path.count(parent) == 1  # already there: not inserted again
+
+
+def test_load_case_without_a_scenarios_ancestor_leaves_sys_path_alone(tmp_path, isolated_imports):
+    case_dir = tmp_path / "loose" / "thing"
+    _case_py(case_dir, "Loose", "out.md")
+    before = list(sys.path)
+
+    assert type(load_case(case_dir)).__name__ == "Loose"
+    assert sys.path == before
+
+
+BASE_PY = """\
+from flowbench.case import Case
+
+
+class SharedBase(Case):
+    max_turns = 5
+"""
+
+
+def _with_a_shared_base(root: Path, pkg: str, case_py: str) -> Path:
+    """`<root>/scenarios/base.py` holding `SharedBase`, plus `<pkg>/case.py`."""
+    scenarios = _package(root / SCENARIOS_DIR)
+    (scenarios / "base.py").write_text(BASE_PY)
+    folder = _package(scenarios / pkg)
+    (folder / "case.py").write_text(case_py)
+    return folder
+
+
+def test_an_imported_case_class_does_not_count_as_a_second_subclass(tmp_path, isolated_imports):
+    case_dir = _with_a_shared_base(
+        tmp_path,
+        "derived",
+        textwrap.dedent("""\
+            from scenarios.base import SharedBase
+
+
+            class Derived(SharedBase):
+                deliverable = "derived.md"
+            """),
+    )
+
+    case = load_case(case_dir)
+
+    assert type(case).__name__ == "Derived"
+    assert (case.deliverable, case.max_turns) == ("derived.md", 5)
+
+
+def test_a_case_py_that_only_imports_a_case_class_defines_none(tmp_path, isolated_imports):
+    case_dir = _with_a_shared_base(tmp_path, "borrowed", "from scenarios.base import SharedBase\n")
+
+    with pytest.raises(ValueError, match=str(case_dir / "case.py")) as err:
+        load_case(case_dir)
+
+    assert "found 0" in str(err.value)
 
 
 async def test_scripts_run_with_flow_env_and_case_cwd(tmp_path, monkeypatch):

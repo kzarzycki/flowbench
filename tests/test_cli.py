@@ -13,10 +13,12 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner
 
+import flowbench.case
 from flowbench.cli import app
 from flowbench.testing import n_run_factories
 
 FIXTURE = Path(__file__).parent / "fixtures" / "feature_flag_service"
+TODO_APP = Path(__file__).parents[1] / "scenarios" / "swe_e2e" / "cases" / "todo_app"
 TEXT_FILES = ("task.md", "simulator.md", "knowledge.md", "flows.yaml", "judge.md")
 ENV_VARS = ("FLOWBENCH_RUNS_ROOT", "FLOWBENCH_SIM_MODEL", "FLOWBENCH_JUDGE_MODEL")
 
@@ -265,6 +267,66 @@ def test_judge_model_flag_reaches_the_case_grader(tmp_path, monkeypatch):
             (tmp_path / "runs" / "scored" / "r1" / flow / "scorecard.json").read_text()
         )
         assert card["judge_model"] == "sonnet"
+
+
+class _CannedGrader:
+    """A grader model that answers without a server, for the CLI → case path."""
+
+    async def generate(self, prompt):
+        class _Out:
+            completion = (
+                '{"shape_fit":0.5,"clarifying_quality":0.5,'
+                '"workflow_adherence":0.5,"rationale":"ok"}'
+            )
+
+        return _Out()
+
+    async def close(self):
+        pass
+
+
+def test_judge_model_flag_reaches_the_todo_app_grader(tmp_path, monkeypatch):
+    """AC13 over the real in-repo case, not a synthetic scorer: `--judge-model`
+    has to arrive at `TodoAppCase`'s own grader factory."""
+    seen = []
+
+    def _factory(flow_dir, *, model):
+        seen.append(model)
+        return _CannedGrader()
+
+    real_load_case = flowbench.case.load_case
+
+    def _load_case(*args, **kwargs):
+        case = real_load_case(*args, **kwargs)
+        # Discovery execs `case.py` into a fresh module, so the class the CLI is
+        # about to use exists only now; patch the class attribute `score` reads.
+        monkeypatch.setattr(type(case), "grader_factory", _factory)
+        return case
+
+    monkeypatch.setattr("flowbench.case.load_case", _load_case)
+    _offline(monkeypatch)
+
+    result = runner.invoke(
+        app,
+        [
+            "run",
+            str(TODO_APP),
+            "--runs-root",
+            str(tmp_path / "runs"),
+            "--run-id",
+            "t1",
+            "--judge-model",
+            "haiku",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert seen == ["haiku", "haiku"]  # one grader per flow, both on the flag's model
+    for flow in ("baseline", "superpowers"):
+        card = json.loads(
+            (tmp_path / "runs" / "todo_app" / "t1" / flow / "scorecard.json").read_text()
+        )
+        assert card["judge_low_confidence"]["shape_fit"] == 0.5
 
 
 # --- flowbench watch --------------------------------------------------------
