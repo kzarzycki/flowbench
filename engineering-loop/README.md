@@ -108,13 +108,15 @@ the PR as a draft after the plan). Nothing else is kept.
 ## Phases
 
 Each phase ends with `board.sh <url> <PHASE>`, and a phase is written from the artifact
-that proves it — a merge from a merge commit on the story's own branch, never from a
-closed issue, a superseded story, or a pull request that only mentions the issue number.
-A story closed without shipping takes `board.sh <url> CLOSED`: Status Done, Phase left
-at the last phase it actually reached. Working files (`spec.md`, `plan.md`,
-`decisions.md`, briefs) go to `<worktree>/.loop/`, gitignored, never committed. The
-`superpowers:*` names below are the Claude Code skills that implement a step; on a
-harness without them, do the step as described.
+that proves it. `MERGED` is written from the commit the story's own PR landed on the base
+branch — SHIP squash-merges, so the evidence is a merged PR whose head is the story's
+branch and the commit it produced, never a closed issue, a superseded story, or a pull
+request that only mentions the issue number. A story closed without shipping takes
+`board.sh <url> CLOSED`: Status Done, Phase left at the last phase it actually reached.
+
+Working files (`spec.md`, `plan.md`, `decisions.md`, briefs) go to `<worktree>/.loop/`,
+gitignored, never committed. The `superpowers:*` names below are the Claude Code skills
+that implement a step; on a harness without them, do the step as described.
 
 **TRIAGE.** Spawned for one issue: that issue. Otherwise `gh issue list --state open`;
 skip epics (containers), `loop:needs-human`, `duplicate`, anything claimed, anything

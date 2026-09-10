@@ -31,7 +31,7 @@ case $phase in
 esac
 sid=${AGENT_SESSION:-${CLAUDE_CODE_SESSION_ID:+claude-code:$CLAUDE_CODE_SESSION_ID}}
 item=$(gh project item-add 1 --owner kzarzycki --url "$url" --format json -q .id)
-if [ -n "$opt" ]; then  # CLOSED writes no phase; an `&&` guard would trip `set -e` on the skip
+if [ -n "$opt" ]; then  # CLOSED writes no phase
   gh project item-edit --project-id $PROJECT --id "$item" --field-id $PHASE --single-select-option-id "$opt" >/dev/null
 fi
 gh project item-edit --project-id $PROJECT --id "$item" --field-id $STATUS --single-select-option-id "$status" >/dev/null

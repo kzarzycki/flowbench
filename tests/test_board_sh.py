@@ -1,6 +1,6 @@
-"""`engineering-loop/board.sh` writes the board: `CLOSED` closes an item without
-claiming a phase it never reached (issue #143). `gh` is stubbed on PATH — no test
-touches the real Project board."""
+"""The loop's board contract (issue #143): `board.sh CLOSED` closes an item without
+claiming a phase it never reached, and the README states the rule that says why. `gh` is
+stubbed on PATH — no test touches the real Project board."""
 
 import os
 import re
@@ -9,7 +9,8 @@ from pathlib import Path
 
 import pytest
 
-BOARD = Path(__file__).resolve().parents[1] / "engineering-loop" / "board.sh"
+LOOP = Path(__file__).resolve().parents[1] / "engineering-loop"
+BOARD = LOOP / "board.sh"
 # Field ids come from the script, so a re-keyed board fails loudly instead of passing on
 # stale literals. The Done *option* id is anchored below: deriving it from MERGED would
 # let both keywords write the same wrong status and still pass.
@@ -84,7 +85,22 @@ def test_closed_output_reports_status_not_phase(board):
     assert res.stdout.strip() == f"{URL} → Status=Done (Phase unchanged)"
 
 
-def test_usage_comment_documents_closed(board):
-    header = BOARD.read_text().split("set -euo pipefail")[0]
-    assert "CLOSED" in header
-    assert re.search(r"CLOSED.*closed without shipping", header, re.I | re.S)
+def test_usage_comment_documents_closed():
+    """Naming the keyword is not documenting it: the header must carry its meaning."""
+    line = next(
+        ln for ln in BOARD.read_text().split("set -euo pipefail")[0].splitlines() if "CLOSED" in ln
+    )
+    assert re.search(r"closed without shipping", line, re.I)
+    assert re.search(r"Status Done", line, re.I)
+    assert re.search(r"Phase left at the last phase", line, re.I)
+
+
+def test_the_phase_rule_lives_once_in_the_phases_preamble():
+    """The rule `CLOSED` exists for. Current truth once, in the doc that owns it — so
+    this asserts placement and uniqueness, not just presence."""
+    readme = " ".join((LOOP / "README.md").read_text().split())  # the prose is hard-wrapped
+    rule = "a phase is written from the artifact that proves it"
+    assert readme.count(rule) == 1
+    preamble = readme.split("## Phases ", 1)[1].split("**TRIAGE.**", 1)[0]
+    assert rule in preamble
+    assert "CLOSED" in preamble
