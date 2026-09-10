@@ -63,14 +63,17 @@ Executes the recorded 2026-07-02 decision: `run_case`, everything omnigent, Insp
   `docs/design/decisions/2026-09-09-omnigent-as-the-meta-harness.md`).
 - S02.6 Error taxonomy: narrow the broad `except Exception` sites.
 
-### M3 — Case format v1 and a real CLI (`epics/E03-case-format-and-cli.md`)
+### M3 — Case API and a real CLI (`epics/E03-case-format-and-cli.md`)
 
+- S03.2 Case API (#137): a case is a folder with an optional `case.py` (`Case` subclass:
+  `deliverable`, `setup`/`teardown`, `score`); `flowbench run <case_dir>` / `flowbench watch`;
+  engine-owned done token + `ended_by`; 1+ flows, no baseline; `pydantic-settings`;
+  engine smoke case `scenarios/smoke/hello`; per-scenario `run.py`/`watch.py`/`scenario.py`
+  deleted; renames `coding_workflow → swe_e2e`, `swe_planning/todo_app → smoke_todo_app`.
+  Goes first; the stories below build on the `Case` it introduces.
 - S03.1 Flow schema v1: the full configuration (harness, model, reasoning_effort, bundle,
   system_prompt, prepend/append, budgets), flat flows + `matrix:` expansion, validating loader.
   Decision: `docs/design/decisions/2026-09-03-flow-is-the-full-configuration.md`.
-- S03.2 Case format v1 (documented loader; scenario-authoring guide moves engine-side;
-  scenario eligibility rules for flow fields, e.g. no system prompt in `coding_workflow`).
-- S03.3 `flowbench run` / `flowbench watch`; per-scenario `__main__`s deleted.
 - S03.4 `run.json`/`scorecard.json` schema v1 (`schema_version`, reader rules).
 - S03.5 Generic compare (metric discovery replaces the hardcoded todo_app table; a
   "differs in: <flow fields>" row per comparison).

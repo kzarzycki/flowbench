@@ -46,7 +46,7 @@ Success: the watcher exits on `run.json`, no failed sessions, `winner` parsed (n
 ## V5 — live todo_app run
 
 Since S01.3, the `run_case_n` entrypoint (`flowbench run --scenario coding_workflow
---case todo_app` once S03.3 lands; the interim `python -m` entrypoint before that):
+--case todo_app` once S03.2 (#137) lands; the interim `python -m` entrypoint before that):
 
 ```bash
 uv run python -m scenarios.coding_workflow.run --case todo_app --run-id <id>
