@@ -9,6 +9,11 @@ the step is the contract. Trust files, git and the board — not your memory.
 This directory is the layer: this file, `coordinator.md`, `board.sh` (board + claim),
 `agent_review.py` (cross-vendor reviewer via omnigent), `LOG.md` (ledger). It lives in
 flowbench and governs both repos; `flowbench-scenarios` is a passive sub-repo of the loop.
+Not a skill yet, on purpose: extract the method half (gates, claiming, `.loop/`, reviewer
+dispatch, coordinator) into an `engineering-loop` skill when a second project wants it,
+leaving the values (board ids, base branches, live-gate command, fleet cap) in a project
+config `board.sh` reads. Until then it stays a plain top-level directory — `.agents/` is
+apm's deploy target for installed skills, not a place for authored files.
 
 **Where state lives.** The GitHub issue and the Project board
 (https://github.com/users/kzarzycki/projects/1) hold the *state of work*: Phase,
