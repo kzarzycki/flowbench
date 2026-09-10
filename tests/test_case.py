@@ -1,5 +1,6 @@
 """A case is a folder: the `Case` contract, `case.py` discovery, the script hooks."""
 
+import os
 import subprocess
 import sys
 import textwrap
@@ -274,3 +275,18 @@ def test_find_deliverable_picks_the_shallowest_nested_match_then_lexically(tmp_p
     found = C(tmp_path).find_deliverable(flow)
     assert found is not None
     assert found.relative_to(flow).as_posix() == "a/plan.md"  # depth 2 beats depth 3; a beats z
+
+
+def test_an_edited_case_py_is_never_served_from_stale_bytecode(tmp_path):
+    """Two same-length edits sharing one mtime second: CPython's `.pyc` check is
+    `(mtime-to-the-second, size)`, so the loader must not consult the cache at all.
+    `flowbench run --rescore` right after editing a case is exactly this shape."""
+    case_dir = _tree(tmp_path)
+    path = _case_py(case_dir, "First", deliverable="aaa.md")
+    assert load_case(case_dir, Settings()).deliverable == "aaa.md"
+
+    mtime = path.stat().st_mtime
+    _case_py(case_dir, "First", deliverable="bbb.md")  # same length, same second
+    os.utime(path, (mtime, mtime))
+
+    assert load_case(case_dir, Settings()).deliverable == "bbb.md"

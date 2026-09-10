@@ -173,7 +173,11 @@ def _load_case_class(path: Path) -> type[Case]:
     spec = importlib.util.spec_from_file_location(module_name, path)
     module = importlib.util.module_from_spec(spec)
     sys.modules[module_name] = module
-    spec.loader.exec_module(module)
+    # Compile the file's own text instead of `spec.loader.exec_module(module)`:
+    # CPython invalidates a cached `.pyc` on `(source mtime-to-the-second, size)`,
+    # so a same-size edit inside one second is served stale from `__pycache__` —
+    # and `flowbench run --rescore` straight after editing a case is exactly that.
+    exec(compile(path.read_text(), str(path), "exec"), module.__dict__)
     found = [
         obj
         for obj in vars(module).values()
