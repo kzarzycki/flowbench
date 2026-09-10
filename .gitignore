@@ -44,3 +44,6 @@ apm_modules/
 
 # per-developer instructions (checkout paths, local env) — never tracked
 CLAUDE.local.md
+
+# Engineering-loop working files of one item (spec, plan, briefs, Q&A) — die with the worktree
+.loop/

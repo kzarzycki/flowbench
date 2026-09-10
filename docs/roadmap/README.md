@@ -17,8 +17,7 @@ Comparison).
 
 The differentiated core is the *runtime*: driving real interactive coding-agent sessions,
 simulator-mediated loops, workspace artifacts, comparative judging. No eval framework
-provides that; frameworks provide the *around* (orchestration at scale, storage, stats).
-That is why the recorded decision is DIY with plain-file seams (see locked decisions).
+provides that; frameworks provide the *around* — orchestration at scale, storage, stats.
 
 ## Reading order
 
@@ -47,34 +46,8 @@ These are prior decision records, not this roadmap's inventions:
   `docs/design/decisions/2026-09-03-flow-is-the-full-configuration.md`.
 - **One execution model: the `run_case` orchestrator, not Inspect.** Decision record:
   flowbench-scenarios `docs/superpowers/specs/2026-07-02-swe-planning-rework-design.md`.
-  todo_app runs on `run_case` since S01.3; Inspect and `subscription_model.py` (`claude -p`)
-  were removed in S01.4 (epic E01).
-- **Stay DIY; adopt capabilities, not frameworks.** Reconsider only at the written triggers
-  in the same decision record (parallel N≥10 with retries; cross-run statistical
-  aggregation; cross-month regression tracking; a second scenario-authoring team).
-- **Plain-file seams.** Run folders (sibling `../flowbench-runs/`, never inside the repo) hold
-  `run.json`, `scorecard.json`, transcripts. Future tooling reads these files; it never wraps
-  execution.
-- **Subscription billing only.** `ANTHROPIC_API_KEY` must be unset; the driver guards on it.
-- **Baseline is not a privileged type** — a comparison may nominate a reference flow at
-  read time; there is no built-in control category.
-
-## Operating model for autonomous development
-
-Every change follows the engineering loop
-(`$SCENARIOS/.claude/loop.md`, see `CLAUDE.md`): branch → spec sized to the change →
-tests green → PR → merge (standing approval) → live-run validation → journal. Rules that
-keep weaker-model sessions safe:
-
-- **One story per loop iteration.** Stories in `ROADMAP.md` are sized to a ≤~300-line diff.
-  If a story grows past that mid-flight, stop and split it in the ledger.
-- **Tests first, contracts explicit.** Each story's "Verify" line cites the shared
-  procedures in `verification.md` (V1–V8: suites, live runs, sweeps) plus its own
-  assertions. A story without a runnable check is not ready to execute.
-- **Engine PRs merge before paired scenarios PRs.** flowbench-scenarios depends on this
-  repo as an editable path dep; the live validation run exercises both.
-- **Do not touch locked decisions.** If a story seems to require it, the story is wrong —
-  escalate in the ledger instead of improvising.
-- **The war-story comments in `driver.py`/`loop.py` are load-bearing.** Each encodes a live
-  incident (lying idle, undelivered injection, empty grader completion). Refactors must
-  carry the constraint, and ideally its regression test, not just the code.
+- **Own the runtime, adopt everything around it.** Written triggers for adopting a framework
+  for the *around*, in the same decision record: parallel N≥10 with retries; cross-run
+  aggregation; cross-month regression tracking; a second authoring team.
+- **Plain-file seams.** A run is a folder of JSON and transcripts, outside the repo. Tooling
+  reads those files; it never wraps execution.

@@ -4,6 +4,10 @@ The engine's execution core is `flowbench/driver/` + `flowbench/loop.py`; `run.p
 orchestrates a case on top of them. Scenarios own content and scenario-specific
 scoring only.
 
+The war-story comments in `driver/` and `loop.py` are load-bearing: each encodes a live
+incident (lying idle, undelivered injection, empty grader completion). A refactor carries the
+constraint and its regression test, not just the code.
+
 ## flowbench/driver/ — the ONE package that knows omnigent exists
 
 Split out of the old `runner/driver.py` in E02 S02.2. `flowbench.runner.driver`
