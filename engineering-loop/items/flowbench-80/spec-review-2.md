@@ -1,0 +1,7 @@
+REVISE
+
+1. AC7 still does not actually pin bundle bytes. It pins `render_config()` string, `tarfile.getnames()`, and metadata dicts, but `getnames()` only proves member paths/order after sorting. A broken `build_bundle()` could preserve names while changing `config.yaml`, `SKILL.md`, MCP contents, tar metadata, or gzip bytes. Existing tests cover some extracted contents, but not byte-identical serialized output as AC7 claims. Require golden assertions over extracted member bytes/metadata, or narrow the claim away from “byte-identical serialized output.”
+
+2. The line citation is only partly fixed. `Problem` now correctly says the dead marker is line 64, matching current `src/flowbench/runner/driver.py:64`; `Moves` still says “Dead marker at line 63 deleted.” Minor, but the prior citation fix is inconsistent.
+
+Other prior checks: V4/AC12 plus decision #10 and T7’s `--with-editable /Users/zarz/dev/agents/flowbench--s022` form are adequate to exercise the branch engine. Re-derived compat imports are covered: old driver path needs module import, `AgentDriver`, `OmnigentDriver`, `TurnResult`, `git_init_repo`, `_PAGE`; adding `TurnStatus` is harmless. Old loop path needs `run_agent_session`, `_is_done`, `render_tail`; adding `prime_prompt`/`relay_prompt` is harmless. AC4b’s grep catches the current stale string monkeypatch targets. AC1/AC2 look machine-checkable for the intended paths, but AC7 remains the blocker.

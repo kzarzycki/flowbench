@@ -62,7 +62,7 @@ These are prior decision records, not this roadmap's inventions:
 ## Operating model for autonomous development
 
 Every change follows the engineering loop
-(`$SCENARIOS/.claude/loop.md`, see `CLAUDE.md`): branch → spec sized to the change →
+(`engineering-loop/README.md`, see `AGENTS.md`): branch → spec sized to the change →
 tests green → PR → merge (standing approval) → live-run validation → journal. Rules that
 keep weaker-model sessions safe:
 
