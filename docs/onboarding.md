@@ -169,7 +169,7 @@ caffeinate -i uv run --extra live python -m scenarios.coding_workflow.run \
   --case todo_app --run-id <id>
 ```
 
-Four rules learned the hard way:
+Five rules learned the hard way:
 
 - **`uv run --extra live`, always.** A bare `uv run` resyncs the env to the default deps and
   drops the extra; omnigent then vanishes mid-day (`ModuleNotFoundError: omnigent` at
@@ -182,6 +182,13 @@ Four rules learned the hard way:
   `QUOTA: ...` — a CLI limit banner, wait for the reset) — one line per event. The engine ships the class, not a CLI; the private scenarios repo wraps it as
   `uv run python -m scenarios.swe_planning.watch <run_id> --pid <runner-pid>`. For the open
   reference case, drive `RunWatch(...).tick()` yourself or tail the logs from §2.
+- **No server restart under a run.** The bridge gates every tool call through a
+  `PreToolUse` hook that asks the omnigent server; when the server is down or restarting the
+  hook fails *ask* by design, and Claude Code shows a permission card even under
+  `bypassPermissions` (`Do you want to create <file>?`) — the flow ends `STALLED (prompt)`.
+  Anything that restarts the server (the fork's `auto-sync` after an upstream rebase,
+  `omnigent host stop`, a launchd kickstart) must wait for a quiet server: no session touched
+  in the last 10 min.
 - **Expect long turns.** A workflow-heavy flow can spend half an hour in one turn. Two of the
   three budgets are per-flow fields in the case's `flows.yaml` — `turn_timeout_s` (per-turn cap)
   and `stall_s` (heartbeat watchdog) — and are declared per case, because a cap the flow can or

@@ -138,7 +138,9 @@ done_token, max_turns, deadline_s)`:
   session records `exit_status`, `stall_reason` and `pane_tail` (the terminal's
   last lines, i.e. the question it is stuck on). The watchdog never answers the
   prompt: a benchmark that resolves its own prompts measures the harness, not
-  the flow. `flowbench.watch` prints `STALLED (...)` on the same signals.
+  the flow. `flowbench.watch` prints `STALLED (...)` on the same signals. `prompt` can fire
+  under `bypassPermissions` for an operational reason, not a flow's: see `docs/onboarding.md`,
+  "No server restart under a run".
 - The simulator is any `user_model` with `async generate(prompt)`; the loop
   composes `simulator_system` + conversation tail per call.
 - An idle main agent with a busy sub-agent (`GET /v1/sessions/{id}/child_sessions`,
