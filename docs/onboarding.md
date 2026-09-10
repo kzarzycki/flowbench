@@ -186,8 +186,9 @@ Five rules learned the hard way:
   `PreToolUse` hook that asks the omnigent server; when the server is down or restarting the
   hook fails *ask* by design, and Claude Code shows a permission card even under
   `bypassPermissions` (`Do you want to create <file>?`) — the flow ends `STALLED (prompt)`.
-  Anything that restarts the server (the fork's `auto-sync` after an upstream rebase, `omnigent
-  host stop`, a launchd kickstart) must wait for a quiet server: no session touched in the last 10 min.
+  Anything that restarts the server (the fork's `auto-sync` after an upstream rebase,
+  `omnigent host stop`, a launchd kickstart) must wait for a quiet server: no session touched
+  in the last 10 min.
 - **Expect long turns.** A workflow-heavy flow can spend half an hour in one turn. Two of the
   three budgets are per-flow fields in the case's `flows.yaml` — `turn_timeout_s` (per-turn cap)
   and `stall_s` (heartbeat watchdog) — and are declared per case, because a cap the flow can or
