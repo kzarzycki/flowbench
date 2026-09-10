@@ -1,9 +1,0 @@
-reviewer: claude-code:subagent gate3-131 (Fable, fresh context; same vendor as implementer)
-
-REVISE
-
-1. `tests/test_watch.py:137-147` (`test_run_watch_reports_server_errors_touching_run_sessions`) and `tests/test_watch.py:148-167` (`test_run_watch_reports_stalls_once_per_transition`): both stub `_run_sessions` but not the new `_last_assistant_text`, so `tick()` (`src/flowbench/watch.py:117`) now issues a real `GET http://127.0.0.1:6767/v1/sessions/{conv_1,c1}/items?limit=1&order=desc` on every tick. Verified by forbidding `urllib.request.urlopen` in a plugin: exactly those two tests fail with `NETWORK: urlopen ...`. They pass in the normal suite only because the except tuple swallows the connection error or 404, and on this machine port 6767 is a live omnigent server, so the offline suite hits it (the stalls test does five ticks = five requests). Fix: stub `_last_assistant_text` in both, or better, gate the item read so it does not fire per tick for a session whose status/updated_at has not changed. That also addresses the unplanned cost of one extra HTTP round-trip per session per tick, forever, for every non-quota session.
-
-Everything else checks out: AC1-AC7 met and covered (driver tests fail on pre-change code); `test_failed_with_new_text_is_a_flaked_idle` unchanged; QUOTA cannot be re-sent; no CI/gate/`.claude/` touches; ruff clean; 360 passed, 1 skipped. Banner rule against the evidence run's 228 items: 13 hits, all the verbatim banner. Non-blocking nit: `docs/onboarding.md:181` is now 152 chars.
-
-Resolution (commit 406d4fd on the branch): item read gated on a change of the session's `updated_at` (`_session_read_at`), both tests stub the seam, new test `test_run_watch_reads_items_only_when_the_session_moved`, onboarding line wrapped. Verified with `urlopen` forbidden: 13/13 watch tests pass.

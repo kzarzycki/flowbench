@@ -1,6 +1,6 @@
 # Engineering-loop ledger
 
-Cross-session memory for both repos — flowbench (engine) and flowbench-scenarios — kept once, here in `flowbench/engineering-loop/LOG.md`. One entry per merged item (plus run outcomes and post-mortems), oldest first, append-only; read it first when resuming work in either repo. Format: `engineering-loop/README.md` → "Ledger". Live-run details live in the run dir; gate verdicts in `items/<id>/`.
+Cross-session memory for both repos — flowbench (engine) and flowbench-scenarios — kept once, here in `flowbench/engineering-loop/LOG.md`. One entry per merged item (plus run outcomes and post-mortems), oldest first, append-only; read it first when resuming work in either repo. Format: `engineering-loop/README.md` → "Ledger". Live-run details live in the run dir; gate verdicts on the PR and the issue.
 
 ## 2026-07-02 — scenarios#7 swe_planning rework v2 (`7a62c83`; flowbench#6 `93f8adc`)
 - `scenarios/swe_planning/` rebuilt as a free-text scenario driven by omnigent agents (fork taxonomy, pydantic manifest, dimension-vector scorer, `claude -p` judge deleted); flowbench gained reasoning-effort, a send() settle loop and `exit_status` in session.json.
@@ -154,7 +154,7 @@ Cross-session memory for both repos — flowbench (engine) and flowbench-scenari
 
 ## 2026-09-09 — flowbench#105 E02 S02.5 part 1: omnigent private-API inventory (docs-only)
 - `docs/design/omnigent-api-inventory.md`: R1 raw `POST /v1/sessions` via `sessions._http` — blocked-upstream (no client version sends `terminal_launch_args`); R2 `_sessions_chat` import — migrate-now; R3 `omnigent.host.daemon_launch` — keep + `# UPSTREAM:`; R4 raw `GET /v1/hosts` — keep. The watchdog GET must stay raw (0.2.0 `Session` lacks `updated_at`/pending signals).
-- `rg` honours `.gitignore` and silently skips `.venv` — use `--no-ignore`. Schema acceptance ≠ behaviour: 0.2.0 accepts `host_id` in create metadata and ignores it; launch-on-create exists only at HEAD. Upstream ask drafted at `items/upstream/omnigent-client-create-launch-args.md`, later filed as omnigent-ai/omnigent#6822.
+- `rg` honours `.gitignore` and silently skips `.venv` — use `--no-ignore`. Schema acceptance ≠ behaviour: 0.2.0 accepts `host_id` in create metadata and ignores it; launch-on-create exists only at HEAD. Upstream ask filed as omnigent-ai/omnigent#6822.
 
 ## 2026-09-09 — flowbench#103 E02 S02.3 one retry policy, one budget per send (PR #126 `f4cb85e`; scenarios#97)
 - `OmnigentDriver.send` owns the retry policy (five-row table in `docs/design/runner.md` → "Send/retry policy") under ONE `asyncio.timeout(turn_timeout_s)` with soft deadline checks before every wait and inject; expiry ⇒ `TIMEOUT`, never re-sent. Rows 1/3 are the only re-sends (`model_error` non-retryable); row 2 FAILED + new NON-EMPTY text ⇒ `IDLE, flaked=True` (`session["flaked_turns"]`); `settle_timeout_s` and the `SessionModel.generate` retry removed (generate = send, raise on non-idle or empty).

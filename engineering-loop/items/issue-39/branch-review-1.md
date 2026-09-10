@@ -1,1 +1,0 @@
-VERDICT: REVISE scenarios/swe_planning/run.py:273 and scenarios/swe_planning/run.py:278 allow `timeout` with fresh non-empty text to be returned instead of raised, violating AC5; tests/test_swe_planning_run.py:248 only covers timeout with empty text, so this regression is untested.

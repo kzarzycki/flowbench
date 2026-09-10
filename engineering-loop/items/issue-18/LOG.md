@@ -1,1 +1,0 @@
-- Phase 5 (issue-18): gate-2 plan review (opus): APPROVE — all 8 ACs mapped to discharging steps, RED/GREEN mechanics verified, 2 non-blocking clarifications (run_judge is a parameter not a global; recorder needs *args/**kwargs). Phase=PLAN_APPROVED. Dispatching sonnet implementer.

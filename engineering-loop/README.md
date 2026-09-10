@@ -7,15 +7,17 @@ or another harness. Where a step names a tool, that tool is one way to do the st
 the step is the contract. Trust files, git and the board — not your memory.
 
 This directory is the layer: this file, `coordinator.md`, `board.sh` (board + claim),
-`agent_review.py` (cross-vendor reviewer via omnigent), `LOG.md` (ledger),
-`items/` (per-issue artifacts). It lives in flowbench and governs both repos;
-`flowbench-scenarios` is a passive sub-repo of the loop.
+`agent_review.py` (cross-vendor reviewer via omnigent), `LOG.md` (ledger). It lives in
+flowbench and governs both repos; `flowbench-scenarios` is a passive sub-repo of the loop.
 
 **Where state lives.** The GitHub issue and the Project board
 (https://github.com/users/kzarzycki/projects/1) hold the *state of work*: Phase,
 Session, questions for the owner, handoffs. The repo holds *what stays true*: spec,
-plan, decisions, review verdicts, and the ledger `engineering-loop/LOG.md`.
-Nothing is written twice.
+ADRs (`docs/design/decisions/`) and the ledger `engineering-loop/LOG.md`. Working
+artifacts of one item — spec, plan, briefs, Q&A — live in the worktree's gitignored
+`.loop/` and die with it; the PR and the issue carry their summaries and the review
+verdicts. The repo never holds text that can argue with the code. Nothing is written
+twice.
 
 ## Repos and branches
 
@@ -62,11 +64,11 @@ formatting, log extraction) is sonnet or haiku. Implementers: Fable `low`, re-ru
 model id. Claude implements → codex reviews (via omnigent); codex implements → Claude
 reviews. Effort `high` for gates 1 and 3, `medium`/`low` for gate 2 and for
 re-reviews of targeted fixes. Same-vendor review only when the other vendor is down
-(server, trust gate, quota) — say so on the review file's first line.
+(server, trust gate, quota) — say so on the verdict's first line.
 
-**Dispatching a reviewer.** Write the brief to `items/issue-<N>/gate-<k>-brief.md`:
-the gate text below plus the paths of the allowed inputs; never your reasoning
-(rule 1). Then get a fresh-context session of the *other* vendor to run it:
+**Dispatching a reviewer.** Write the brief to `.loop/gate-<k>-brief.md` in the
+worktree: the gate text below plus the paths of the allowed inputs; never your
+reasoning (rule 1). Then get a fresh-context session of the *other* vendor to run it:
 1. `uv run --extra live python engineering-loop/agent_review.py --cwd <worktree>
    --harness <codex-native|claude-native> --effort <high|medium> --title "issue-<N>
    gate-<k>" --brief-file <brief>` — works from any harness; prints the verdict.
@@ -74,8 +76,10 @@ the gate text below plus the paths of the allowed inputs; never your reasoning
    on the other vendor's agent with the brief, end the turn, read the inbox (a
    `failed` child may still hold the verdict: `sys_session_get_history`).
 3. Your own harness's fresh-context subagent with the same brief — same vendor as
-   the implementer, so say so on the review file's first line.
-Verdict → `items/issue-<N>/<spec|plan|branch>-review-<k>.md`.
+   the implementer, so say so on the verdict's first line.
+Verdict → first line `reviewer: <harness>:<id>`, then the text — posted where the
+human already looks: gate 1 as an issue comment, gates 2 and 3 as a PR review (open
+the PR as a draft after the plan). Nothing else is kept.
 
 ## Rules
 
@@ -84,10 +88,10 @@ Verdict → `items/issue-<N>/<spec|plan|branch>-review-<k>.md`.
 2. **Three attempts per gate.** Third rejection: label `loop:needs-human`, comment
    the reviewer's objections on the issue, Phase PARKED, next issue. Never lower a gate.
 3. **Unattended.** Where a skill or your own method would ask the user: answer from
-   the issue and the code and record question + answer in
-   `items/issue-<N>/decisions.md` (the spec reviewer audits it); true product
-   judgment → ask on the issue, `loop:needs-human`, park. "User approves" gates are
-   the reviewer of that phase.
+   the issue and the code and record question + answer in `.loop/decisions.md` (the
+   spec reviewer audits it; a decision that outlives the item becomes an ADR); true
+   product judgment → ask on the issue, `loop:needs-human`, park. "User approves"
+   gates are the reviewer of that phase.
 4. One issue in flight per session. Never merge red. No skipped or weakened tests, no
    force-push.
 5. **Follow-ups land on the same PR, before merge** — reviewer notes, a knob to plumb,
@@ -98,10 +102,10 @@ Verdict → `items/issue-<N>/<spec|plan|branch>-review-<k>.md`.
 
 ## Phases
 
-Each phase ends with `board.sh <url> <PHASE>` and a commit of its artifacts.
-`items/issue-<N>/` holds `decisions.md`, `spec.md`, `plan.md`, the gate briefs and
-review files. The `superpowers:*` names below are the Claude Code skills that
-implement a step; on a harness without them, do the step as described.
+Each phase ends with `board.sh <url> <PHASE>`. Working files (`spec.md`, `plan.md`,
+`decisions.md`, briefs) go to `<worktree>/.loop/`, gitignored, never committed. The
+`superpowers:*` names below are the Claude Code skills that implement a step; on a
+harness without them, do the step as described.
 
 **TRIAGE.** Spawned for one issue: that issue. Otherwise `gh issue list --state open`;
 skip epics (containers), `loop:needs-human`, `duplicate`, anything claimed, anything
@@ -116,7 +120,7 @@ inventing requirements → park it. Claim. One-paragraph pick rationale as issue
 options, pick one with reasons, write acceptance criteria that a test can check
 (`superpowers:brainstorming`, under rule 3; decline its visual companion). Scope
 check is binding: several independent subsystems → spec the first, comment that the
-issue should split. Spec → `items/issue-<N>/spec.md`.
+issue should split. Spec → `.loop/spec.md`.
 
 **Gate 1 — spec review** (effort `high`). Inputs: issue, `spec.md`, `decisions.md`,
 repo read access.
@@ -124,18 +128,20 @@ repo read access.
 > invented requirements are an automatic reject; (b) acceptance criteria are
 > objectively testable; (c) `decisions.md` answers are defensible from issue + code,
 > not guesses; (d) scope matches the issue. APPROVE or REVISE with numbered objections.
-APPROVE → `SPEC_APPROVED`, spec summary as issue comment.
+APPROVE → `SPEC_APPROVED`; the full spec goes on the issue as a comment (the worktree
+copy is not the record).
 
 **PLAN.** Ordered tasks with exact files and interfaces, each leaving the branch green,
 every acceptance criterion mapped to a task and a test (`superpowers:writing-plans`)
-→ `items/issue-<N>/plan.md`.
+→ `.loop/plan.md`.
 
 **Gate 2 — plan review** (effort `medium`). Inputs: `spec.md`, `plan.md`, repo.
 > Reject unless: (a) full criterion→task→test traceability, built by you; (b) tasks
 > ordered so the branch is green after each; (c) exact paths and interfaces per task
 > (context-free subagents execute this); (d) tests would catch the bug, not just the
 > happy path. APPROVE or REVISE with numbered objections.
-APPROVE → `PLAN_APPROVED`.
+APPROVE → `PLAN_APPROVED`; open the PR as a draft with the plan in its body, so gates
+2–3 land there as reviews.
 
 **IMPLEMENT.** One fresh-context implementer per task, TDD, a review after each task
 (`superpowers:subagent-driven-development`). "Escalate to the human" = park (rules
@@ -149,7 +155,8 @@ Inputs: `spec.md`, `plan.md`, `git diff origin/BASE_BRANCH...HEAD`, repo.
 > Also reject if: (a) any criterion lacks a test that fails without the change; (b) a
 > test was weakened, skipped or tailored; (c) unexplained changes beyond the plan;
 > (d) the diff touches CI config, agent instructions (`AGENTS.md`, `.claude/`,
-> `.codex/`) or `engineering-loop/` outside `items/` and `LOG.md`; (e) docs do not state current truth once, in the doc that owns
+> `.codex/`) or `engineering-loop/` outside `LOG.md`; (e) docs do not state current
+> truth once, in the doc that owns
 > it — no strikethroughs, "done (date)", restated facts or narration of how the text
 > came to be. APPROVE or REVISE with file:line objections.
 Fixes via fresh fix subagents, re-review. APPROVE → `BRANCH_APPROVED`.
@@ -157,8 +164,8 @@ Fixes via fresh fix subagents, re-review. APPROVE → `BRANCH_APPROVED`.
 **Gate 4 — mechanical.** Suite, lint, build; rebase on `origin/BASE_BRANCH` (code
 changed in conflict resolution → re-run gate 3); suite again → `GATES_GREEN`.
 
-**SHIP.** Push, PR against BASE_BRANCH (`Closes #<N>`, spec/plan summaries, review
-files), never merge locally (`superpowers:finishing-a-development-branch` with that
+**SHIP.** Mark the draft PR ready (`Closes #<N>`, spec and plan summaries in the
+body), never merge locally (`superpowers:finishing-a-development-branch` with that
 answer pre-made). Standing merge authorization for loop PRs (owner, 2026-07-03) — `gh pr merge
 --squash` once CI is green; red CI is a failed gate (fix, rule 2 cap, else park with
 the PR open). Merged → `MERGED`, PR link on the issue. The ledger entry ships in this
@@ -179,6 +186,6 @@ Then: spawned → stop. Otherwise back to TRIAGE.
 Append-only, compressed: **one entry per merged item**, ≤ 8 lines — issue, PRs, what
 changed and why in one sentence, live-run id and verdict, and only the lessons that
 are new (a root cause, a probe result, a rule that should change). No phase
-journaling, no gate play-by-play — the review files and the board already have those.
+journaling, no gate play-by-play — the PR reviews and the board already have those.
 Read it first when resuming work in either repo. Never rewrite history. Never edit
 this file — amendments go through the owner.

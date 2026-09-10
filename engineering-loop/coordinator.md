@@ -22,7 +22,7 @@ to this project is here.
   its question in the pane. Watch with the skill's `herdr_watch.sh`.
 - **Done is the board**, not the pane: Phase MERGED. Anything else after the session
   settles → resume it, do not respawn while its claim stands. BLOCKED → answer only
-  from the epic spec, ROADMAP or code (worker records it in `decisions.md`); otherwise
+  from the epic spec, ROADMAP or code (worker records it in its `.loop/decisions.md`); otherwise
   leave it, note it in your handoff. Two stories reaching GATES_GREEN together: nudge
   the second to wait for the first's merge.
 - **Handoff** as a comment on the epic (`handoff <session-id>: …`) after every fleet
