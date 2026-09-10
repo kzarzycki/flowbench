@@ -14,8 +14,8 @@ Rules:
   permission to build. If the agent offers to implement, decline: the plan is
   the deliverable.
 
-Ending the session: when the agent has written the final plan to plan.md and is
-finished (it says the plan is complete, presents/summarizes the finished plan,
-offers to implement, or stops asking questions), reply with exactly
-`PLAN_COMPLETE` and nothing else. Do not say `PLAN_COMPLETE` while the agent is
-still asking questions or still working on the plan.
+The plan counts as DELIVERED once the agent has written the final plan to
+plan.md and is finished with it — it says the plan is complete, presents or
+summarizes the finished plan, offers to implement it, or stops asking you
+questions. While it is still asking questions or still writing the plan, it has
+not delivered.

@@ -24,7 +24,6 @@ from flowbench.runner.judge import (
 )
 from flowbench.transcript import render_transcript
 
-DONE_TOKEN = "PLAN_COMPLETE"
 MISSING_PLAN = "(this flow produced no plan.md — treat it as a failed run)"
 SIM_MODEL = "opus"
 JUDGE_MODEL = "opus"
@@ -53,7 +52,6 @@ async def run_case(
     deadline_s: float = 1800.0,
     artifact_grace_s: float = 60.0,
     rotation: int = 0,
-    done_token: str = DONE_TOKEN,
     score_flow=None,
     artifact_name: str | None = "plan.md",
 ) -> dict:
@@ -117,7 +115,6 @@ async def run_case(
                 simulator,
                 first_prompt=compose_kickoff(flow, task_text),
                 simulator_system=sim_system,
-                done_token=done_token,
                 max_turns=max_turns,
                 deadline_s=deadline_s,
                 artifact_grace_s=artifact_grace_s,
@@ -208,7 +205,6 @@ async def run_case_n(
     scenario: str,
     max_turns: int = 80,
     deadline_s: float = 1800.0,
-    done_token: str = DONE_TOKEN,
     score_flow=None,
     artifact_name: str | None = "plan.md",
 ) -> dict:
@@ -228,7 +224,6 @@ async def run_case_n(
         "scenario": scenario,
         "max_turns": max_turns,
         "deadline_s": deadline_s,
-        "done_token": done_token,
         "score_flow": score_flow,
         "artifact_name": artifact_name,
     }

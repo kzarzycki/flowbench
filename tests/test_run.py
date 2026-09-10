@@ -7,6 +7,7 @@ import pytest
 import yaml
 
 import flowbench.run as run_mod
+from flowbench.loop import DONE_TOKEN
 from flowbench.run import (
     MISSING_PLAN,
     _project,
@@ -36,9 +37,9 @@ def test_run_case_offline(tmp_path):
 
     def make_simulator(flow, sim_dir):
         replies = (
-            ["a 404 not-found response", "PLAN_COMPLETE"]
+            ["a 404 not-found response", DONE_TOKEN]
             if flow["name"] == "superpowers"
-            else ["PLAN_COMPLETE"]
+            else [DONE_TOKEN]
         )
         sim = StubSim(replies)
         sims.append(sim)
@@ -97,7 +98,7 @@ def test_run_case_flags_missing_plan(tmp_path):
         return MissingPlanDriver("unused", [], run_dir=flow_dir)
 
     def make_simulator(flow, sim_dir):
-        return StubSim(["PLAN_COMPLETE"])
+        return StubSim([DONE_TOKEN])
 
     async def run_judge(judge_md, entries, judge_dir):
         by_label = {label: plan for label, _transcript, plan in entries}
@@ -176,7 +177,7 @@ def test_run_case_forwards_artifact_grace(tmp_path, monkeypatch):
         return FakeDriver("# p", [])
 
     def make_simulator(flow, sim_dir):
-        return StubSim(["PLAN_COMPLETE"])
+        return StubSim([DONE_TOKEN])
 
     async def run_judge(judge_md, entries, judge_dir):
         return "WINNER: A"
@@ -482,7 +483,7 @@ def _three_flow_factories():
         )
 
     def make_simulator(flow, sim_dir):
-        return StubSim(["PLAN_COMPLETE"])
+        return StubSim([DONE_TOKEN])
 
     return make_flow_driver, make_simulator
 
@@ -710,7 +711,7 @@ def test_omni_factories_bind_scenario():
     assert all(f.keywords == {"scenario": "dwh"} for f in (mk_sim, judge))
 
 
-# --- S01.3: no-judge / score_flow / done_token / omni_factories keywords ----
+# --- S01.3: no-judge / score_flow / omni_factories keywords -----------------
 
 
 def _unjudged_case(tmp_path) -> Path:
@@ -848,39 +849,6 @@ def test_run_case_no_score_flow_judge_present_unchanged(tmp_path):
     assert (root / "judge.md").is_file()
 
 
-def test_run_case_done_token_reaches_run_agent_session(tmp_path, monkeypatch):
-    case = _unjudged_case(tmp_path)
-    calls = []
-
-    async def rec(*args, **kwargs):
-        calls.append(kwargs)
-        return {"items": [], "events": [], "artifact_text": "# p"}
-
-    monkeypatch.setattr(run_mod, "run_agent_session", rec)
-
-    def make_flow_driver(flow, flow_dir):
-        return FakeDriver("# p", [])
-
-    def make_simulator(flow, sim_dir):
-        return StubSim(["<<DONE>>"])
-
-    asyncio.run(
-        run_case(
-            case,
-            run_id="t",
-            make_flow_driver=make_flow_driver,
-            make_simulator=make_simulator,
-            run_judge=None,
-            runs_root=tmp_path,
-            scenario="coding_workflow",
-            done_token="<<DONE>>",
-            artifact_grace_s=0.0,
-        )
-    )
-    assert calls
-    assert all(kwargs["done_token"] == "<<DONE>>" for kwargs in calls)
-
-
 def test_omni_factories_git_init(tmp_path):
     mk_flow, _mk_sim, _judge = run_mod.omni_factories("x", git_init=True)
     d = mk_flow({"name": "plain"}, tmp_path)
@@ -898,7 +866,7 @@ def test_run_case_artifact_none_omits_artifact_keys(tmp_path):
         return FakeDriver("# p", [])
 
     def make_simulator(flow, sim_dir):
-        return StubSim(["PLAN_COMPLETE"])
+        return StubSim([DONE_TOKEN])
 
     async def score_flow(flow, flow_dir, session):
         return {"flow": flow["name"]}
@@ -953,7 +921,6 @@ def test_run_case_builds_probe_from_flow_dir(tmp_path, monkeypatch):
             run_judge=None,
             runs_root=tmp_path,
             scenario="coding_workflow",
-            done_token="<<DONE>>",
             artifact_grace_s=30.0,
             artifact_name=None,
         )
@@ -972,7 +939,6 @@ def test_run_case_builds_probe_from_flow_dir(tmp_path, monkeypatch):
             run_judge=None,
             runs_root=tmp_path,
             scenario="coding_workflow",
-            done_token="<<DONE>>",
             artifact_grace_s=30.0,
         )
     )

@@ -29,7 +29,6 @@ from flowbench.run import omni_factories, rescore_run, run_case_n
 from scenarios.coding_workflow.cases.todo_app.scoring import make_grader_omni, score_todo_app
 
 SCENARIO = "coding_workflow"
-DONE_TOKEN = "<<DONE>>"
 # todo_app's deliverable is the running app, judged black-box by acceptance.py
 # — no file artifact (tasks.json is the app's runtime state, not a deliverable).
 ARTIFACT_NAME = None
@@ -110,7 +109,6 @@ def main() -> None:
             runs_root=runs_root,
             scenario=SCENARIO,
             deadline_s=args.deadline_s,
-            done_token=DONE_TOKEN,
             score_flow=score_flow,
             artifact_name=ARTIFACT_NAME,
         )

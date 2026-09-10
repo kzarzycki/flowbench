@@ -16,17 +16,20 @@ def test_first_prompt_leaks_only_python_cli():
         assert leak not in p
 
 
-def test_simulator_names_done_token_and_knowledge_carries_shape():
+def test_simulator_names_no_done_token_and_knowledge_carries_shape():
+    # the token is the engine's (flowbench.loop.DONE_TOKEN), appended to the
+    # prime prompt; the persona must not name a competing one.
     sim = (CASE_DIR / "simulator.md").read_text()
     knowledge = (CASE_DIR / "knowledge.md").read_text()
-    assert "<<DONE>>" in sim
+    assert "<<DONE>>" not in sim
     assert "tasks.json" in knowledge
 
 
-def test_done_and_continue_rules_present():
+def test_delivered_and_continue_rules_present():
     sim = (CASE_DIR / "simulator.md").read_text()
     assert "Continue." in sim
-    assert "<<DONE>>" in sim
+    assert "DELIVERED" in sim  # what "delivered" means here, in the case's words
+    assert "<<DONE>>" not in sim
     assert "take your time" in sim.lower()
 
 

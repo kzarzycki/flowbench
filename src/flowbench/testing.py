@@ -8,6 +8,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from flowbench.driver import AgentDriver
+from flowbench.loop import DONE_TOKEN
 from flowbench.types import TurnResult, TurnStatus
 
 
@@ -82,7 +83,7 @@ class StubSim:
         self.closed = False
 
     async def generate(self, prompt):
-        reply = self.replies.pop(0) if self.replies else "PLAN_COMPLETE"
+        reply = self.replies.pop(0) if self.replies else DONE_TOKEN
 
         class _Out:
             completion = reply
@@ -103,7 +104,7 @@ def n_run_factories(judge_winners):
         return FakeDriver("# plain plan\nno unknown-key note.", [], run_dir=flow_dir)
 
     def make_simulator(flow, sim_dir):
-        return StubSim(["PLAN_COMPLETE"])
+        return StubSim([DONE_TOKEN])
 
     async def run_judge(judge_md, entries, judge_dir):
         w = winners.pop(0)

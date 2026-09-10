@@ -12,7 +12,7 @@ import pytest
 import flowbench.run as engine_run
 from scenarios.coding_workflow.cases.todo_app.fixtures import sessions
 from scenarios.coding_workflow.cases.todo_app.scoring import make_grader_omni, score_todo_app
-from scenarios.coding_workflow.run import DONE_TOKEN, SCENARIO, default_runs_root, main
+from scenarios.coding_workflow.run import SCENARIO, default_runs_root, main
 
 FIX = Path(__file__).parents[3] / "scenarios/coding_workflow/cases/todo_app/fixtures"
 
@@ -42,7 +42,6 @@ def test_main_wires_engine_run_case_n(monkeypatch, capsys, tmp_path):
     case_dir, kw = calls[-1]
     assert kw["run_id"] == "r1" and kw["n"] == 1
     assert kw["scenario"] == "coding_workflow"
-    assert kw["done_token"] == "<<DONE>>"
     assert kw["score_flow"].func is score_todo_app
     assert kw["score_flow"].keywords["make_grader"].func is make_grader_omni
     assert kw["make_flow_driver"].func is engine_run.make_flow_driver_omni
@@ -86,9 +85,8 @@ def test_main_rescore_missing_run_dir_exits(monkeypatch, tmp_path):
         main()
 
 
-def test_scenario_and_done_token_constants():
+def test_scenario_constant():
     assert SCENARIO == "coding_workflow"
-    assert DONE_TOKEN == "<<DONE>>"
 
 
 class _CannedGrader:
