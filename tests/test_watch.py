@@ -1,17 +1,27 @@
 import json
+import os
+from pathlib import Path
 
 import pytest
 
 from flowbench.types import TurnStatus
-from flowbench.watch import RunWatch
+from flowbench.watch import RunWatch, follow
+
+
+def _runs_root(tmp_path, case: str = "swe_planning", run_id: str = "todo-x") -> Path:
+    """`<runs_root>/<case>/<run_id>` — the layout `RunWatch.locate` reads a run id
+    in, and the one it derives the `omni_project` label from."""
+    root = tmp_path / "runs"
+    (root / case / run_id).mkdir(parents=True)
+    return root
 
 
 def test_run_watch_tick_events(tmp_path):
     log = tmp_path / "server.log"
     log.write_text("boot line\n")
-    run_root = tmp_path / "runs" / "todo-x"
-    run_root.mkdir(parents=True)
-    w = RunWatch("todo-x", runs_root=tmp_path / "runs", scenario="swe_planning", server_log=log)
+    runs_root = _runs_root(tmp_path)
+    run_root = runs_root / "swe_planning" / "todo-x"
+    w = RunWatch("todo-x", runs_root=runs_root, server_log=log)
     w._last_assistant_text = lambda sid: ""  # keep the suite off the network (#131 read)
     w._run_sessions = lambda: [
         {
@@ -64,8 +74,7 @@ def test_run_watch_tick_events(tmp_path):
 
 def test_run_watch_log_sources_missing_and_rotated(tmp_path):
     log = tmp_path / "server.log"  # does not exist yet
-    (tmp_path / "runs" / "r").mkdir(parents=True)
-    w = RunWatch("r", runs_root=tmp_path / "runs", scenario="s", server_log=log)
+    w = RunWatch("r", runs_root=_runs_root(tmp_path, "s", "r"), server_log=log)
     assert w._new_log_lines() == []
     log.write_text("a\nb\n")
     assert w._new_log_lines() == ["a", "b"]
@@ -73,7 +82,9 @@ def test_run_watch_log_sources_missing_and_rotated(tmp_path):
     assert w._new_log_lines() == ["c"]
 
 
-def test_run_watch_sessions_filters_by_project_and_survives_server_errors(monkeypatch, caplog):
+def test_run_watch_sessions_filters_by_project_and_survives_server_errors(
+    tmp_path, monkeypatch, caplog
+):
     import http.client
     import io
     import logging
@@ -81,7 +92,7 @@ def test_run_watch_sessions_filters_by_project_and_survives_server_errors(monkey
 
     from flowbench import watch as watch_mod
 
-    w = RunWatch("r", runs_root="/nonexistent", scenario="s", server_log=watch_mod.SERVER_LOG)
+    w = RunWatch("r", runs_root=_runs_root(tmp_path, "s", "r"), server_log=watch_mod.SERVER_LOG)
     payload = {
         "data": [
             {"id": "a", "labels": {"omni_project": "s/r"}},
@@ -137,8 +148,7 @@ def test_run_watch_sessions_filters_by_project_and_survives_server_errors(monkey
 def test_run_watch_reports_server_errors_touching_run_sessions(tmp_path):
     log = tmp_path / "server.log"
     log.write_text("")
-    (tmp_path / "runs" / "r").mkdir(parents=True)
-    w = RunWatch("r", runs_root=tmp_path / "runs", scenario="s", server_log=log)
+    w = RunWatch("r", runs_root=_runs_root(tmp_path, "s", "r"), server_log=log)
     w._last_assistant_text = lambda sid: ""  # offline
     w._run_sessions = lambda: [{"id": "conv_1", "status": TurnStatus.RUNNING, "title": "flow: x"}]
     log.write_text("ERROR runner conv_1 exploded\nERROR unrelated conv_9\n")
@@ -149,7 +159,10 @@ def test_run_watch_reports_server_errors_touching_run_sessions(tmp_path):
 def test_run_watch_reports_stalls_once_per_transition(tmp_path, monkeypatch):
     monkeypatch.setattr("flowbench.watch.time.time", lambda: 1000.0)
     w = RunWatch(
-        "r", runs_root=tmp_path, scenario="s", server_log=tmp_path / "none.log", stall_s=300
+        "r",
+        runs_root=_runs_root(tmp_path, "s", "r"),
+        server_log=tmp_path / "none.log",
+        stall_s=300,
     )
     sess = {"id": "c1", "status": TurnStatus.RUNNING, "title": "flow: x", "updated_at": 900}
     w._run_sessions = lambda: [sess]
@@ -175,8 +188,8 @@ _BANNER = "You've hit your session limit · resets 6:40pm (Europe/Zurich)"  # s0
 def _watch(tmp_path, last_text):
     log = tmp_path / "server.log"
     log.write_text("")
-    (tmp_path / "runs" / "r1").mkdir(parents=True)
-    w = RunWatch("r1", runs_root=tmp_path / "runs", scenario="coding_workflow", server_log=log)
+    runs_root = _runs_root(tmp_path, "coding_workflow", "r1")
+    w = RunWatch("r1", runs_root=runs_root, server_log=log)
     w._run_sessions = lambda: [
         {
             "id": "conv_q",
@@ -237,7 +250,8 @@ class _Resp:
 def _watch_plain(tmp_path):
     log = tmp_path / "server.log"
     log.write_text("")
-    return RunWatch("r1", runs_root=tmp_path / "runs", scenario="coding_workflow", server_log=log)
+    runs_root = _runs_root(tmp_path, "coding_workflow", "r1")
+    return RunWatch("r1", runs_root=runs_root, server_log=log)
 
 
 @pytest.mark.parametrize(
@@ -273,3 +287,95 @@ def test_last_assistant_text_read_failure_is_empty(tmp_path, monkeypatch):
 
     monkeypatch.setattr("flowbench.watch.urllib.request.urlopen", failing_urlopen)
     assert _watch_plain(tmp_path)._last_assistant_text("conv_q") == ""
+
+
+# --- locating a run by id ---------------------------------------------------
+
+
+def test_run_watch_locates_the_run_and_derives_the_project(tmp_path):
+    runs_root = _runs_root(tmp_path, "feature_flag_service", "r1")
+    (runs_root / "other_case" / "r2").mkdir(parents=True)  # a neighbour, same root
+
+    located = RunWatch.locate("r1", runs_root)
+
+    assert located == runs_root / "feature_flag_service" / "r1"
+    w = RunWatch("r1", runs_root=runs_root, server_log=tmp_path / "none.log")
+    assert w.run_root == located
+    # the label every writer of the run uses, read back off the located path
+    assert w.project == "feature_flag_service/r1"
+
+
+def test_run_watch_locate_rejects_missing_and_ambiguous(tmp_path):
+    runs_root = _runs_root(tmp_path, "case_a", "r1")
+
+    with pytest.raises(ValueError, match=r"no run dir") as missing:
+        RunWatch.locate("nope", runs_root)
+    assert str(runs_root / "*" / "nope") in str(missing.value)
+
+    (runs_root / "case_b" / "r1").mkdir(parents=True)
+    with pytest.raises(ValueError, match=r"matches 2 cases") as ambiguous:
+        RunWatch("r1", runs_root=runs_root, server_log=tmp_path / "none.log")
+    for case in ("case_a", "case_b"):
+        assert str(runs_root / case / "r1") in str(ambiguous.value)
+
+
+# --- follow -----------------------------------------------------------------
+
+
+class _FakeWatch:
+    """A watch whose ticks and completion are scripted: `follow`'s loop under test
+    without a run dir or a server."""
+
+    def __init__(self, run_root, ticks, complete_after: int | None = None):
+        self.run_root = run_root
+        self._ticks = list(ticks)
+        self._complete_after = complete_after
+        self.calls = 0
+
+    def tick(self):
+        self.calls += 1
+        return self._ticks.pop(0) if self._ticks else []
+
+    def run_complete(self):
+        if self._complete_after is not None and self.calls >= self._complete_after:
+            return self.run_root / "run.json"
+        return None
+
+
+def test_follow_prints_events_then_exits_on_run_json(tmp_path, monkeypatch):
+    slept = []
+    monkeypatch.setattr("flowbench.watch.time.sleep", slept.append)
+    run_root = tmp_path / "runs" / "case_a" / "r1"
+    run_root.mkdir(parents=True)
+    (run_root / "run.json").write_text('{"winner": "A"}')
+    lines = []
+    w = _FakeWatch(run_root, [["SESSION FAILED: flow: plain (c1)"], []], complete_after=2)
+
+    # a live pid is not an exit condition: the loop waits for the run.json
+    follow(w, pid=os.getpid(), interval=7.0, out=lines.append)
+
+    assert lines == [
+        "SESSION FAILED: flow: plain (c1)",
+        'RUN COMPLETE: {"winner": "A"}',
+    ]
+    assert slept == [7.0]  # one wait between the two ticks, none after the last
+
+
+@pytest.mark.parametrize("launch_log", [True, False])
+def test_follow_exits_when_the_runner_pid_is_gone(tmp_path, monkeypatch, launch_log):
+    def _dead(pid, sig):
+        raise OSError("no such process")
+
+    monkeypatch.setattr("flowbench.watch.os.kill", _dead)
+    monkeypatch.setattr("flowbench.watch.time.sleep", lambda s: pytest.fail("must not wait"))
+    run_root = tmp_path / "runs" / "case_a" / "r1"
+    run_root.mkdir(parents=True)
+    if launch_log:
+        (run_root.parent / "r1.launch.log").write_text("Traceback: boom\n")
+    lines = []
+
+    follow(_FakeWatch(run_root, []), pid=4242, out=lines.append)
+
+    assert len(lines) == 1
+    assert lines[0].startswith("RUNNER EXITED without run.json")
+    assert ("Traceback: boom" if launch_log else "(no launch log)") in lines[0]
