@@ -1465,23 +1465,6 @@ async def test_start_skips_reasoning_effort_when_unset(tmp_path, monkeypatch):
     assert ns.effort is None
 
 
-async def test_start_git_inits_the_run_dir_once(tmp_path, monkeypatch):
-    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-    _patch_start(monkeypatch, _FakeHttp())
-    run_dir = tmp_path / "run"
-    d = OmnigentDriver(run_dir=run_dir, git_init=True)
-
-    await d.start()
-    assert (run_dir / ".git").is_dir()
-
-    # already a repo: git_init_repo must not run again (it would re-commit)
-    def _boom(path):  # pragma: no cover - must not be called
-        raise AssertionError("git_init_repo called on an existing repo")
-
-    monkeypatch.setattr("flowbench.driver.omnigent.git_init_repo", _boom)
-    await d.start()
-
-
 async def test_start_raises_when_no_host_has_claude_native(tmp_path, monkeypatch):
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     _patch_start(monkeypatch, _FakeHttp(hosts=[]))

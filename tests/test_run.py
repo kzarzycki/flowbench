@@ -16,6 +16,7 @@ from flowbench.run import (
     NO_DELIVERABLE,
     _judge_view,
     _project,
+    _run_parts,
     _title,
     make_flow_driver_omni,
     run_case,
@@ -511,23 +512,19 @@ def test_make_flow_driver_omni_maps_flow_config(tmp_path):
         "reasoning_effort": "xhigh",
         "skills": "none",
     }
-    d = make_flow_driver_omni(flow, tmp_path, scenario="swe_planning")
-    assert d.run_dir == tmp_path
+    flow_dir = tmp_path / "todo_app" / "run-1" / "plain"
+    d = make_flow_driver_omni(flow, flow_dir)
+    assert d.run_dir == flow_dir
     assert d.model == "opus"
     assert d.harness == "claude-native"
     assert d.skills == "none"
     assert d.reasoning_effort == "xhigh"
     assert d.turn_timeout_s == 1800  # planning turns run way past the driver's 240s default
     assert d.stall_s == 300  # watchdog (#54) is per-flow tunable like the turn cap
-    assert (
-        make_flow_driver_omni(
-            {"name": "x", "turn_timeout_s": 60}, tmp_path, scenario="swe_planning"
-        ).turn_timeout_s
-        == 60
-    )
-    # web-UI grouping: one project folder per run, short role-based titles
-    assert d.session_title == "flow: plain"
-    assert d.project == f"swe_planning/{tmp_path.parent.name}"
+    assert make_flow_driver_omni({"name": "x", "turn_timeout_s": 60}, flow_dir).turn_timeout_s == 60
+    # web-UI grouping: one project folder per run, case-and-role titles
+    assert d.session_title == "todo_app · flow: plain"
+    assert d.project == "todo_app/run-1"
 
 
 def test_run_n_writes_one_trial_dir_per_trial(tmp_path):
@@ -736,18 +733,31 @@ def test_run_case_rotation_reverses_judge_order(tmp_path):
     assert meta["winner_flow"] == "plain"  # positional "a" resolved via labels
 
 
+def test_run_parts_and_title_and_project(tmp_path):
+    flat = tmp_path / "todo_app" / "run-7" / "plain"
+    assert _run_parts(flat) == ("todo_app", "run-7", None)
+    assert _title(flat, "flow: plain") == "todo_app · flow: plain"
+    assert _project(flat) == "todo_app/run-7"
+
+    trial = tmp_path / "todo_app" / "run-7" / "trial-01" / "plain"
+    assert _run_parts(trial) == ("todo_app", "run-7", "trial-01")
+    assert _title(trial, "flow: plain") == "todo_app · trial-01 · flow: plain"
+    assert _project(trial) == "todo_app/run-7"
+
+
 def test_project_groups_trials_under_the_run(tmp_path):
-    assert _project(tmp_path / "todo-010" / "plain", "swe_planning") == "swe_planning/todo-010"
+    assert _project(tmp_path / "todo_app" / "todo-010" / "plain") == "todo_app/todo-010"
     assert (
-        _project(tmp_path / "todo-010" / "trial-01" / "plain", "swe_planning")
-        == "swe_planning/todo-010"
+        _project(tmp_path / "todo_app" / "todo-010" / "trial-01" / "plain") == "todo_app/todo-010"
     )
 
 
 def test_title_includes_trial_segment(tmp_path):
-    assert _title(tmp_path / "todo-x" / "plain", "sim: plain") == "sim: plain"
-    assert (
-        _title(tmp_path / "todo-x" / "trial-02" / "plain", "sim: plain") == "trial-02 · sim: plain"
+    assert _title(tmp_path / "todo_app" / "todo-x" / "plain", "sim: plain") == (
+        "todo_app · sim: plain"
+    )
+    assert _title(tmp_path / "todo_app" / "todo-x" / "trial-02" / "plain", "sim: plain") == (
+        "todo_app · trial-02 · sim: plain"
     )
 
 
@@ -758,14 +768,14 @@ def test_make_flow_driver_threads_skill_dirs(tmp_path):
         "model": "gpt-5.5",
         "skill_dirs": [tmp_path / "skills" / "brainstorming"],
     }
-    d = make_flow_driver_omni(flow, tmp_path, scenario="swe_planning")
+    d = make_flow_driver_omni(flow, tmp_path)
     assert d.skill_dirs == [tmp_path / "skills" / "brainstorming"]
     assert d.harness == "codex-native"
     assert d.model == "gpt-5.5"
 
 
 def test_make_flow_driver_defaults_no_skill_dirs(tmp_path):
-    d = make_flow_driver_omni({"name": "x"}, tmp_path, scenario="swe_planning")
+    d = make_flow_driver_omni({"name": "x"}, tmp_path)
     assert d.skill_dirs == []
 
 
@@ -952,14 +962,13 @@ def test_run_case_n_writes_aggregate_report(tmp_path):
 
 
 def test_make_simulator_omni_is_bare_claude_on_a_session_model(tmp_path):
-    sim = run_mod.make_simulator_omni(
-        {"name": "plain"}, tmp_path / "_sim_plain", scenario="swe_planning"
-    )
+    sim_dir = tmp_path / "todo_app" / "run-1" / "_sim_plain"
+    sim = run_mod.make_simulator_omni({"name": "plain"}, sim_dir, model="haiku")
     d = sim._driver
-    assert d.skills == "none" and d.model == run_mod.SIM_MODEL
+    assert d.skills == "none" and d.model == "haiku"
     # web-UI grouping: the sim shares its run's folder, like the flow and judge
-    assert d.session_title == "sim: plain"
-    assert d.project == f"swe_planning/{tmp_path.name}"
+    assert d.session_title == "todo_app · sim: plain"
+    assert d.project == "todo_app/run-1"
 
 
 def test_run_judge_omni_generates_once_and_closes(tmp_path, monkeypatch):
@@ -982,34 +991,65 @@ def test_run_judge_omni_generates_once_and_closes(tmp_path, monkeypatch):
             seen["closed"] = True
 
     monkeypatch.setattr(run_mod, "SessionModel", _Model)
-    judge_dir = tmp_path / "todo-1" / "_judge"
+    judge_dir = tmp_path / "todo_app" / "todo-1" / "_judge"
     out = asyncio.run(
-        run_mod.run_judge_omni("rubric", [("A", "t", "plan a")], judge_dir, scenario="swe_planning")
+        run_mod.run_judge_omni("rubric", [("A", "t", "plan a")], judge_dir, model="sonnet")
     )
     assert out == "WINNER: A" and seen["closed"] is True
     assert seen["prompt"].startswith("rubric")
     d = seen["driver"]
-    assert d.model == run_mod.JUDGE_MODEL and d.turn_timeout_s == 600
-    assert d.project == "swe_planning/todo-1" and d.session_title == "judge"
+    assert d.model == "sonnet" and d.turn_timeout_s == 600
+    assert d.project == "todo_app/todo-1" and d.session_title == "todo_app · judge"
 
 
-def test_omni_factories_bind_scenario():
-    mk_flow, mk_sim, judge = run_mod.omni_factories("dwh")
-    assert mk_flow.func is run_mod.make_flow_driver_omni
+@pytest.mark.parametrize("trial", [None, "trial-01"])
+def test_every_role_driver_carries_the_case_and_trial(tmp_path, monkeypatch, trial):
+    """Flow, sim and judge label themselves off the run layout alone: the case,
+    the trial when there is one, and the run they all belong to."""
+    run_root = tmp_path / "todo_app" / "run-7"
+    if trial is not None:
+        run_root = run_root / trial
+    prefix = f"todo_app · {trial}" if trial is not None else "todo_app"
+    drivers = []
+
+    class _Model:
+        def __init__(self, driver):
+            drivers.append(driver)
+
+        async def generate(self, prompt):
+            class _Out:
+                completion = "WINNER: A"
+
+            return _Out()
+
+        async def close(self):
+            pass
+
+    monkeypatch.setattr(run_mod, "SessionModel", _Model)
+    flow_driver = make_flow_driver_omni({"name": "plain"}, run_root / "plain")
+    run_mod.make_simulator_omni({"name": "plain"}, run_root / "_sim_plain", model="haiku")
+    asyncio.run(
+        run_mod.run_judge_omni("rubric", [("A", "t", "p")], run_root / "_judge", model="sonnet")
+    )
+
+    sim_driver, judge_driver = drivers
+    assert flow_driver.session_title == f"{prefix} · flow: plain"
+    assert sim_driver.session_title == f"{prefix} · sim: plain"
+    assert judge_driver.session_title == f"{prefix} · judge"
+    # one benchmark run is one web-UI folder, trials included
+    assert {d.project for d in (flow_driver, sim_driver, judge_driver)} == {"todo_app/run-7"}
+
+
+def test_omni_factories_read_models_from_case_settings(tmp_path):
+    case = PlanCase(
+        tmp_path / "case_dir", settings=Settings(sim_model="haiku", judge_model="sonnet")
+    )
+    mk_flow, mk_sim, judge = run_mod.omni_factories(case)
+    assert mk_flow is run_mod.make_flow_driver_omni  # nothing to bind: the flow carries its model
     assert mk_sim.func is run_mod.make_simulator_omni
     assert judge.func is run_mod.run_judge_omni
-    assert mk_flow.keywords == {"scenario": "dwh", "git_init": False}
-    assert all(f.keywords == {"scenario": "dwh"} for f in (mk_sim, judge))
-
-
-def test_omni_factories_git_init(tmp_path):
-    mk_flow, _mk_sim, _judge = run_mod.omni_factories("x", git_init=True)
-    d = mk_flow({"name": "plain"}, tmp_path)
-    assert d.git_init is True
-
-    mk_flow_default, _, _ = run_mod.omni_factories("x")
-    d2 = mk_flow_default({"name": "plain"}, tmp_path)
-    assert d2.git_init is False
+    assert mk_sim.keywords == {"model": "haiku"}
+    assert judge.keywords == {"model": "sonnet"}
 
 
 # --- the case's own grading, with no judge ----------------------------------

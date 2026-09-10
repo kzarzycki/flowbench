@@ -90,7 +90,7 @@ def main() -> None:
         print(json.dumps(result, indent=2))
         return
 
-    make_flow_driver, make_simulator, run_judge = omni_factories(SCENARIO)
+    make_flow_driver, make_simulator, run_judge = omni_factories(case)
     result = asyncio.run(
         run_case_n(
             case,

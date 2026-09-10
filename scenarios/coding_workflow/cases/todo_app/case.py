@@ -10,8 +10,6 @@ from flowbench.case import Case
 from flowbench.driver import git_init_repo
 from scenarios.coding_workflow.cases.todo_app.scoring import make_grader_omni, score_todo_app
 
-SCENARIO = "coding_workflow"
-
 
 class TodoAppCase(Case):
     """The build takes ~an hour of wall clock; the grader is a class attribute so
@@ -36,5 +34,5 @@ class TodoAppCase(Case):
             flow,
             flow_dir,
             session,
-            make_grader=lambda d: grader_factory(d, scenario=SCENARIO),
+            make_grader=lambda d: grader_factory(d, model=self.settings.judge_model),
         )

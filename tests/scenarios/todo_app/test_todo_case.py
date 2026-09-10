@@ -8,6 +8,7 @@ import subprocess
 from pathlib import Path
 
 from flowbench.case import load_case
+from flowbench.settings import Settings
 from scenarios.coding_workflow import scenario
 from scenarios.coding_workflow.cases.todo_app.fixtures import sessions
 
@@ -58,6 +59,29 @@ async def test_todo_app_case_setup_git_inits_the_flow_dir(tmp_path):
     )
     assert "initial commit" in log.stdout
     await case.setup({"name": "superpowers"}, flow_dir)  # idempotent: a re-run must not fail
+
+
+async def test_todo_app_case_score_uses_the_settings_judge_model(tmp_path, monkeypatch):
+    case = load_case(scenario.CASE_DIR("todo_app"), settings=Settings(judge_model="haiku"))
+    flow_dir = tmp_path / "superpowers"
+    shutil.copytree(FIX / "good_app", flow_dir)
+    grader = _CannedGrader('{"shape_fit":0.5,"rationale":"ok"}')
+    seen = {}
+
+    def _factory(flow_dir, **kw):
+        seen.update(kw)
+        return grader
+
+    # At the class attribute, not the instance: `score` reads it through type(self)
+    monkeypatch.setattr(type(case), "grader_factory", _factory)
+
+    await case.score(
+        {"name": "superpowers", "harness": "claude-native", "skills": "none", "skill_dirs": []},
+        flow_dir,
+        sessions.FULL_WORKFLOW,
+    )
+
+    assert seen == {"model": "haiku"}
 
 
 async def test_todo_app_case_score_goes_through_the_grader_factory(tmp_path, monkeypatch):

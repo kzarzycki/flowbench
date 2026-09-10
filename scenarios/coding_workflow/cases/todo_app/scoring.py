@@ -10,7 +10,7 @@ from pathlib import Path
 
 from flowbench.driver import OmnigentDriver
 from flowbench.model import SessionModel
-from flowbench.run import JUDGE_MODEL, _project, _title
+from flowbench.run import _project, _title
 from scenarios.coding_workflow.cases.todo_app import scorers as sc
 from scenarios.coding_workflow.cases.todo_app.acceptance import run_acceptance
 
@@ -77,17 +77,17 @@ async def score_todo_app(flow: dict, flow_dir: Path, session: dict, *, make_grad
     }
 
 
-def make_grader_omni(flow_dir: Path, *, scenario: str) -> SessionModel:
+def make_grader_omni(flow_dir: Path, *, model: str) -> SessionModel:
     flow_dir = Path(flow_dir)
     judge_dir = flow_dir.parent / f"_judge_{flow_dir.name}"
     judge_dir.mkdir(parents=True, exist_ok=True)
     return SessionModel(
         OmnigentDriver(
             run_dir=judge_dir,
-            model=JUDGE_MODEL,
+            model=model,
             skills="none",
             turn_timeout_s=600,  # one long grading turn over the produced code
             session_title=_title(judge_dir, f"judge: {flow_dir.name}"),
-            project=_project(judge_dir, scenario),
+            project=_project(judge_dir),
         )
     )

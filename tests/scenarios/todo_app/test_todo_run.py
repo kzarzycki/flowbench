@@ -43,11 +43,9 @@ def test_main_wires_engine_run_case_n(monkeypatch, capsys, tmp_path):
     assert type(case).__name__ == "TodoAppCase" and case.name == "todo_app"
     assert case.deadline_s == 60.0  # --deadline-s overrides what the case declares
     assert kw["run_id"] == "r1" and kw["n"] == 1
-    assert kw["make_flow_driver"].func is engine_run.make_flow_driver_omni
-    assert kw["make_flow_driver"].keywords == {
-        "scenario": "coding_workflow",
-        "git_init": False,  # the case git-inits the flow dir in its own setup
-    }
+    # the case git-inits the flow dir in its own setup, and the flow carries its
+    # own model, so the flow factory needs nothing bound to it
+    assert kw["make_flow_driver"] is engine_run.make_flow_driver_omni
     out = capsys.readouterr().out
     assert json.loads(out.split("\nRun written to:")[0]) == {"x": 1}
 
@@ -147,20 +145,24 @@ async def test_score_todo_app_empty_grader_completion(tmp_path):
     assert grader.closed is True
 
 
-def test_make_grader_omni_wires_judge_dir_and_model(tmp_path):
-    flow_dir = tmp_path / "run-1" / "superpowers"
+@pytest.mark.parametrize("trial", [None, "trial-01"])
+def test_make_grader_omni_takes_the_model_and_the_new_labels(tmp_path, trial):
+    run_root = tmp_path / "todo_app" / "run-1"
+    if trial is not None:
+        run_root = run_root / trial
+    flow_dir = run_root / "superpowers"
     flow_dir.mkdir(parents=True)
-    model = make_grader_omni(flow_dir, scenario="coding_workflow")
+    model = make_grader_omni(flow_dir, model="sonnet")
     d = model._driver
-    assert d.run_dir == flow_dir.parent / "_judge_superpowers"
+    assert d.run_dir == run_root / "_judge_superpowers"
     assert d.run_dir.is_dir()
-    assert d.model == engine_run.JUDGE_MODEL
+    assert d.model == "sonnet"
     assert d.skills == "none"
     assert d.turn_timeout_s == 600
-    assert not hasattr(d, "artifact_name")
-    # web-UI grouping: the grader lands in its run's folder, titled by flow
-    assert d.project == "coding_workflow/run-1"
-    assert d.session_title == "judge: superpowers"
+    # web-UI grouping: the grader lands in its run's folder, titled by case and flow
+    assert d.project == "todo_app/run-1"
+    prefix = f"todo_app · {trial}" if trial is not None else "todo_app"
+    assert d.session_title == f"{prefix} · judge: superpowers"
 
 
 @pytest.mark.parametrize("flag", ["--deadline-s", "--n"])

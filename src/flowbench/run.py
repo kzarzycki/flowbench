@@ -29,8 +29,6 @@ from flowbench.runner.judge import (
 from flowbench.transcript import render_transcript
 
 NO_DELIVERABLE = "(no deliverable declared)"
-SIM_MODEL = "opus"
-JUDGE_MODEL = "opus"
 
 
 def MISSING_DELIVERABLE(name: str) -> str:
@@ -394,36 +392,41 @@ async def rescore_run(case, run_root) -> dict[str, str]:
 # --- the real omnigent factories -------------------------------------------
 
 
+def _run_parts(run_dir: Path) -> tuple[str, str, str | None]:
+    """`(case, run_id, trial | None)` read off a role dir's own path. Every role
+    of a run — a flow, its simulator, the judge, a per-flow grader — is a direct
+    child of the run dir, which `run_case` lays out as
+    `<runs_root>/<case>/<run_id>[/trial-XX]`. So the labels a session carries are
+    the run's own layout, never something a caller has to pass in and keep
+    consistent with it."""
+    run_root = Path(run_dir).parent
+    trial = run_root.name if run_root.name.startswith("trial-") else None
+    if trial is not None:
+        run_root = run_root.parent
+    return run_root.parent.name, run_root.name, trial
+
+
 def _title(run_dir: Path, base: str) -> str:
-    # n>1 nests roles under trial-XX — put the trial in the session title so
-    # the web UI's "sim: plain" chats are tellable apart across trials.
-    trial = run_dir.parent.name
-    return f"{trial} · {base}" if trial.startswith("trial-") else base
+    # The case, because one omnigent server runs sessions from many of them; and
+    # n>1 nests roles under trial-XX, so the trial too — the web UI's "sim: plain"
+    # chats are otherwise not tellable apart across trials.
+    case, _run_id, trial = _run_parts(run_dir)
+    return " · ".join(p for p in (case, trial, base) if p is not None)
 
 
-def _project(run_dir: Path, scenario: str) -> str:
-    # <runs_root>/<run_id>/<role_dir> -> "<scenario>/<run_id>"; groups all of a
-    # run's sessions into one web-UI project folder (omni_project label). n>1
-    # nests trials (<run_id>/trial-01/<role_dir>) — group by the RUN, not the
-    # trial, so one benchmark run is one folder.
-    parent = run_dir.parent
-    if parent.name.startswith("trial-"):
-        parent = parent.parent
-    return f"{scenario}/{parent.name}"
+def _project(run_dir: Path) -> str:
+    # "<case>/<run_id>": groups all of a run's sessions into one web-UI project
+    # folder (the omni_project label). Trials group by the RUN, not the trial, so
+    # one benchmark run is one folder.
+    case, run_id, _trial = _run_parts(run_dir)
+    return f"{case}/{run_id}"
 
 
-def make_flow_driver_omni(
-    flow: dict,
-    flow_dir: Path,
-    *,
-    scenario: str,
-    git_init: bool = False,
-) -> OmnigentDriver:
+def make_flow_driver_omni(flow: dict, flow_dir: Path) -> OmnigentDriver:
     return OmnigentDriver(
         run_dir=flow_dir,
-        git_init=git_init,
         session_title=_title(flow_dir, f"flow: {flow['name']}"),
-        project=_project(flow_dir, scenario),
+        project=_project(flow_dir),
         model=flow.get("model", "opus"),
         harness=flow.get("harness", "claude-native"),
         skills=flow.get("skills", "all"),
@@ -436,15 +439,15 @@ def make_flow_driver_omni(
     )
 
 
-def make_simulator_omni(flow: dict, sim_dir: Path, *, scenario: str) -> SessionModel:
+def make_simulator_omni(flow: dict, sim_dir: Path, *, model: str) -> SessionModel:
     # Bare Claude Code (skills: none): the simulator only answers questions.
     return SessionModel(
         OmnigentDriver(
             run_dir=sim_dir,
-            model=SIM_MODEL,
+            model=model,
             skills="none",
             session_title=_title(sim_dir, f"sim: {flow['name']}"),
-            project=_project(sim_dir, scenario),
+            project=_project(sim_dir),
         )
     )
 
@@ -454,36 +457,37 @@ async def run_judge_omni(
     entries: list[tuple[str, str, str]],
     judge_dir: Path,
     *,
-    scenario: str,
+    model: str,
 ) -> str:
     # One-shot omnigent session: judge prompt + all plans in, prose verdict out.
-    model = SessionModel(
+    judge = SessionModel(
         OmnigentDriver(
             run_dir=judge_dir,
-            model=JUDGE_MODEL,
+            model=model,
             skills="none",
             turn_timeout_s=600,  # one long grading turn over all full plans
             session_title=_title(judge_dir, "judge"),
-            project=_project(judge_dir, scenario),
+            project=_project(judge_dir),
         )
     )
     try:
-        out = await model.generate(build_judge_prompt(judge_md, entries))
+        out = await judge.generate(build_judge_prompt(judge_md, entries))
         return out.completion
     finally:
-        await model.close()
+        await judge.close()
 
 
-def omni_factories(scenario: str, *, git_init: bool = False):
-    """The three real omnigent factories, bound to `scenario`, matching the
-    2-arg `(flow, dir)` / 3-arg `(judge_md, entries, judge_dir)` contract
-    run_case/run_case_n call. `git_init` asks the driver to init a repo in the
-    flow dir; a case that needs one does it in its own `setup` instead. Which
-    file proves delivery is the case's (`Case.deliverable`/`find_deliverable`),
-    never the driver's."""
+def omni_factories(case):
+    """The three real omnigent factories for `case`, matching the 2-arg
+    `(flow, dir)` / 3-arg `(judge_md, entries, judge_dir)` contract
+    run_case/run_case_n call. Only the models are the case's to choose
+    (`settings.sim_model`, `settings.judge_model`; a flow names its own): the
+    session labels come off the run layout, a case that needs a git repo in the
+    flow dir makes one in its own `setup`, and which file proves delivery is
+    `Case.deliverable`/`find_deliverable` — never the driver's."""
 
     return (
-        functools.partial(make_flow_driver_omni, scenario=scenario, git_init=git_init),
-        functools.partial(make_simulator_omni, scenario=scenario),
-        functools.partial(run_judge_omni, scenario=scenario),
+        make_flow_driver_omni,
+        functools.partial(make_simulator_omni, model=case.settings.sim_model),
+        functools.partial(run_judge_omni, model=case.settings.judge_model),
     )
