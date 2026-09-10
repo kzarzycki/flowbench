@@ -1,7 +1,8 @@
 """Debug watcher for a live run: stream anomalies + progress.
 
 One line per event on stdout — permission prompts, server errors/warnings
-touching the run's sessions, failed-session flips, trial/run completion.
+touching the run's sessions, failed-session flips, stalls, a CLI limit banner
+(`QUOTA: …`, #131 — wait for the reset, nothing to debug), trial/run completion.
 Exits when the run's aggregate run.json lands (or the runner pid dies).
 
 Works standalone in a terminal, or wrapped by an agent Monitor.
@@ -16,6 +17,7 @@ import time
 import urllib.request
 from pathlib import Path
 
+from flowbench.transcript import is_quota_banner, item_text
 from flowbench.types import TurnStatus
 
 log = logging.getLogger(__name__)
@@ -49,6 +51,7 @@ class RunWatch:
         self._log_pos = server_log.stat().st_size if server_log.exists() else 0
         self._session_status: dict[str, str] = {}
         self._session_stall: dict[str, str | None] = {}
+        self._session_quota: set[str] = set()
         self._trials_done: set[str] = set()
 
     # --- sources -------------------------------------------------------------
@@ -74,6 +77,21 @@ class RunWatch:
             return []  # server hiccup: skip this tick, never kill the watch
         return [s for s in data if (s.get("labels") or {}).get("omni_project") == self.project]
 
+    def _last_assistant_text(self, session_id: str) -> str:
+        """Text of the session's last item when it is an assistant message, else ""
+        (a user/tool item, no items, or a failed read — the watch never dies on one)."""
+        url = f"{self.server}/v1/sessions/{session_id}/items?limit=1&order=desc"
+        try:
+            with urllib.request.urlopen(url, timeout=5) as r:
+                items = json.load(r).get("data", [])
+        except (OSError, http.client.HTTPException, ValueError, AttributeError) as e:
+            log.debug("items read failed for %s, skipping: %r", session_id, e)
+            return ""
+        it = items[0] if items else {}
+        if isinstance(it, dict) and it.get("type") == "message" and it.get("role") == "assistant":
+            return item_text(it)
+        return ""
+
     # --- tick ----------------------------------------------------------------
 
     def tick(self) -> list[str]:
@@ -94,6 +112,13 @@ class RunWatch:
             if prev not in (None, cur) and cur == TurnStatus.FAILED:
                 events.append(f"SESSION FAILED: {s.get('title')} ({s['id']})")
             self._session_status[s["id"]] = cur
+            # quota banner (#131): the session's last assistant item IS the CLI's
+            # limit banner — the operator waits for the reset. Once per session.
+            if s["id"] not in self._session_quota:
+                banner = self._last_assistant_text(s["id"])
+                if is_quota_banner(banner):
+                    self._session_quota.add(s["id"])
+                    events.append(f"QUOTA: {s.get('title')} ({s['id']}) {banner.strip()}")
             # stall watchdog (#54): a pending elicitation is a prompt nobody can
             # answer (the list endpoint exposes only that count); a running
             # session with a stale heartbeat is stuck on one the server cannot
