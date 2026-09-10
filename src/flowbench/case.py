@@ -102,6 +102,26 @@ class Case:
         )
 
 
+def check_gradable(case: Case) -> list[str]:
+    """The case's flow names, once something can grade them: a `judge.md` needs two
+    flows to compare, and a lone flow needs a `score()` override. A run that could
+    produce no verdict at all is a load error, not a spent session.
+
+    Load-time in both senses — `load_case` raises for a folder that already has a
+    `flows.yaml`, and the runner raises again before it builds a factory."""
+    flows = case.validate()
+    if len(flows) < 2 and case.judge_path.exists():
+        raise ValueError(
+            f"{case.case_dir}/judge.md needs 2+ flows to compare, flows.yaml has {len(flows)}"
+        )
+    if len(flows) < 2 and not case.has_score_override():
+        raise ValueError(
+            f"{case.case_dir}: nothing grades this case — one flow and no score() override "
+            "(add a second flow to compare, or override Case.score)"
+        )
+    return flows
+
+
 def scenarios_root(case_dir) -> Path:
     """The last folder discovery may look in: the case folder itself or its first
     ancestor named `scenarios`, else the filesystem root."""
@@ -118,7 +138,12 @@ def load_case(case_dir, settings: Settings | None = None) -> Case:
     case_dir = Path(case_dir).resolve()
     path = _find_case_py(case_dir)
     cls = Case if path is None else _load_case_class(path)
-    return cls(case_dir, settings=settings)
+    case = cls(case_dir, settings=settings)
+    if (case_dir / "flows.yaml").is_file():
+        # No flows file: there is no flow list to check yet, and the runner raises
+        # when it reads one that isn't there.
+        check_gradable(case)
+    return case
 
 
 def _walk(case_dir: Path) -> Iterator[Path]:

@@ -29,37 +29,35 @@ def test_default_runs_root_is_sibling_of_repo():
 def test_main_wires_engine_run_case_n(monkeypatch, capsys, tmp_path):
     calls = []
 
-    async def fake_run_case_n(case_dir, **kw):
+    async def fake_run_case_n(case, **kw):
         # bind against the real signature so a misspelled/extra kwarg fails here, not live
-        inspect.signature(engine_run.run_case_n).bind(case_dir, **kw)
-        calls.append((case_dir, kw))
+        inspect.signature(engine_run.run_case_n).bind(case, **kw)
+        calls.append((case, kw))
         return {"run_root": str(tmp_path), "trials": [{"x": 1}], "aggregate": {"n": kw["n"]}}
 
     monkeypatch.setattr("scenarios.coding_workflow.run.run_case_n", fake_run_case_n)
-    monkeypatch.setattr("sys.argv", ["run", "--run-id", "r1"])
+    monkeypatch.setattr("sys.argv", ["run", "--run-id", "r1", "--deadline-s", "60"])
     main()
 
-    case_dir, kw = calls[-1]
+    case, kw = calls[-1]
+    assert type(case).__name__ == "TodoAppCase" and case.name == "todo_app"
+    assert case.deadline_s == 60.0  # --deadline-s overrides what the case declares
     assert kw["run_id"] == "r1" and kw["n"] == 1
-    assert kw["scenario"] == "coding_workflow"
-    assert kw["score_flow"].func is score_todo_app
-    assert kw["score_flow"].keywords["make_grader"].func is make_grader_omni
     assert kw["make_flow_driver"].func is engine_run.make_flow_driver_omni
     assert kw["make_flow_driver"].keywords == {
         "scenario": "coding_workflow",
-        "git_init": True,
+        "git_init": False,  # the case git-inits the flow dir in its own setup
     }
-    assert kw["artifact_name"] is None
     out = capsys.readouterr().out
     assert json.loads(out.split("\nRun written to:")[0]) == {"x": 1}
 
 
 def test_main_rescore_calls_rescore_run_and_skips_factories(monkeypatch, capsys, tmp_path):
-    (tmp_path / "r1").mkdir()
+    (tmp_path / "todo_app" / "r1").mkdir(parents=True)
     calls = []
 
-    async def fake_rescore_run(case_dir, run_root, *, score_flow):
-        calls.append((case_dir, run_root, score_flow))
+    async def fake_rescore_run(case, run_root):
+        calls.append((case, run_root))
         return {"superpowers": "ok", "plain": "ok"}
 
     def boom(*args, **kwargs):
@@ -71,10 +69,9 @@ def test_main_rescore_calls_rescore_run_and_skips_factories(monkeypatch, capsys,
     monkeypatch.setattr("sys.argv", ["run", "--rescore", "r1", "--runs-root", str(tmp_path)])
     main()
 
-    case_dir, run_root, score_flow = calls[-1]
-    assert Path(case_dir).name == "todo_app"
-    assert run_root == tmp_path / "r1"
-    assert score_flow.func is score_todo_app
+    case, run_root = calls[-1]
+    assert type(case).__name__ == "TodoAppCase" and case.name == "todo_app"
+    assert run_root == tmp_path / "todo_app" / "r1"  # <runs_root>/<case>/<run_id>
     out = capsys.readouterr().out
     assert json.loads(out) == {"superpowers": "ok", "plain": "ok"}
 

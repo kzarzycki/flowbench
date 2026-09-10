@@ -2,9 +2,24 @@ import asyncio
 import json
 from pathlib import Path
 
-from flowbench.run import rescore_run
+from flowbench.case import Case
+from flowbench.run import rescore_run, run_case
+from flowbench.testing import n_run_factories
 
 CASE_DIR = Path(__file__).parent / "fixtures" / "feature_flag_service"
+
+
+def _case(score_fn=None, case_dir=CASE_DIR) -> Case:
+    """The fixture case, graded by `score_fn(flow, flow_dir, session)` — what the
+    retired `score_flow` keyword used to carry. No scorer means the base `Case`,
+    whose `score` returns None."""
+    if score_fn is None:
+        return Case(case_dir)
+
+    async def score(self, flow, flow_dir, session):
+        return await score_fn(flow, flow_dir, session)
+
+    return type("ScoredCase", (Case,), {"score": score})(case_dir)
 
 
 def _write_flow(run_root: Path, name: str, *, with_session: bool = True) -> None:
@@ -42,7 +57,7 @@ def test_rescore_run_success_clears_stale_error_and_rewrites_scorecards(tmp_path
     async def score_flow(flow, flow_dir, session):
         return {"flow": flow["name"], "objective": {"acceptance": 1.0}}
 
-    result = asyncio.run(rescore_run(CASE_DIR, run_root, score_flow=score_flow))
+    result = asyncio.run(rescore_run(_case(score_flow), run_root))
 
     assert result == {"superpowers": "ok", "plain": "ok"}
     for name in ("superpowers", "plain"):
@@ -66,7 +81,7 @@ def test_rescore_run_isolates_one_flows_failure(tmp_path):
             raise RuntimeError("boom")
         return {"flow": flow["name"]}
 
-    result = asyncio.run(rescore_run(CASE_DIR, run_root, score_flow=score_flow))
+    result = asyncio.run(rescore_run(_case(score_flow), run_root))
 
     assert result["superpowers"] == "RuntimeError: boom"
     assert result["plain"] == "ok"
@@ -96,7 +111,7 @@ def test_rescore_run_n_gt_1_layout_keys_by_trial(tmp_path):
     async def score_flow(flow, flow_dir, session):
         return {"flow": flow["name"]}
 
-    result = asyncio.run(rescore_run(CASE_DIR, run_root, score_flow=score_flow))
+    result = asyncio.run(rescore_run(_case(score_flow), run_root))
 
     assert result == {
         "trial-01/superpowers": "ok",
@@ -117,7 +132,7 @@ def test_rescore_run_skips_flow_with_no_session(tmp_path):
     async def score_flow(flow, flow_dir, session):
         return {"flow": flow["name"]}
 
-    result = asyncio.run(rescore_run(CASE_DIR, run_root, score_flow=score_flow))
+    result = asyncio.run(rescore_run(_case(score_flow), run_root))
 
     assert result == {"plain": "ok"}
     assert (run_root / "superpowers" / "scorecard.json").read_bytes() == stale_card
@@ -137,7 +152,7 @@ def test_rescore_run_flow_absent_from_flows_yaml_is_keyerror(tmp_path):
     async def score_flow(flow, flow_dir, session):
         return {"flow": flow["name"]}
 
-    result = asyncio.run(rescore_run(CASE_DIR, run_root, score_flow=score_flow))
+    result = asyncio.run(rescore_run(_case(score_flow), run_root))
 
     assert result["superpowers"] == "ok"
     assert result["plain"] == "ok"
@@ -146,3 +161,55 @@ def test_rescore_run_flow_absent_from_flows_yaml_is_keyerror(tmp_path):
     assert ghost_card == {"error": result["ghost"]}
     meta = json.loads((run_root / "run.json").read_text())
     assert meta["flow_stats"]["ghost"]["score_error"] == result["ghost"]
+
+
+# --- over a run dir the orchestrator wrote -----------------------------------
+
+
+async def _orchestrated_run(tmp_path, run_id: str) -> Path:
+    """A real run dir: `rescore_run` reads `flow_stats`, which only a run writes."""
+    mfd, ms, rj = n_run_factories(["A"])
+
+    async def score_flow(flow, flow_dir, session):
+        return {"flow": flow["name"], "pass": 1}
+
+    result = await run_case(
+        _case(score_flow),
+        run_id=run_id,
+        make_flow_driver=mfd,
+        make_simulator=ms,
+        run_judge=rj,
+        runs_root=tmp_path,
+    )
+    return Path(result["run_root"])
+
+
+async def test_rescore_rewrites_from_disk_without_touching_sessions(tmp_path):
+    run_root = await _orchestrated_run(tmp_path, "orchestrated")
+    before = {
+        name: (run_root / name / "session.json").read_bytes() for name in ("superpowers", "plain")
+    }
+
+    async def score_flow(flow, flow_dir, session):
+        # what is on disk is the whole input: the session dict came from session.json
+        return {"flow": flow["name"], "pass": 2, "turns": session["turns"]}
+
+    result = await rescore_run(_case(score_flow), run_root)
+
+    assert result == {"superpowers": "ok", "plain": "ok"}
+    for name in ("superpowers", "plain"):
+        card = json.loads((run_root / name / "scorecard.json").read_text())
+        assert card == {"flow": name, "pass": 2, "turns": 0}
+        assert (run_root / name / "session.json").read_bytes() == before[name]
+    assert json.loads((run_root / "run.json").read_text())["flow_stats"]["plain"]
+
+
+async def test_rescore_deletes_a_stale_scorecard_when_score_returns_none(tmp_path):
+    run_root = await _orchestrated_run(tmp_path, "then-ungraded")
+    assert (run_root / "plain" / "scorecard.json").is_file()
+
+    result = await rescore_run(_case(), run_root)  # nothing grades this case any more
+
+    assert result == {"superpowers": "ok", "plain": "ok"}
+    for name in ("superpowers", "plain"):
+        assert not (run_root / name / "scorecard.json").exists()

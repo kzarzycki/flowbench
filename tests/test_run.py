@@ -1,5 +1,7 @@
 import asyncio
+import inspect
 import json
+import re
 import shutil
 from pathlib import Path
 
@@ -7,23 +9,409 @@ import pytest
 import yaml
 
 import flowbench.run as run_mod
+from flowbench.case import Case, load_case
 from flowbench.loop import DONE_TOKEN
 from flowbench.run import (
-    MISSING_PLAN,
+    MISSING_DELIVERABLE,
+    NO_DELIVERABLE,
+    _judge_view,
     _project,
     _title,
     make_flow_driver_omni,
     run_case,
     run_case_n,
 )
+from flowbench.settings import Settings
 from flowbench.testing import FakeDriver, MissingPlanDriver, StubSim, n_run_factories
 from tests.report.test_run_report import _aggregate_dir
 
 CASE_DIR = Path(__file__).parent / "fixtures" / "feature_flag_service"
 
+ONE_FLOW = [{"name": "plain", "harness": "claude-native", "model": "opus", "skills": "none"}]
+TWO_FLOWS = [
+    {"name": "superpowers", "harness": "claude-native", "model": "opus", "skills": "all"},
+    {"name": "plain", "harness": "claude-native", "model": "opus", "skills": "none"},
+]
+THREE_FLOWS = [
+    *TWO_FLOWS,
+    {"name": "codex", "harness": "codex-native", "model": "gpt-5.5", "skills": "none"},
+]
 
-def test_run_case_offline(tmp_path):
-    case = CASE_DIR
+
+class PlanCase(Case):
+    """Plan-shaped, like the fixture case: the flows are compared on plan.md."""
+
+    deliverable = "plan.md"
+
+
+def _case_files(dst: Path, *, flows: list[dict], judge: bool = True) -> Path:
+    """A case folder over the fixture's text, with a hand-written flows.yaml and
+    judge.md only when this case compares its flows."""
+    dst.mkdir(parents=True, exist_ok=True)
+    for name in ("task.md", "simulator.md", "knowledge.md"):
+        shutil.copy(CASE_DIR / name, dst / name)
+    if judge:
+        shutil.copy(CASE_DIR / "judge.md", dst / "judge.md")
+    (dst / "flows.yaml").write_text(yaml.safe_dump({"flows": flows}))
+    return dst
+
+
+def _scored(case_dir, score_fn, *, base=PlanCase, **attrs) -> Case:
+    """A case that grades its own flows: `score_fn(flow, flow_dir, session)` is
+    what the retired `score_flow` keyword used to carry."""
+
+    async def score(self, flow, flow_dir, session):
+        return await score_fn(flow, flow_dir, session)
+
+    return type("ScoredCase", (base,), {"score": score, **attrs})(case_dir)
+
+
+async def _card(flow, flow_dir, session) -> dict:
+    """The simplest scorecard a case's `score` can return."""
+    return {"flow": flow["name"]}
+
+
+def _fail_factory(*args, **kwargs):
+    pytest.fail("no factory may be built when the case cannot be graded")
+
+
+def _sim(flow, sim_dir):
+    return StubSim([DONE_TOKEN])
+
+
+class TreeDriver(FakeDriver):
+    """A flow that lays down an arbitrary tree in its run dir: the deliverable
+    shapes a real agent produces (nested file, directory, none) that FakeDriver's
+    single plan.md cannot express. `{"a/b.txt": "text", "port/": ""}` — a trailing
+    slash is a directory."""
+
+    def __init__(self, tree, run_dir, on_start=None):
+        super().__init__("", [], run_dir=run_dir)
+        self._tree = tree
+        self._on_start = on_start
+
+    async def start(self):
+        if self._on_start is not None:
+            self._on_start()
+        root = Path(self._run_dir)
+        root.mkdir(parents=True, exist_ok=True)
+        for rel, text in self._tree.items():
+            path = root / rel
+            if rel.endswith("/"):
+                path.mkdir(parents=True, exist_ok=True)
+            else:
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(text)
+
+
+# --- layout, budgets, settings ----------------------------------------------
+
+
+async def test_run_case_layout_is_case_then_run_id(tmp_path):
+    case = load_case(CASE_DIR)
+    mfd, ms, rj = n_run_factories(["A"])
+
+    result = await run_case(
+        case,
+        run_id="test-run",
+        make_flow_driver=mfd,
+        make_simulator=ms,
+        run_judge=rj,
+        runs_root=tmp_path,
+    )
+
+    root = Path(result["run_root"])
+    assert root == tmp_path / "feature_flag_service" / "test-run"
+    meta = json.loads((root / "run.json").read_text())
+    assert meta["case"] == "feature_flag_service"
+    assert meta["deliverable"] == "plan.md"
+    assert "scenario" not in meta
+
+
+async def test_runs_root_defaults_to_settings(tmp_path):
+    case = load_case(CASE_DIR, Settings(runs_root=tmp_path / "from-settings"))
+    mfd, ms, rj = n_run_factories(["A"])
+
+    result = await run_case(case, run_id="r", make_flow_driver=mfd, make_simulator=ms, run_judge=rj)
+
+    assert Path(result["run_root"]) == tmp_path / "from-settings" / "feature_flag_service" / "r"
+
+
+async def test_case_budgets_reach_the_loop_and_done_token_does_not(tmp_path, monkeypatch):
+    retired = {"done_token", "artifact_name", "score_flow", "max_turns", "deadline_s", "scenario"}
+    assert retired.isdisjoint(inspect.signature(run_case).parameters)
+    assert retired.isdisjoint(inspect.signature(run_case_n).parameters)
+
+    calls = []
+
+    async def rec(*args, **kwargs):
+        calls.append(kwargs)
+        return {"items": [], "events": []}
+
+    monkeypatch.setattr(run_mod, "run_agent_session", rec)
+    case = type("Budgeted", (PlanCase,), {"max_turns": 7, "deadline_s": 12.0})(CASE_DIR)
+    mfd, ms, rj = n_run_factories(["A"])
+
+    await run_case(
+        case,
+        run_id="budgets",
+        make_flow_driver=mfd,
+        make_simulator=ms,
+        run_judge=rj,
+        runs_root=tmp_path,
+    )
+
+    assert calls
+    assert all(kwargs["max_turns"] == 7 for kwargs in calls)
+    assert all(kwargs["deadline_s"] == 12.0 for kwargs in calls)
+    assert all("done_token" not in kwargs for kwargs in calls)
+
+
+# --- the two load-time errors ------------------------------------------------
+
+
+async def test_judge_with_one_flow_is_a_load_error(tmp_path):
+    case_dir = _case_files(tmp_path / "one_flow_judged", flows=ONE_FLOW)
+    expected = re.escape(f"{case_dir}/judge.md needs 2+ flows to compare, flows.yaml has 1")
+
+    with pytest.raises(ValueError, match=expected):
+        load_case(case_dir)
+    case = PlanCase(case_dir)
+    with pytest.raises(ValueError, match=expected):
+        await run_case(
+            case,
+            run_id="x",
+            make_flow_driver=_fail_factory,
+            make_simulator=_fail_factory,
+            run_judge=_fail_factory,
+            runs_root=tmp_path / "runs",
+        )
+    with pytest.raises(ValueError, match=expected):
+        await run_case_n(
+            case,
+            run_id="x",
+            n=1,
+            make_flow_driver=_fail_factory,
+            make_simulator=_fail_factory,
+            run_judge=_fail_factory,
+            runs_root=tmp_path / "runs",
+        )
+    assert not (tmp_path / "runs").exists()
+
+
+async def test_one_flow_without_score_is_a_load_error(tmp_path):
+    case_dir = _case_files(tmp_path / "one_flow", flows=ONE_FLOW, judge=False)
+    expected = re.escape(
+        f"{case_dir}: nothing grades this case — one flow and no score() override "
+        "(add a second flow to compare, or override Case.score)"
+    )
+
+    with pytest.raises(ValueError, match=expected):
+        load_case(case_dir)
+    case = PlanCase(case_dir)
+    with pytest.raises(ValueError, match=expected):
+        await run_case(
+            case,
+            run_id="x",
+            make_flow_driver=_fail_factory,
+            make_simulator=_fail_factory,
+            run_judge=_fail_factory,
+            runs_root=tmp_path / "runs",
+        )
+    with pytest.raises(ValueError, match=expected):
+        await run_case_n(
+            case,
+            run_id="x",
+            n=2,
+            make_flow_driver=_fail_factory,
+            make_simulator=_fail_factory,
+            run_judge=_fail_factory,
+            runs_root=tmp_path / "runs",
+        )
+    assert not (tmp_path / "runs").exists()
+
+
+async def test_load_errors_fire_before_any_factory(tmp_path):
+    """Ordering, not just the message: a factory that raises is never reached, so
+    the ValueError is what surfaces and no run dir is created."""
+    case = PlanCase(_case_files(tmp_path / "one_flow", flows=ONE_FLOW, judge=False))
+
+    def exploding(*args, **kwargs):
+        raise RuntimeError("a factory was built")
+
+    with pytest.raises(ValueError, match="nothing grades this case"):
+        await run_case(
+            case,
+            run_id="x",
+            make_flow_driver=exploding,
+            make_simulator=exploding,
+            run_judge=exploding,
+            runs_root=tmp_path / "runs",
+        )
+    assert not (tmp_path / "runs").exists()
+
+
+async def test_two_flows_without_score_or_judge_load(tmp_path):
+    """The errors do not over-reject: two flows are comparable even with no
+    judge.md and no score override (the run dir is the record)."""
+    case_dir = _case_files(tmp_path / "unjudged", flows=TWO_FLOWS, judge=False)
+    mfd, ms, _ = n_run_factories([])
+
+    assert type(load_case(case_dir)).__name__ == "Case"
+    result = await run_case(
+        PlanCase(case_dir),
+        run_id="r",
+        make_flow_driver=mfd,
+        make_simulator=ms,
+        run_judge=None,
+        runs_root=tmp_path,
+    )
+
+    root = Path(result["run_root"])
+    for name in ("superpowers", "plain"):
+        assert (root / name / "session.json").is_file()
+        assert not (root / name / "scorecard.json").exists()
+    assert not (root / "judge.md").exists()
+
+
+# --- the per-flow lifecycle --------------------------------------------------
+
+
+async def test_lifecycle_order_setup_session_capture_score_teardown(tmp_path):
+    log = []
+
+    class Lifecycle(PlanCase):
+        async def setup(self, flow, flow_dir):
+            log.append("setup")
+
+        async def score(self, flow, flow_dir, session):
+            # Only the capture stage puts the nested plan.md at the flow-dir root.
+            captured = (Path(flow_dir) / "plan.md").is_file()
+            log.append("capture" if captured else "no-capture")
+            log.append("score")
+            return {"flow": flow["name"]}
+
+        async def teardown(self, flow, flow_dir):
+            log.append("teardown")
+
+    def make_flow_driver(flow, flow_dir):
+        return TreeDriver(
+            {"work/plan.md": "# nested plan\n"}, flow_dir, on_start=lambda: log.append("session")
+        )
+
+    await run_case(
+        Lifecycle(_case_files(tmp_path / "case", flows=ONE_FLOW, judge=False)),
+        run_id="r",
+        make_flow_driver=make_flow_driver,
+        make_simulator=_sim,
+        run_judge=None,
+        runs_root=tmp_path,
+    )
+
+    assert log == ["setup", "session", "capture", "score", "teardown"]
+
+
+@pytest.mark.parametrize("stage", ["setup", "session", "score"])
+async def test_teardown_runs_when_a_stage_fails(tmp_path, stage):
+    torn_down = []
+
+    class Failing(PlanCase):
+        async def setup(self, flow, flow_dir):
+            if stage == "setup":
+                raise RuntimeError("setup boom")
+
+        async def score(self, flow, flow_dir, session):
+            if stage == "score":
+                raise RuntimeError("score boom")
+            return None
+
+        async def teardown(self, flow, flow_dir):
+            torn_down.append(flow["name"])
+
+    class BoomDriver(FakeDriver):
+        async def start(self):
+            raise RuntimeError("session boom")
+
+    def make_flow_driver(flow, flow_dir):
+        if stage == "session":
+            return BoomDriver("", [], run_dir=flow_dir)
+        return FakeDriver("# plan\n", [], run_dir=flow_dir)
+
+    case = Failing(_case_files(tmp_path / "case", flows=TWO_FLOWS, judge=False))
+    kwargs = {
+        "run_id": "r",
+        "make_flow_driver": make_flow_driver,
+        "make_simulator": _sim,
+        "run_judge": None,
+        "runs_root": tmp_path,
+    }
+
+    if stage == "score":  # a scorer failure is isolated: both flows run and tear down
+        await run_case(case, **kwargs)
+        assert torn_down == ["superpowers", "plain"]
+    else:
+        with pytest.raises(RuntimeError, match=f"{stage} boom"):
+            await run_case(case, **kwargs)
+        assert torn_down == ["superpowers"]  # the run aborted, its flow still tore down
+
+
+async def test_score_returning_none_writes_no_scorecard(tmp_path):
+    async def score(flow, flow_dir, session):
+        return {"flow": flow["name"]} if flow["name"] == "superpowers" else None
+
+    case = _scored(_case_files(tmp_path / "case", flows=TWO_FLOWS, judge=False), score)
+    mfd, ms, _ = n_run_factories([])
+
+    result = await run_case(
+        case,
+        run_id="r",
+        make_flow_driver=mfd,
+        make_simulator=ms,
+        run_judge=None,
+        runs_root=tmp_path,
+    )
+
+    root = Path(result["run_root"])
+    assert json.loads((root / "superpowers" / "scorecard.json").read_text()) == {
+        "flow": "superpowers"
+    }
+    assert not (root / "plain" / "scorecard.json").exists()
+
+
+async def test_one_flow_case_runs_and_scores(tmp_path):
+    async def score(flow, flow_dir, session):
+        return {"flow": flow["name"], "objective": {"acceptance": 1.0}}
+
+    case = _scored(_case_files(tmp_path / "solo", flows=ONE_FLOW, judge=False), score)
+
+    result = await run_case(
+        case,
+        run_id="solo-run",
+        make_flow_driver=lambda flow, flow_dir: FakeDriver(
+            "# plan\nplanned.", [], run_dir=flow_dir
+        ),
+        make_simulator=_sim,
+        run_judge=None,
+        runs_root=tmp_path,
+    )
+
+    root = Path(result["run_root"])
+    assert json.loads((root / "plain" / "scorecard.json").read_text()) == {
+        "flow": "plain",
+        "objective": {"acceptance": 1.0},
+    }
+    meta = json.loads((root / "run.json").read_text())
+    assert meta["flows"] == ["plain"]
+    assert meta["labels"] == {"A": "plain"}
+    assert meta["winner"] is None and meta["winner_flow"] is None
+    assert not (root / "judge.md").exists() and not (root / "report.html").exists()
+
+
+# --- a judged run end to end -------------------------------------------------
+
+
+def test_run_a_judged_two_flow_case(tmp_path):
+    case = load_case(CASE_DIR)
     sims = []
 
     def make_flow_driver(flow, flow_dir):
@@ -62,13 +450,11 @@ def test_run_case_offline(tmp_path):
             make_simulator=make_simulator,
             run_judge=run_judge,
             runs_root=tmp_path,
-            scenario="swe_planning",
             artifact_grace_s=0.0,
         )
     )
 
     root = Path(result["run_root"])
-    assert root == tmp_path / "test-run"
     assert (root / "superpowers" / "plan.md").read_text().startswith("# SP plan")
     assert (root / "plain" / "plan.md").read_text().startswith("# plain plan")
     assert (root / "superpowers" / "session.json").is_file()
@@ -89,82 +475,7 @@ def test_run_case_offline(tmp_path):
     assert sims and all(s.closed for s in sims)
 
 
-def test_run_case_flags_missing_plan(tmp_path):
-    case = CASE_DIR
-
-    def make_flow_driver(flow, flow_dir):
-        if flow["name"] == "superpowers":
-            return FakeDriver("# SP plan\nunknown flag key returns 404.", [], run_dir=flow_dir)
-        return MissingPlanDriver("unused", [], run_dir=flow_dir)
-
-    def make_simulator(flow, sim_dir):
-        return StubSim([DONE_TOKEN])
-
-    async def run_judge(judge_md, entries, judge_dir):
-        by_label = {label: plan for label, _transcript, plan in entries}
-        assert by_label["B"] == MISSING_PLAN
-        return "A is better.\nWINNER: A\nA: thorough\nB: missing"
-
-    result = asyncio.run(
-        run_case(
-            case,
-            run_id="test-run",
-            make_flow_driver=make_flow_driver,
-            make_simulator=make_simulator,
-            run_judge=run_judge,
-            runs_root=tmp_path,
-            scenario="swe_planning",
-            artifact_grace_s=0.0,
-        )
-    )
-
-    root = Path(result["run_root"])
-    assert (root / "plain" / "plan.md").read_text() == ""
-
-    meta = json.loads((root / "run.json").read_text())
-    assert meta["artifact_missing"] == ["plain"]
-
-
-def test_run_case_rejects_flow_count(tmp_path):
-    case = CASE_DIR
-    case_copy = tmp_path / "case"
-    case_copy.mkdir()
-    for name in ("task.md", "simulator.md", "knowledge.md", "judge.md"):
-        shutil.copy(case / name, case_copy / name)
-    single_flow = {
-        "flows": [
-            {
-                "name": "plain",
-                "harness": "claude-native",
-                "model": "opus",
-                "reasoning_effort": "xhigh",
-                "skills": "none",
-                "prepend": "Plan this feature directly.",
-                "append": "Write the plan to plan.md.",
-            }
-        ]
-    }
-    (case_copy / "flows.yaml").write_text(yaml.safe_dump(single_flow))
-
-    def fail_factory(*args, **kwargs):
-        pytest.fail("factory should not be called when flow count is invalid")
-
-    with pytest.raises(ValueError):
-        asyncio.run(
-            run_case(
-                case_copy,
-                run_id="test-run",
-                make_flow_driver=fail_factory,
-                make_simulator=fail_factory,
-                run_judge=fail_factory,
-                runs_root=tmp_path / "runs",
-                scenario="swe_planning",
-            )
-        )
-
-
 def test_run_case_forwards_artifact_grace(tmp_path, monkeypatch):
-    case = CASE_DIR
     calls = []
 
     async def rec(*args, **kwargs):
@@ -173,24 +484,17 @@ def test_run_case_forwards_artifact_grace(tmp_path, monkeypatch):
 
     monkeypatch.setattr(run_mod, "run_agent_session", rec)
 
-    def make_flow_driver(flow, flow_dir):
-        return FakeDriver("# p", [])
-
-    def make_simulator(flow, sim_dir):
-        return StubSim([DONE_TOKEN])
-
     async def run_judge(judge_md, entries, judge_dir):
         return "WINNER: A"
 
     asyncio.run(
         run_case(
-            case,
+            load_case(CASE_DIR),
             run_id="t",
-            make_flow_driver=make_flow_driver,
-            make_simulator=make_simulator,
+            make_flow_driver=lambda flow, flow_dir: FakeDriver("# p", []),
+            make_simulator=_sim,
             run_judge=run_judge,
             runs_root=tmp_path,
-            scenario="swe_planning",
             artifact_grace_s=0.0,
         )
     )
@@ -226,8 +530,8 @@ def test_make_flow_driver_omni_maps_flow_config(tmp_path):
     assert d.project == f"swe_planning/{tmp_path.parent.name}"
 
 
-def test_run_case_n_three_trials(tmp_path):
-    case = CASE_DIR
+def test_run_n_writes_one_trial_dir_per_trial(tmp_path):
+    case = load_case(CASE_DIR)
     mfd, ms, rj = n_run_factories(["A", "B", "A"])
 
     result = asyncio.run(
@@ -239,7 +543,6 @@ def test_run_case_n_three_trials(tmp_path):
             make_simulator=ms,
             run_judge=rj,
             runs_root=tmp_path,
-            scenario="swe_planning",
         )
     )
 
@@ -257,7 +560,7 @@ def test_run_case_n_three_trials(tmp_path):
     assert [t["rotation"] for t in result["trials"]] == [0, 1, 0]
 
     root = Path(result["run_root"])
-    assert root == tmp_path / "agg-run"
+    assert root == tmp_path / "feature_flag_service" / "agg-run"
     # each trial dir has the full single-run layout
     for k in (1, 2, 3):
         trial = root / f"trial-{k:02d}"
@@ -281,8 +584,28 @@ def test_run_case_n_three_trials(tmp_path):
     assert agg["winner"] == "superpowers"
 
 
+def test_aggregate_run_json_carries_the_deliverable(tmp_path):
+    mfd, ms, rj = n_run_factories(["A", "B"])
+    result = asyncio.run(
+        run_case_n(
+            load_case(CASE_DIR),
+            run_id="agg-deliverable",
+            n=2,
+            make_flow_driver=mfd,
+            make_simulator=ms,
+            run_judge=rj,
+            runs_root=tmp_path,
+        )
+    )
+
+    agg = json.loads((Path(result["run_root"]) / "run.json").read_text())
+    assert agg["case"] == "feature_flag_service"
+    assert agg["deliverable"] == "plan.md"
+    assert "scenario" not in agg
+
+
 def test_run_case_n_single_trial_keeps_flat_layout(tmp_path):
-    case = CASE_DIR
+    case = load_case(CASE_DIR)
     mfd, ms, rj = n_run_factories(["A"])
 
     result = asyncio.run(
@@ -294,7 +617,6 @@ def test_run_case_n_single_trial_keeps_flat_layout(tmp_path):
             make_simulator=ms,
             run_judge=rj,
             runs_root=tmp_path,
-            scenario="swe_planning",
         )
     )
 
@@ -306,7 +628,7 @@ def test_run_case_n_single_trial_keeps_flat_layout(tmp_path):
         "winner": "superpowers",
     }
     root = Path(result["run_root"])
-    assert root == tmp_path / "single-run"
+    assert root == tmp_path / "feature_flag_service" / "single-run"
     # flat single-run layout, no trial dirs, run.json is the single-run meta
     assert not (root / "trial-01").exists()
     assert (root / "superpowers" / "plan.md").is_file()
@@ -317,25 +639,23 @@ def test_run_case_n_single_trial_keeps_flat_layout(tmp_path):
 
 
 def test_run_case_n_rejects_bad_n(tmp_path):
-    case = CASE_DIR
     mfd, ms, rj = n_run_factories([])
     with pytest.raises(ValueError):
         asyncio.run(
             run_case_n(
-                case,
+                load_case(CASE_DIR),
                 run_id="x",
                 n=0,
                 make_flow_driver=mfd,
                 make_simulator=ms,
                 run_judge=rj,
                 runs_root=tmp_path,
-                scenario="swe_planning",
             )
         )
 
 
 def test_run_case_n_failing_trial_propagates(tmp_path):
-    case = CASE_DIR
+    case = load_case(CASE_DIR)
     mfd, ms, rj = n_run_factories(["A"])
     calls = {"n": 0}
 
@@ -355,13 +675,12 @@ def test_run_case_n_failing_trial_propagates(tmp_path):
                 make_simulator=ms,
                 run_judge=failing_judge,
                 runs_root=tmp_path,
-                scenario="swe_planning",
             )
         )
 
     # trial 1 completed and its artifacts remain; trial 3 never started
     assert calls["n"] == 2
-    root = tmp_path / "fail-run"
+    root = tmp_path / "feature_flag_service" / "fail-run"
     assert (root / "trial-01" / "judge.md").is_file()
     assert not (root / "trial-03").exists()
     # no aggregate run.json was written for the aborted run
@@ -369,17 +688,15 @@ def test_run_case_n_failing_trial_propagates(tmp_path):
 
 
 def test_run_case_writes_report_html_and_flow_stats(tmp_path):
-    case = CASE_DIR
     mfd, ms, rj = n_run_factories(["A"])
     result = asyncio.run(
         run_case(
-            case,
+            load_case(CASE_DIR),
             run_id="report-run",
             make_flow_driver=mfd,
             make_simulator=ms,
             run_judge=rj,
             runs_root=tmp_path,
-            scenario="swe_planning",
         )
     )
     root = Path(result["run_root"])
@@ -394,7 +711,6 @@ def test_run_case_writes_report_html_and_flow_stats(tmp_path):
 
 
 def test_run_case_rotation_reverses_judge_order(tmp_path):
-    case = CASE_DIR
     seen = {}
 
     async def run_judge(judge_md, entries, judge_dir):
@@ -404,13 +720,12 @@ def test_run_case_rotation_reverses_judge_order(tmp_path):
     mfd, ms, _ = n_run_factories([])
     result = asyncio.run(
         run_case(
-            case,
+            load_case(CASE_DIR),
             run_id="swap-run",
             make_flow_driver=mfd,
             make_simulator=ms,
             run_judge=run_judge,
             runs_root=tmp_path,
-            scenario="swe_planning",
             rotation=1,
         )
     )
@@ -457,23 +772,9 @@ def test_make_flow_driver_defaults_no_skill_dirs(tmp_path):
 # --- N-way (3-flow) coverage -------------------------------------------------
 
 
-def _three_flow_case(tmp_path) -> Path:
-    """A synthetic 3-flow case dir: reuses feature_flag_service's task/sim/judge
-    text, with a hand-written 3-flow flows.yaml."""
-    src = CASE_DIR
-    case = tmp_path / "three_flow_case"
-    case.mkdir()
-    for name in ("task.md", "simulator.md", "knowledge.md", "judge.md"):
-        shutil.copy(src / name, case / name)
-    flows = {
-        "flows": [
-            {"name": "superpowers", "harness": "claude-native", "model": "opus", "skills": "all"},
-            {"name": "plain", "harness": "claude-native", "model": "opus", "skills": "none"},
-            {"name": "codex", "harness": "codex-native", "model": "gpt-5.5", "skills": "none"},
-        ]
-    }
-    (case / "flows.yaml").write_text(yaml.safe_dump(flows))
-    return case
+def _three_flow_case(tmp_path) -> Case:
+    """A synthetic 3-flow case: the fixture's task/sim/judge text, three flows."""
+    return PlanCase(_case_files(tmp_path / "three_flow_case", flows=THREE_FLOWS))
 
 
 def _three_flow_factories():
@@ -482,10 +783,7 @@ def _three_flow_factories():
             f"# {flow['name']} plan\ncontent for {flow['name']}.", [], run_dir=flow_dir
         )
 
-    def make_simulator(flow, sim_dir):
-        return StubSim([DONE_TOKEN])
-
-    return make_flow_driver, make_simulator
+    return make_flow_driver, _sim
 
 
 def test_run_case_three_flows_labels_and_winner_flow(tmp_path):
@@ -504,7 +802,6 @@ def test_run_case_three_flows_labels_and_winner_flow(tmp_path):
             make_simulator=ms,
             run_judge=run_judge,
             runs_root=tmp_path / "runs",
-            scenario="swe_planning",
             artifact_grace_s=0.0,
         )
     )
@@ -534,7 +831,6 @@ def test_run_case_n_three_flows_rotation_sequence(tmp_path):
             make_simulator=ms,
             run_judge=run_judge,
             runs_root=tmp_path / "runs",
-            scenario="swe_planning",
         )
     )
     trials = result["trials"]
@@ -569,7 +865,6 @@ def test_run_case_three_flows_report_renders_without_keyerror(tmp_path):
             make_simulator=ms,
             run_judge=run_judge,
             runs_root=tmp_path / "runs",
-            scenario="swe_planning",
             artifact_grace_s=0.0,
         )
     )
@@ -594,7 +889,6 @@ def test_run_case_n_three_flows_aggregate_report_renders(tmp_path):
             make_simulator=ms,
             run_judge=run_judge,
             runs_root=tmp_path / "runs",
-            scenario="swe_planning",
         )
     )
     text = (Path(result["run_root"]) / "report.html").read_text()
@@ -621,13 +915,12 @@ def test_render_any_dispatches_on_shape(tmp_path):
     mfd, ms, rj = n_run_factories(["A"])
     result = asyncio.run(
         run_case(
-            CASE_DIR,
+            load_case(CASE_DIR),
             run_id="single",
             make_flow_driver=mfd,
             make_simulator=ms,
             run_judge=rj,
-            runs_root=tmp_path,
-            scenario="swe_planning",
+            runs_root=tmp_path / "runs",
         )
     )
     text = render_any(Path(result["run_root"])).read_text()
@@ -636,19 +929,17 @@ def test_render_any_dispatches_on_shape(tmp_path):
 
 
 def test_run_case_n_writes_aggregate_report(tmp_path):
-    case = CASE_DIR
     # trial-02 rotates: positional B is superpowers, so A,B -> superpowers 2-0
     mfd, ms, rj = n_run_factories(["A", "B"])
     result = asyncio.run(
         run_case_n(
-            case,
+            load_case(CASE_DIR),
             run_id="agg-report-run",
             n=2,
             make_flow_driver=mfd,
             make_simulator=ms,
             run_judge=rj,
             runs_root=tmp_path,
-            scenario="swe_planning",
         )
     )
     text = (Path(result["run_root"]) / "report.html").read_text()
@@ -711,36 +1002,38 @@ def test_omni_factories_bind_scenario():
     assert all(f.keywords == {"scenario": "dwh"} for f in (mk_sim, judge))
 
 
-# --- S01.3: no-judge / score_flow / omni_factories keywords -----------------
+def test_omni_factories_git_init(tmp_path):
+    mk_flow, _mk_sim, _judge = run_mod.omni_factories("x", git_init=True)
+    d = mk_flow({"name": "plain"}, tmp_path)
+    assert d.git_init is True
+
+    mk_flow_default, _, _ = run_mod.omni_factories("x")
+    d2 = mk_flow_default({"name": "plain"}, tmp_path)
+    assert d2.git_init is False
 
 
-def _unjudged_case(tmp_path) -> Path:
-    """feature_flag_service, minus judge.md — a build-shaped case."""
-    src = CASE_DIR
-    case = tmp_path / "unjudged_case"
-    case.mkdir()
-    for name in ("task.md", "simulator.md", "knowledge.md", "flows.yaml"):
-        shutil.copy(src / name, case / name)
-    return case
+# --- the case's own grading, with no judge ----------------------------------
 
 
-def test_run_case_score_flow_writes_scorecards_no_judge(tmp_path):
-    case = _unjudged_case(tmp_path)
-    mfd, ms, _ = n_run_factories([])
+def _unjudged_case(tmp_path, score_fn=None) -> Case:
+    """The fixture's two flows, minus judge.md — a build-shaped case."""
+    case_dir = _case_files(tmp_path / "unjudged_case", flows=TWO_FLOWS, judge=False)
+    return PlanCase(case_dir) if score_fn is None else _scored(case_dir, score_fn)
 
-    async def score_flow(flow, flow_dir, session):
+
+def test_case_score_writes_a_scorecard_per_flow_with_no_judge(tmp_path):
+    async def score(flow, flow_dir, session):
         return {"flow": flow["name"], "objective": {"acceptance": 1.0}}
 
+    mfd, ms, _ = n_run_factories([])
     result = asyncio.run(
         run_case(
-            case,
+            _unjudged_case(tmp_path, score),
             run_id="unjudged-run",
             make_flow_driver=mfd,
             make_simulator=ms,
             run_judge=None,
             runs_root=tmp_path,
-            scenario="coding_workflow",
-            score_flow=score_flow,
             artifact_grace_s=0.0,
         )
     )
@@ -758,23 +1051,19 @@ def test_run_case_score_flow_writes_scorecards_no_judge(tmp_path):
 
 @pytest.mark.parametrize("n", [1, 2])  # n=1 is the CLI default and takes its own branch
 def test_run_case_n_unjudged_aggregate_empty(tmp_path, n):
-    case = _unjudged_case(tmp_path)
-    mfd, ms, _ = n_run_factories([])
-
-    async def score_flow(flow, flow_dir, session):
+    async def score(flow, flow_dir, session):
         return {"flow": flow["name"]}
 
+    mfd, ms, _ = n_run_factories([])
     result = asyncio.run(
         run_case_n(
-            case,
+            _unjudged_case(tmp_path, score),
             run_id="unjudged-agg",
             n=n,
             make_flow_driver=mfd,
             make_simulator=ms,
             run_judge=None,
             runs_root=tmp_path,
-            scenario="coding_workflow",
-            score_flow=score_flow,
         )
     )
     assert result["aggregate"] == {"n": n, "counts": {}, "winner": None}
@@ -786,27 +1075,24 @@ def test_run_case_n_unjudged_aggregate_empty(tmp_path, n):
         assert (root / "report.html").is_file()
 
 
-def test_run_case_score_flow_error_is_isolated(tmp_path):
-    case = _unjudged_case(tmp_path)
-    mfd, ms, _ = n_run_factories([])
+def test_case_score_error_is_isolated(tmp_path):
     calls = {"n": 0}
 
-    async def score_flow(flow, flow_dir, session):
+    async def score(flow, flow_dir, session):
         calls["n"] += 1
         if flow["name"] == "superpowers":
             raise RuntimeError("boom")
         return {"flow": flow["name"], "objective": {"acceptance": 1.0}}
 
+    mfd, ms, _ = n_run_factories([])
     result = asyncio.run(
         run_case(
-            case,
+            _unjudged_case(tmp_path, score),
             run_id="err-run",
             make_flow_driver=mfd,
             make_simulator=ms,
             run_judge=None,
             runs_root=tmp_path,
-            scenario="coding_workflow",
-            score_flow=score_flow,
             artifact_grace_s=0.0,
         )
     )
@@ -821,7 +1107,7 @@ def test_run_case_score_flow_error_is_isolated(tmp_path):
 
     from flowbench.report.compare import compare_table, load_scorecards
 
-    cards = load_scorecards(tmp_path, "err-run")
+    cards = load_scorecards(root.parent, root.name)
     table = compare_table(cards)
     assert "FAILED (RuntimeError: boom)" in table
     lines = table.splitlines()
@@ -829,18 +1115,16 @@ def test_run_case_score_flow_error_is_isolated(tmp_path):
     assert "ok" in status_line
 
 
-def test_run_case_no_score_flow_judge_present_unchanged(tmp_path):
-    case = CASE_DIR
+def test_no_score_override_writes_no_scorecard_and_still_judges(tmp_path):
     mfd, ms, rj = n_run_factories(["A"])
     result = asyncio.run(
         run_case(
-            case,
+            load_case(CASE_DIR),
             run_id="judged-run",
             make_flow_driver=mfd,
             make_simulator=ms,
             run_judge=rj,
             runs_root=tmp_path,
-            scenario="swe_planning",
         )
     )
     root = Path(result["run_root"])
@@ -849,55 +1133,217 @@ def test_run_case_no_score_flow_judge_present_unchanged(tmp_path):
     assert (root / "judge.md").is_file()
 
 
-def test_omni_factories_git_init(tmp_path):
-    mk_flow, _mk_sim, _judge = run_mod.omni_factories("x", git_init=True)
-    d = mk_flow({"name": "plain"}, tmp_path)
-    assert d.git_init is True
-
-    mk_flow_default, _, _ = run_mod.omni_factories("x")
-    d2 = mk_flow_default({"name": "plain"}, tmp_path)
-    assert d2.git_init is False
+# --- deliverable shapes ------------------------------------------------------
 
 
-def test_run_case_artifact_none_omits_artifact_keys(tmp_path):
-    case = _unjudged_case(tmp_path)
+async def test_file_deliverable_still_carries_its_text(tmp_path):
+    mfd, ms, rj = n_run_factories(["A"])
+    result = await run_case(
+        load_case(CASE_DIR),
+        run_id="file-run",
+        make_flow_driver=mfd,
+        make_simulator=ms,
+        run_judge=rj,
+        runs_root=tmp_path,
+    )
+
+    root = Path(result["run_root"])
+    assert (root / "superpowers" / "plan.md").read_text().startswith("# SP plan")
+    stats = json.loads((root / "run.json").read_text())["flow_stats"]["superpowers"]
+    assert stats["artifact_lines"] == 2
+    assert stats["deliverable_path"] == "plan.md"
+
+
+async def test_nested_file_deliverable_is_copied_to_the_flow_dir(tmp_path):
+    """A declared `out/result.txt` the agent wrote under a subagent's cwd: the
+    canonical copy lands at the flow-dir root, its parent dir created for it."""
+    case = _scored(
+        _case_files(tmp_path / "case", flows=ONE_FLOW, judge=False),
+        _card,
+        deliverable="out/result.txt",
+    )
+
+    result = await run_case(
+        case,
+        run_id="nested",
+        make_flow_driver=lambda flow, flow_dir: TreeDriver(
+            {"work/out/result.txt": "ported\n"}, flow_dir
+        ),
+        make_simulator=_sim,
+        run_judge=None,
+        runs_root=tmp_path,
+    )
+
+    root = Path(result["run_root"])
+    assert (root / "plain" / "out" / "result.txt").read_text() == "ported\n"
+    stats = json.loads((root / "run.json").read_text())["flow_stats"]["plain"]
+    assert stats["deliverable_path"] == "work/out/result.txt"
+    assert stats["artifact_lines"] == 1
+
+
+async def test_directory_deliverable_is_present_with_no_text(tmp_path):
+    """A directory is left where it is — `deliverable_path` is how a reader
+    reaches a nested one."""
+    case = _scored(
+        _case_files(tmp_path / "case", flows=ONE_FLOW, judge=False), _card, deliverable="port"
+    )
+
+    result = await run_case(
+        case,
+        run_id="dir-run",
+        make_flow_driver=lambda flow, flow_dir: TreeDriver(
+            {"work/port/a.sql": "select 1\n", "work/port/b/c.sql": "select 2\n"}, flow_dir
+        ),
+        make_simulator=_sim,
+        run_judge=None,
+        runs_root=tmp_path,
+    )
+
+    root = Path(result["run_root"])
+    flow_dir = root / "plain"
+    session = json.loads((flow_dir / "session.json").read_text())
+    assert session["artifact_exists"] is True
+    assert session["artifact_text"] is None
+    assert not (flow_dir / "port").exists()  # never copied
+    meta = json.loads((root / "run.json").read_text())
+    stats = meta["flow_stats"]["plain"]
+    assert stats["deliverable_path"] == "work/port"
+    assert stats["artifact_lines"] == 0
+    assert meta["artifact_missing"] == []
+    assert _judge_view(case, session) == "(port/ — 2 files)\na.sql\nb/c.sql"
+
+
+async def test_empty_directory_deliverable_is_present_not_missing(tmp_path):
+    case = _scored(
+        _case_files(tmp_path / "case", flows=ONE_FLOW, judge=False), _card, deliverable="port"
+    )
+
+    result = await run_case(
+        case,
+        run_id="empty-dir",
+        make_flow_driver=lambda flow, flow_dir: TreeDriver({"port/": ""}, flow_dir),
+        make_simulator=_sim,
+        run_judge=None,
+        runs_root=tmp_path,
+        artifact_grace_s=0.0,
+    )
+
+    root = Path(result["run_root"])
+    session = json.loads((root / "plain" / "session.json").read_text())
+    assert session["artifact_exists"] is True and session["artifact_text"] is None
+    meta = json.loads((root / "run.json").read_text())
+    assert meta["artifact_missing"] == []  # present, though it holds nothing
+    assert meta["flow_stats"]["plain"]["deliverable_path"] == "port"
+    assert _judge_view(case, session) == "(port/ — 0 files)"
+
+
+async def test_missing_deliverable_marks_the_flow_and_the_judge_entry(tmp_path):
+    seen = {}
 
     def make_flow_driver(flow, flow_dir):
-        return FakeDriver("# p", [])
+        if flow["name"] == "superpowers":
+            return FakeDriver("# SP plan\nunknown flag key returns 404.", [], run_dir=flow_dir)
+        return MissingPlanDriver("unused", [], run_dir=flow_dir)
 
-    def make_simulator(flow, sim_dir):
-        return StubSim([DONE_TOKEN])
+    async def run_judge(judge_md, entries, judge_dir):
+        seen.update({label: plan for label, _transcript, plan in entries})
+        return "A is better.\nWINNER: A\nA: thorough\nB: missing"
 
-    async def score_flow(flow, flow_dir, session):
-        return {"flow": flow["name"]}
-
-    result = asyncio.run(
-        run_case(
-            case,
-            run_id="no-artifact-run",
-            make_flow_driver=make_flow_driver,
-            make_simulator=make_simulator,
-            run_judge=None,
-            runs_root=tmp_path,
-            scenario="coding_workflow",
-            score_flow=score_flow,
-            artifact_name=None,
-        )
+    result = await run_case(
+        load_case(CASE_DIR),
+        run_id="missing-run",
+        make_flow_driver=make_flow_driver,
+        make_simulator=_sim,
+        run_judge=run_judge,
+        runs_root=tmp_path,
+        artifact_grace_s=0.0,
     )
+
+    root = Path(result["run_root"])
+    assert not (root / "plain" / "plan.md").exists()  # nothing to capture, nothing written
+    assert seen["B"] == MISSING_DELIVERABLE("plan.md")
+    meta = json.loads((root / "run.json").read_text())
+    assert meta["artifact_missing"] == ["plain"]
+    assert meta["flow_stats"]["plain"]["deliverable_path"] is None
+    assert meta["flow_stats"]["plain"]["artifact_lines"] == 0
+
+
+async def test_no_deliverable_omits_the_artifact_keys(tmp_path):
+    case = _scored(
+        _case_files(tmp_path / "case", flows=TWO_FLOWS, judge=False), _card, deliverable=None
+    )
+    result = await run_case(
+        case,
+        run_id="no-deliverable",
+        make_flow_driver=lambda flow, flow_dir: FakeDriver("# p", [], run_dir=flow_dir),
+        make_simulator=_sim,
+        run_judge=None,
+        runs_root=tmp_path,
+    )
+
     root = Path(result["run_root"])
     run_json_text = (root / "run.json").read_text()
-    for key in ("artifact_missing", "artifact_lines", "plans_missing", "plan_lines"):
+    for key in ("artifact_missing", "artifact_lines", "deliverable_path", "plans_missing"):
         assert key not in run_json_text
     for name in ("superpowers", "plain"):
-        assert not (root / name / "plan.md").exists()
         assert (root / name / "session.json").is_file()
         assert (root / name / "transcript.md").is_file()
-        card = json.loads((root / name / "scorecard.json").read_text())
-        assert card == {"flow": name}
+        assert json.loads((root / name / "scorecard.json").read_text()) == {"flow": name}
 
 
-def test_run_case_builds_probe_from_flow_dir(tmp_path, monkeypatch):
-    case = _unjudged_case(tmp_path)
+async def test_no_deliverable_with_judge_reports_null_and_no_missing_key(tmp_path):
+    """A judged case may declare no deliverable: the flows are then compared on
+    their conversations alone."""
+    seen = {}
+
+    async def run_judge(judge_md, entries, judge_dir):
+        seen.update({label: plan for label, _transcript, plan in entries})
+        return "A is better.\nWINNER: A\nA: ok\nB: ok"
+
+    case = Case(_case_files(tmp_path / "case", flows=TWO_FLOWS, judge=True))
+    result = await run_case(
+        case,
+        run_id="judged-no-deliverable",
+        make_flow_driver=lambda flow, flow_dir: FakeDriver("# p", [], run_dir=flow_dir),
+        make_simulator=_sim,
+        run_judge=run_judge,
+        runs_root=tmp_path,
+    )
+
+    root = Path(result["run_root"])
+    assert seen == {"A": NO_DELIVERABLE, "B": NO_DELIVERABLE}
+    assert (root / "judge.md").is_file() and (root / "report.html").is_file()
+    meta = json.loads((root / "run.json").read_text())
+    assert meta["deliverable"] is None
+    assert "artifact_missing" not in meta
+    assert "artifact_lines" not in json.dumps(meta)
+
+
+def test_what_the_judge_is_shown_for_each_deliverable_shape(tmp_path):
+    plan_case = PlanCase(CASE_DIR)
+    port = tmp_path / "port"
+    (port / "b").mkdir(parents=True)
+    (port / "a.sql").write_text("select 1\n")
+    (port / "b" / "c.sql").write_text("select 2\n")
+    dir_case = type("DirCase", (Case,), {"deliverable": "port"})(CASE_DIR)
+
+    # a file: its text; an empty file: its (empty) text — presence, not truthiness
+    assert _judge_view(plan_case, {"artifact_exists": True, "artifact_text": "# plan\n"}) == (
+        "# plan\n"
+    )
+    assert _judge_view(plan_case, {"artifact_exists": True, "artifact_text": ""}) == ""
+    # absent: the missing marker
+    assert _judge_view(plan_case, {"artifact_exists": False, "artifact_text": None}) == (
+        MISSING_DELIVERABLE("plan.md")
+    )
+    # a directory: no text, so a sorted listing
+    session = {"artifact_exists": True, "artifact_text": None, "artifact_path": str(port)}
+    assert _judge_view(dir_case, session) == "(port/ — 2 files)\na.sql\nb/c.sql"
+    # none declared: the conversations are the whole evidence
+    assert _judge_view(Case(CASE_DIR), session) == NO_DELIVERABLE
+
+
+async def test_the_probe_is_the_cases_find_deliverable(tmp_path, monkeypatch):
     calls = []
 
     async def rec(*args, **kwargs):
@@ -905,126 +1351,27 @@ def test_run_case_builds_probe_from_flow_dir(tmp_path, monkeypatch):
         return {"items": [], "events": []}
 
     monkeypatch.setattr(run_mod, "run_agent_session", rec)
+    mfd, ms, _ = n_run_factories([])
+    common = {
+        "make_flow_driver": mfd,
+        "make_simulator": ms,
+        "run_judge": None,
+        "runs_root": tmp_path,
+        "artifact_grace_s": 30.0,
+    }
+    case_dir = _case_files(tmp_path / "case", flows=TWO_FLOWS, judge=False)
 
-    def make_flow_driver(flow, flow_dir):
-        return FakeDriver("# p", [])
-
-    def make_simulator(flow, sim_dir):
-        return StubSim(["<<DONE>>"])
-
-    asyncio.run(
-        run_case(
-            case,
-            run_id="t-none",
-            make_flow_driver=make_flow_driver,
-            make_simulator=make_simulator,
-            run_judge=None,
-            runs_root=tmp_path,
-            scenario="coding_workflow",
-            artifact_grace_s=30.0,
-            artifact_name=None,
-        )
-    )
+    await run_case(_scored(case_dir, _card, deliverable=None), run_id="t-none", **common)
     assert calls
     assert all(kwargs["artifact_probe"] is None for kwargs in calls)
     assert all(kwargs["artifact_grace_s"] == 30.0 for kwargs in calls)
 
     calls.clear()
-    asyncio.run(
-        run_case(
-            case,
-            run_id="t-default",
-            make_flow_driver=make_flow_driver,
-            make_simulator=make_simulator,
-            run_judge=None,
-            runs_root=tmp_path,
-            scenario="coding_workflow",
-            artifact_grace_s=30.0,
-        )
-    )
+    case = _scored(case_dir, _card)  # PlanCase: declares plan.md
+    result = await run_case(case, run_id="t-plan", **common)
+    root = Path(result["run_root"])
     assert calls
-    names = [f["name"] for f in run_mod.load_flows(case / "flows.yaml")]
-    for name, kwargs in zip(names, calls, strict=True):
-        assert kwargs["artifact_probe"].func is run_mod.find_artifact
-        assert kwargs["artifact_probe"].args == (tmp_path / "t-default" / name, "plan.md")
-        assert kwargs["artifact_grace_s"] == 30.0
-
-
-def test_run_case_n_forwards_artifact_name(tmp_path, monkeypatch):
-    calls = []
-
-    async def rec(case_dir, *, run_id, **kwargs):
-        calls.append(kwargs)
-        run_root = tmp_path / run_id
-        run_root.mkdir(parents=True, exist_ok=True)
-        return {
-            "run_root": str(run_root),
-            "meta": {"winner_flow": None, "labels": {}, "scores": {}},
-        }
-
-    monkeypatch.setattr(run_mod, "run_case", rec)
-
-    for n in (1, 2):
-        calls.clear()
-        asyncio.run(
-            run_case_n(
-                CASE_DIR,
-                run_id=f"n{n}",
-                n=n,
-                make_flow_driver=None,
-                make_simulator=None,
-                run_judge=None,
-                runs_root=tmp_path,
-                scenario="coding_workflow",
-                artifact_name=None,
-            )
-        )
-        assert calls
-        assert all(kwargs["artifact_name"] is None for kwargs in calls)
-
-
-def test_run_case_artifact_none_with_judge_rejected(tmp_path):
-    case = CASE_DIR
-
-    def fail_factory(*args, **kwargs):
-        pytest.fail("factory should not be called when artifact_name/judge.md conflict")
-
-    with pytest.raises(ValueError):
-        asyncio.run(
-            run_case(
-                case,
-                run_id="rejected-run",
-                make_flow_driver=fail_factory,
-                make_simulator=fail_factory,
-                run_judge=fail_factory,
-                runs_root=tmp_path / "runs",
-                scenario="swe_planning",
-                artifact_name=None,
-            )
-        )
-    assert not (tmp_path / "runs" / "rejected-run").exists()
-
-
-def test_find_artifact_picks_the_shallowest_nested_match_then_lexically(tmp_path):
-    """Same ordering rule as Case.find_deliverable: rglob's first yield follows
-    os.scandir, so two nested copies would resolve differently per filesystem."""
-    for rel in ("z/plan.md", "a/b/plan.md", "a/plan.md"):
-        p = tmp_path / rel
-        p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(rel)
-    found = run_mod.find_artifact(tmp_path, "plan.md")
-    assert found is not None and found.relative_to(tmp_path).as_posix() == "a/plan.md"
-
-
-def test_find_artifact_missing_top_level_nested(tmp_path):
-    assert run_mod.find_artifact(tmp_path, "plan.md") is None
-
-    top = tmp_path / "plan.md"
-    top.write_text("top")
-    assert run_mod.find_artifact(tmp_path, "plan.md") == top
-
-    top.unlink()
-    nested = tmp_path / "sub" / "plan.md"
-    nested.parent.mkdir()
-    nested.write_text("nested")
-    assert run_mod.find_artifact(tmp_path, "plan.md") == nested
+    for name, kwargs in zip([f["name"] for f in TWO_FLOWS], calls, strict=True):
+        probe = kwargs["artifact_probe"]
+        assert probe.func == case.find_deliverable
+        assert probe.args == (root / name,)

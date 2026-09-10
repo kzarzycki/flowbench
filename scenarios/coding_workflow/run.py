@@ -1,7 +1,7 @@
 """coding_workflow entrypoint: the simulator and each flow run as omnigent
 sessions via flowbench's OmnigentDriver — never `claude -p`. Unlike
 swe_planning this case has no comparative judge; each flow is scored on its
-own (score_todo_app) into <flow>/scorecard.json, read by `flowbench compare`.
+own (the case's `score`) into <flow>/scorecard.json, read by `flowbench compare`.
 
 Usage (from the repo root; needs a live omnigent server):
 
@@ -11,27 +11,25 @@ Usage (from the repo root; needs a live omnigent server):
     # without re-driving anything — no new session, session.json untouched:
     uv run python -m scenarios.coding_workflow.run --rescore <run-id>
 
-Outputs land in ../flowbench-runs/coding_workflow/<run-id>/ (per-flow
+Outputs land in ../flowbench-runs/coding_workflow/<case>/<run-id>/ (per-flow
 subfolders), never inside the repo. The runtime (run_case/run_case_n,
 SessionModel, the omnigent factories, rescore_run) lives in the engine:
-`flowbench.run`. This module is the CLI."""
+`flowbench.run`; what the case is (deliverable, budgets, setup, score) lives in
+its `case.py`. This module is the CLI."""
 
 from __future__ import annotations
 
 import argparse
 import asyncio
-import functools
 import json
 from datetime import datetime
 from pathlib import Path
 
+from flowbench.case import load_case
 from flowbench.run import omni_factories, rescore_run, run_case_n
-from scenarios.coding_workflow.cases.todo_app.scoring import make_grader_omni, score_todo_app
+from scenarios.coding_workflow import scenario
 
 SCENARIO = "coding_workflow"
-# todo_app's deliverable is the running app, judged black-box by acceptance.py
-# — no file artifact (tasks.json is the app's runtime state, not a deliverable).
-ARTIFACT_NAME = None
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -79,42 +77,33 @@ def _parse_args(argv=None) -> argparse.Namespace:
 
 
 def main() -> None:
-    from scenarios.coding_workflow import scenario
-
     args = _parse_args()
     runs_root = Path(args.runs_root) if args.runs_root else default_runs_root()
-    score_flow = functools.partial(
-        score_todo_app, make_grader=functools.partial(make_grader_omni, scenario=SCENARIO)
-    )
+    case = load_case(scenario.CASE_DIR(args.case))
+    case.deadline_s = args.deadline_s  # the flag overrides what the case declares
 
     if args.rescore is not None:
-        run_root = runs_root / args.rescore
+        run_root = runs_root / case.name / args.rescore
         if not run_root.is_dir():
             raise SystemExit(f"--rescore: no run dir at {run_root}")
-        result = asyncio.run(
-            rescore_run(scenario.CASE_DIR(args.case), run_root, score_flow=score_flow)
-        )
+        result = asyncio.run(rescore_run(case, run_root))
         print(json.dumps(result, indent=2))
         return
 
-    make_flow_driver, make_simulator, run_judge = omni_factories(SCENARIO, git_init=True)
+    make_flow_driver, make_simulator, run_judge = omni_factories(SCENARIO)
     result = asyncio.run(
         run_case_n(
-            scenario.CASE_DIR(args.case),
+            case,
             run_id=args.run_id or datetime.now().strftime("%Y%m%d-%H%M%S"),
             n=args.n,
             make_flow_driver=make_flow_driver,
             make_simulator=make_simulator,
             run_judge=run_judge,
             runs_root=runs_root,
-            scenario=SCENARIO,
-            deadline_s=args.deadline_s,
-            score_flow=score_flow,
-            artifact_name=ARTIFACT_NAME,
         )
     )
-    # n=1: trials[0] is run_case's meta (the old single-run print, plus the
-    # engine's "scenario" key). n>1: the aggregate {n, counts, winner}.
+    # n=1: trials[0] is run_case's meta (the old single-run print). n>1: the
+    # aggregate {n, counts, winner}.
     payload = result["trials"][0] if args.n == 1 else result["aggregate"]
     print(json.dumps(payload, indent=2))
     print(f"\nRun written to: {result['run_root']}")

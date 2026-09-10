@@ -33,7 +33,7 @@ class ScriptedDriver:
 class FakeDriver(AgentDriver):
     """Replays scripted questions, then reports the plan complete; 'writes' the
     plan to `run_dir/plan.md` on disk (like a real driver would) when `run_dir`
-    is given, so the orchestrator's `find_artifact` probe finds it."""
+    is given, so a case declaring `plan.md` finds one."""
 
     def __init__(self, plan_text, questions, run_dir=None):
         self._plan = plan_text
@@ -64,7 +64,7 @@ class FakeDriver(AgentDriver):
 
 class MissingPlanDriver(FakeDriver):
     """Reports the plan complete but never produced an artifact (flow crashed):
-    `start()` writes nothing, so `find_artifact` never finds a plan."""
+    `start()` writes nothing, so the deliverable probe never finds a plan."""
 
     async def start(self):
         pass

@@ -1,16 +1,20 @@
 """Orchestrator: the simulator, each flow, and the judge all run as omnigent
 sessions via flowbench's OmnigentDriver — never `claude -p`.
 
-Outputs land in <runs_root>/<run_id>/ (per-flow subfolders), never inside the
-repo. Offline tests inject fakes for the three factories."""
+What is benchmarked is a `Case` (`flowbench.case`): it says what proves delivery,
+how long a flow may run, what happens before and after one, and how it is graded.
+Outputs land in <runs_root>/<case.name>/<run_id>/ (per-flow subfolders), never
+inside the repo. Offline tests inject fakes for the three factories."""
 
 from __future__ import annotations
 
 import functools
 import json
+import shutil
 import string
 from pathlib import Path
 
+from flowbench.case import check_gradable
 from flowbench.driver import OmnigentDriver
 from flowbench.flowspec import compose_kickoff, load_flows
 from flowbench.loop import run_agent_session
@@ -24,86 +28,102 @@ from flowbench.runner.judge import (
 )
 from flowbench.transcript import render_transcript
 
-MISSING_PLAN = "(this flow produced no plan.md — treat it as a failed run)"
+NO_DELIVERABLE = "(no deliverable declared)"
 SIM_MODEL = "opus"
 JUDGE_MODEL = "opus"
 
 
-def find_artifact(run_dir: Path, name: str) -> Path | None:
-    """Which file proves a flow delivered — the orchestrator's knowledge, not
-    the driver's. `run_dir/name` if it landed at the top level, else its shallowest
-    nested hit (e.g. under a subagent's cwd), else None. The nested pick is
-    ordered — shallowest, then lexicographic — because `rglob` yields in
-    `os.scandir` order and two nested copies would otherwise resolve differently
-    per machine."""
-    top = run_dir / name
-    if top.exists():
-        return top
-    matches = sorted(
-        run_dir.rglob(name),
-        key=lambda p: (len(p.relative_to(run_dir).parts), p.as_posix()),
-    )
-    return matches[0] if matches else None
+def MISSING_DELIVERABLE(name: str) -> str:
+    """What the judge is shown in place of a deliverable the flow never produced."""
+    return f"(this flow produced no {name} — treat it as a failed run)"
+
+
+def _judge_view(case, session: dict) -> str:
+    """What the judge reads for one flow. A file deliverable is its text; a
+    directory has no text, so it is its sorted file listing; a declared
+    deliverable the flow never produced is the missing marker; a case that
+    declares none says so, and its flows are compared on the conversations alone.
+
+    Presence is the session's `artifact_exists`, never the truthiness of
+    `artifact_text`: an empty file and a directory both have no text."""
+    if case.deliverable is None:
+        return NO_DELIVERABLE
+    if not session.get("artifact_exists"):
+        return MISSING_DELIVERABLE(case.deliverable)
+    text = session.get("artifact_text")
+    if text is not None:
+        return text
+    root = Path(session["artifact_path"])
+    files = sorted(p.relative_to(root).as_posix() for p in root.rglob("*") if p.is_file())
+    return "\n".join([f"({case.deliverable}/ — {len(files)} files)", *files])
+
+
+def _capture_deliverable(case, flow_dir: Path, session: dict) -> str | None:
+    """Put a found deliverable FILE where every reader looks — the declared path
+    at the flow-dir root, parents created, so a declared `out/result.txt` lands
+    even when the agent wrote it under a subagent's cwd. A directory is left where
+    it is (a ported project can be large; copying it would double the run dir).
+
+    Answers where the deliverable was found, relative to the flow dir, which is
+    how a reader reaches one that is nested — or None when there is none."""
+    found = session.get("artifact_path")
+    if not session.get("artifact_exists") or found is None:
+        return None
+    found = Path(found)
+    canonical = flow_dir / case.deliverable
+    if found.is_file() and found != canonical:
+        canonical.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(found, canonical)
+    return found.relative_to(flow_dir).as_posix()
 
 
 async def run_case(
-    case_dir,
+    case,
     *,
     run_id: str,
     make_flow_driver,
     make_simulator,
     run_judge,
-    runs_root,
-    scenario: str,
-    max_turns: int = 80,
-    deadline_s: float = 1800.0,
+    runs_root=None,
     artifact_grace_s: float = 60.0,
     rotation: int = 0,
-    score_flow=None,
-    artifact_name: str | None = "plan.md",
 ) -> dict:
-    """Spawn simulator + each flow, run the mediated loop, collect artifacts,
-    then judge. Omnigent-specific spawning is injected via the three factories
-    so the whole pipeline runs offline with fakes. `rotation` rotates the flow
-    list left by rotation % N so multi-trial runs cancel judge position bias.
+    """Run every flow of `case` — setup, session, deliverable capture, score,
+    teardown — then judge them against each other when the case carries a
+    `judge.md`. Omnigent-specific spawning is injected via the three factories so
+    the whole pipeline runs offline with fakes. `rotation` rotates the flow list
+    left by rotation % N so multi-trial runs cancel judge position bias.
 
-    `artifact_name=None` means the case declares no artifact (a build-shaped
-    case like todo_app, judged black-box): no `<flow>/plan.md` is written, no
-    `artifact_missing`/`artifact_lines` keys appear in `run.json`, and the
-    artifact grace-poll is skipped.
+    The run dir is `<runs_root>/<case.name>/<run_id>`, `runs_root` falling back to
+    the case's settings. Budgets (`max_turns`, `deadline_s`) and what proves
+    delivery (`case.deliverable`) are the case's; a case that declares no
+    deliverable (a build-shaped one like todo_app, judged black-box) gets no
+    probe, no grace-poll and no `artifact_missing`/`artifact_lines` in `run.json`.
 
-    `score_flow(flow, flow_dir, session) -> dict`, when given, is called after
-    each flow's session and its result written to `<flow_dir>/scorecard.json`;
-    a raised exception is caught and recorded as `{"error": ...}` instead of
-    aborting the run. The comparative judge stage runs only when the case
-    carries a `judge.md` (a build-shaped case like todo_app has none — each
-    flow is scored on its own instead)."""
-    case_dir = Path(case_dir)
-    task_text = (case_dir / "task.md").read_text()
+    `case.score(flow, flow_dir, session)` runs after each flow's session and its
+    result is written to `<flow_dir>/scorecard.json`; `None` writes no scorecard,
+    and a raised exception is recorded as `{"error": ...}` for that flow instead
+    of aborting the run. `case.teardown` runs even when a stage raises."""
+    check_gradable(case)  # before any factory: never spend a session on an ungradable run
+    task_text = (case.case_dir / "task.md").read_text()
     sim_system = (
-        (case_dir / "simulator.md").read_text()
+        (case.case_dir / "simulator.md").read_text()
         + "\n\n--- WHAT YOU KNOW ---\n\n"
-        + (case_dir / "knowledge.md").read_text()
+        + (case.case_dir / "knowledge.md").read_text()
     )
-    judge_path = case_dir / "judge.md"
-    has_judge = judge_path.exists()
-    judge_md = judge_path.read_text() if has_judge else None
-    has_artifact = artifact_name is not None
-    if artifact_name is None and has_judge:
-        raise ValueError(
-            f"{case_dir}: artifact_name=None is incompatible with judge.md "
-            "— the HTML report needs <flow>/plan.md"
-        )
-    flows = load_flows(case_dir / "flows.yaml")
-    if len(flows) < 2:
-        raise ValueError(f"run_case judges 2+ flows, got {len(flows)}")
+    has_judge = case.judge_path.exists()
+    judge_md = case.judge_path.read_text() if has_judge else None
+    has_deliverable = case.deliverable is not None
+    flows = load_flows(case.case_dir / "flows.yaml")
     r = rotation % len(flows)
     flows = flows[r:] + flows[:r]
 
-    run_root = Path(runs_root) / run_id
+    root = runs_root if runs_root is not None else case.settings.runs_root
+    run_root = Path(root) / case.name / run_id
     run_root.mkdir(parents=True, exist_ok=True)
 
-    plans: dict[str, str | None] = {}
+    views: dict[str, str] = {}
+    delivered: dict[str, bool] = {}
     transcripts: dict[str, str] = {}
     flow_stats: dict[str, dict] = {}
     for flow in flows:
@@ -112,53 +132,63 @@ async def run_case(
         flow_dir.mkdir(parents=True, exist_ok=True)
         sim_dir = run_root / f"_sim_{name}"
         sim_dir.mkdir(parents=True, exist_ok=True)
-        driver = make_flow_driver(flow, flow_dir)
-        simulator = make_simulator(flow, sim_dir)
         try:
-            # run_agent_session closes the flow driver itself (its own finally);
-            # the simulator is ours to close.
-            session = await run_agent_session(
-                driver,
-                simulator,
-                first_prompt=compose_kickoff(flow, task_text),
-                simulator_system=sim_system,
-                max_turns=max_turns,
-                deadline_s=deadline_s,
-                artifact_grace_s=artifact_grace_s,
-                artifact_probe=(
-                    functools.partial(find_artifact, flow_dir, artifact_name)
-                    if has_artifact
-                    else None
-                ),
-            )
-        finally:
-            close = getattr(simulator, "close", None)
-            if close is not None:
-                await close()
-
-        plan_text = session.get("artifact_text")
-        transcript_text = render_transcript(session.get("items") or [])
-        if has_artifact:
-            (flow_dir / "plan.md").write_text(plan_text or "")
-        (flow_dir / "transcript.md").write_text(transcript_text)
-        (flow_dir / "session.json").write_text(json.dumps(session, indent=2, default=str))
-        plans[name] = plan_text
-        transcripts[name] = transcript_text
-        flow_stats[name] = {
-            "exit_status": session.get("exit_status"),
-            "turns": session.get("turns"),
-            "duration_s": session.get("duration_s"),
-            **({"artifact_lines": len((plan_text or "").splitlines())} if has_artifact else {}),
-            "context_tokens": session.get("context_tokens"),
-        }
-        if score_flow is not None:
+            await case.setup(flow, flow_dir)
+            driver = make_flow_driver(flow, flow_dir)
+            simulator = make_simulator(flow, sim_dir)
             try:
-                card = await score_flow(flow, flow_dir, session)
+                # run_agent_session closes the flow driver itself (its own finally);
+                # the simulator is ours to close.
+                session = await run_agent_session(
+                    driver,
+                    simulator,
+                    first_prompt=compose_kickoff(flow, task_text),
+                    simulator_system=sim_system,
+                    max_turns=case.max_turns,
+                    deadline_s=case.deadline_s,
+                    artifact_grace_s=artifact_grace_s,
+                    artifact_probe=(
+                        functools.partial(case.find_deliverable, flow_dir)
+                        if has_deliverable
+                        else None
+                    ),
+                )
+            finally:
+                close = getattr(simulator, "close", None)
+                if close is not None:
+                    await close()
+
+            deliverable_path = _capture_deliverable(case, flow_dir, session)
+            transcript_text = render_transcript(session.get("items") or [])
+            (flow_dir / "transcript.md").write_text(transcript_text)
+            (flow_dir / "session.json").write_text(json.dumps(session, indent=2, default=str))
+            views[name] = _judge_view(case, session)
+            delivered[name] = bool(session.get("artifact_exists"))
+            transcripts[name] = transcript_text
+            flow_stats[name] = {
+                "exit_status": session.get("exit_status"),
+                "turns": session.get("turns"),
+                "duration_s": session.get("duration_s"),
+                **(
+                    {
+                        "artifact_lines": len((session.get("artifact_text") or "").splitlines()),
+                        "deliverable_path": deliverable_path,
+                    }
+                    if has_deliverable
+                    else {}
+                ),
+                "context_tokens": session.get("context_tokens"),
+            }
+            try:
+                card = await case.score(flow, flow_dir, session)
             except Exception as e:  # noqa: BLE001 - isolate one flow's scorer, never abort the run
                 error = f"{type(e).__name__}: {e}"
                 card = {"error": error}
                 flow_stats[name]["score_error"] = error
-            (flow_dir / "scorecard.json").write_text(json.dumps(card, indent=2, default=str))
+            if card is not None:
+                (flow_dir / "scorecard.json").write_text(json.dumps(card, indent=2, default=str))
+        finally:
+            await case.teardown(flow, flow_dir)
 
     # Rotated flow order defines this trial's judge-facing labels A, B, C…
     names = [f["name"] for f in flows]
@@ -166,7 +196,7 @@ async def run_case(
     labels = dict(zip(letters, names, strict=True))  # {"A": name, "B": name, ...}
     if has_judge:
         entries = [
-            (letter, transcripts[name], plans[name] if plans[name] else MISSING_PLAN)
+            (letter, transcripts[name], views[name])
             for letter, name in zip(letters, names, strict=True)
         ]
         judge_dir = run_root / "_judge"
@@ -181,15 +211,19 @@ async def run_case(
 
     meta = {
         "run_id": run_id,
-        "scenario": scenario,
-        "case": case_dir.name,
+        "case": case.name,
+        "deliverable": case.deliverable,
         "flows": names,
         "labels": labels,  # {"A": flow_name, ...} — judge-facing, this trial only
         "rotation": rotation,
         "winner": verdict["winner"],  # judge letter, or tie/unknown
         "winner_flow": winner_flow,  # flow NAME (order-independent), or tie/unknown
         "scores": verdict.get("scores"),
-        **({"artifact_missing": [n for n, p in plans.items() if not p]} if has_artifact else {}),
+        **(
+            {"artifact_missing": [n for n, ok in delivered.items() if not ok]}
+            if has_deliverable
+            else {}
+        ),
         "flow_stats": flow_stats,
         "models": {f["name"]: f.get("model") for f in flows},
         "reasoning_effort": {f["name"]: f.get("reasoning_effort") for f in flows},
@@ -201,19 +235,15 @@ async def run_case(
 
 
 async def run_case_n(
-    case_dir,
+    case,
     *,
     run_id: str,
     n: int,
     make_flow_driver,
     make_simulator,
     run_judge,
-    runs_root,
-    scenario: str,
-    max_turns: int = 80,
-    deadline_s: float = 1800.0,
-    score_flow=None,
-    artifact_name: str | None = "plan.md",
+    runs_root=None,
+    artifact_grace_s: float = 60.0,
 ) -> dict:
     """Run run_case n times (sequentially; a failing trial propagates) and
     aggregate the categorical verdicts. Uniform return shape for every n:
@@ -223,22 +253,17 @@ async def run_case_n(
     then {"counts": {}, "winner": None} rather than tallying None as a flow."""
     if n < 1:
         raise ValueError(f"n must be >= 1, got {n}")
+    names = check_gradable(case)  # the same load errors, before any factory
     kwargs = {
         "make_flow_driver": make_flow_driver,
         "make_simulator": make_simulator,
         "run_judge": run_judge,
         "runs_root": runs_root,
-        "scenario": scenario,
-        "max_turns": max_turns,
-        "deadline_s": deadline_s,
-        "score_flow": score_flow,
-        "artifact_name": artifact_name,
+        "artifact_grace_s": artifact_grace_s,
     }
 
-    names = [f["name"] for f in load_flows(Path(case_dir) / "flows.yaml")]
-
     if n == 1:
-        result = await run_case(case_dir, run_id=run_id, **kwargs)
+        result = await run_case(case, run_id=run_id, **kwargs)
         winner_flow = result["meta"]["winner_flow"]
         agg = (
             aggregate_verdicts([winner_flow])
@@ -259,7 +284,7 @@ async def run_case_n(
         # Trial k rotates the flow list so multi-trial runs cancel judge
         # position bias; everything cross-trial keys by flow NAME, not label.
         result = await run_case(
-            case_dir, run_id=f"{run_id}/trial-{k:02d}", rotation=(k - 1) % len(names), **kwargs
+            case, run_id=f"{run_id}/trial-{k:02d}", rotation=(k - 1) % len(names), **kwargs
         )
         trials.append(result["meta"])
 
@@ -275,11 +300,12 @@ async def run_case_n(
         score_means = aggregate_scores([_name_keyed_scores(t) for t in trials])
     else:
         counts, winner, score_means = {}, None, {}
-    run_root = Path(runs_root) / run_id
+    root = runs_root if runs_root is not None else case.settings.runs_root
+    run_root = Path(root) / case.name / run_id
     aggregate_meta = {
         "run_id": run_id,
-        "scenario": scenario,
-        "case": Path(case_dir).name,
+        "case": case.name,
+        "deliverable": case.deliverable,
         "n": n,
         "flows": names,  # flows.yaml order, name-keyed everything below
         "trials": [
@@ -299,11 +325,12 @@ async def run_case_n(
     }
 
 
-async def rescore_run(case_dir, run_root, *, score_flow) -> dict[str, str]:
-    """Re-run `score_flow` over an existing run dir, without starting a
+async def rescore_run(case, run_root) -> dict[str, str]:
+    """Re-run the case's `score` over an existing run dir, without starting a
     session: rewrites `<flow>/scorecard.json` and `flow_stats[flow].score_error`
     from what is already on disk (`<flow>/session.json` + the case's current
-    flows.yaml). Never touches transcripts or session.json.
+    flows.yaml), and deletes a scorecard whose fresh score is `None`. Never
+    touches transcripts or session.json, and builds no factory.
 
     Covers both layouts: the flat `n=1` run dir itself, and each `trial-XX/`
     of an `n>1` run (its own aggregate `run.json` has no `flow_stats` and is
@@ -316,7 +343,7 @@ async def rescore_run(case_dir, run_root, *, score_flow) -> dict[str, str]:
     against a config that no longer matches the run would be worse than a
     recorded error."""
     run_root = Path(run_root)
-    flows_by_name = {f["name"]: f for f in load_flows(Path(case_dir) / "flows.yaml")}
+    flows_by_name = {f["name"]: f for f in load_flows(case.case_dir / "flows.yaml")}
 
     results: dict[str, str] = {}
     targets = [run_root, *sorted(run_root.glob("trial-*"))]
@@ -340,7 +367,7 @@ async def rescore_run(case_dir, run_root, *, score_flow) -> dict[str, str]:
             stats = meta["flow_stats"].setdefault(name, {})
             try:
                 flow = flows_by_name[name]
-                card = await score_flow(flow, flow_dir, session)
+                card = await case.score(flow, flow_dir, session)
             except Exception as e:  # noqa: BLE001 - isolate one flow's scorer, never abort the rescore
                 error = f"{type(e).__name__}: {e}"
                 card = {"error": error}
@@ -349,7 +376,13 @@ async def rescore_run(case_dir, run_root, *, score_flow) -> dict[str, str]:
             else:
                 stats.pop("score_error", None)
                 results[key] = "ok"
-            (flow_dir / "scorecard.json").write_text(json.dumps(card, indent=2, default=str))
+            card_path = flow_dir / "scorecard.json"
+            if card is None:
+                # Nothing grades this flow any more: a card left behind would be
+                # read as a fresh verdict by `compare`.
+                card_path.unlink(missing_ok=True)
+            else:
+                card_path.write_text(json.dumps(card, indent=2, default=str))
             changed = True
 
         if changed:
@@ -444,10 +477,10 @@ async def run_judge_omni(
 def omni_factories(scenario: str, *, git_init: bool = False):
     """The three real omnigent factories, bound to `scenario`, matching the
     2-arg `(flow, dir)` / 3-arg `(judge_md, entries, judge_dir)` contract
-    run_case/run_case_n call. `git_init` is a case property (todo_app writes
-    into a git-initialized flow_dir); the default keeps swe_planning
-    byte-identical. Which file proves delivery (`artifact_name`) is a
-    `run_case`/`run_case_n` concern, not the driver's — see `find_artifact`."""
+    run_case/run_case_n call. `git_init` asks the driver to init a repo in the
+    flow dir; a case that needs one does it in its own `setup` instead. Which
+    file proves delivery is the case's (`Case.deliverable`/`find_deliverable`),
+    never the driver's."""
 
     return (
         functools.partial(make_flow_driver_omni, scenario=scenario, git_init=git_init),
