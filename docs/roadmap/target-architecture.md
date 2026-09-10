@@ -112,7 +112,7 @@ A scenario is a directory of cases plus optional Python:
   (`flowbench.run`, `flowbench.transcript`, `flowbench.judge`). Scenario-local code stays
   in the scenario dir until a second scenario shares it — then it moves to the engine
   (that trigger already fired once: swe_planning's orchestrator is E01's extraction).
-- The open reference scenario (`scenarios/coding_workflow/`) lives in this repo;
+- The open reference scenario (`scenarios/swe_e2e/`) lives in this repo;
   proprietary scenarios live in a downstream repo depending on flowbench.
 
 ## Omnigent upstream wishlist

@@ -1,8 +1,8 @@
 # Runner design
 
 The engine's execution core is `flowbench/driver/` + `flowbench/loop.py`; `run.py`
-orchestrates a case on top of them. Scenarios own content and scenario-specific
-scoring only.
+orchestrates a case on top of them. A case owns its content and its own scoring
+(`case.py`); the engine owns everything generic.
 
 The war-story comments in `driver/` and `loop.py` are load-bearing: each encodes a live
 incident (lying idle, undelivered injection, empty grader completion). A refactor carries the
@@ -113,14 +113,21 @@ announces completion while its write is still flushing gets the grace; a hung fi
 ends the poll, not the run (the abandoned thread finishes on its own). After
 `capture_session()` the loop probes once more and sets `artifact_exists`, `artifact_path`
 and `artifact_text` on the session — for every session, `False/None/None` without a probe,
-so `session.json` has one shape. `run.py` owns the probe: `find_artifact(run_dir, name)`
-(top-level hit, else first `rglob` hit) bound to the flow dir and the case's
-`artifact_name`; simulator, judge and grader sessions never see one.
+so `session.json` has one shape. `run.py` owns the probe: `case.find_deliverable` bound to
+the flow dir, and only when the case declares a deliverable (`case.deliverable is not None`);
+simulator, judge and grader sessions never see one. What the probe looks for, and what a
+file/nested file/directory/nothing each mean downstream, is [`case.md`](case.md).
 
 ## loop.py — the mediated DONE-token loop
 
-`run_agent_session(driver, user_model, *, first_prompt, simulator_system,
-done_token, max_turns, deadline_s)`:
+`run_agent_session(driver, user_model, *, first_prompt, simulator_system, max_turns=80,
+deadline_s=1800.0, artifact_grace_s=60.0, artifact_probe=None)`:
+
+- **The engine owns the done token.** `DONE_TOKEN = "<<DONE>>"` is a module constant, not a
+  parameter and not a case field; `prime_prompt` appends the instruction to use it to the
+  simulator's persona. A case's `simulator.md` says what *delivered* means and never names a
+  token. Decision record:
+  [`decisions/2026-09-10-completion-is-engine-owned.md`](decisions/2026-09-10-completion-is-engine-owned.md).
 
 - Only an `idle` turn is a clean boundary; any other `TurnStatus` stops the loop
   and scores what was built. The vocabulary lives in `flowbench/types.py`:
@@ -145,6 +152,18 @@ done_token, max_turns, deadline_s)`:
   the flow. `flowbench.watch` prints `STALLED (...)` on the same signals. `prompt` can fire
   under `bypassPermissions` for an operational reason, not a flow's: see `docs/onboarding.md`,
   "No server restart under a run".
+- **`session["ended_by"]` says why the session stopped**, next to `exit_status`, which says what
+  the agent's last turn was doing. Precedence, first match wins:
+
+  | `ended_by` | when |
+  | --- | --- |
+  | the terminal status, verbatim (`failed`, `timeout`, `quota`, …) | the final turn was not `idle` — a crashed session is not a completed one, whatever the simulator said |
+  | `done` | the simulator emitted the token |
+  | `max_turns` | the turn cap was reached |
+  | `deadline` | idle, uncapped, no token: the wall clock |
+
+  Without it the exit was invisible: 50 of 69 recorded sessions ended `idle` and the record could
+  not say whether the simulator or a budget stopped them.
 - The simulator is any `user_model` with `async generate(prompt)`; the loop
   composes `simulator_system` + conversation tail per call.
 - An idle main agent with a busy sub-agent (`GET /v1/sessions/{id}/child_sessions`,
@@ -161,34 +180,54 @@ done_token, max_turns, deadline_s)`:
 - **The loop closes the driver itself** (finally). Callers close only their
   simulator.
 
-## run.py — the `run_case` orchestrator (since S01.1)
+## run.py — the `run_case` orchestrator (takes a `Case` since S03.2)
 
-`run_case(case_dir, *, run_id, runs_root, scenario, make_flow_driver, make_simulator,
-run_judge, done_token=DONE_TOKEN, score_flow=None, ...)`: for each flow spawn a driver +
-simulator, run the loop (against `done_token`, a per-case override — todo_app's is
-`<<DONE>>`), write `<run_root>/<flow>/{plan.md,transcript.md,session.json}`, then (since
-S01.3) judge all flows in one shot and write `run.json` + `report.html` — but ONLY if
-`case_dir/judge.md` exists. A case with no `judge.md` (a build-shaped case like todo_app,
-scored per-flow rather than comparatively) skips the judge stage entirely: no `_judge/`
-dir, no `report.html`, `run.json`'s `winner`/`winner_flow` are `None`. In that shape
-`score_flow(flow, flow_dir, session) -> dict`, when given, runs after each flow's own
-session and its result is written to `<flow_dir>/scorecard.json`; a raised exception is
-caught and recorded as `{"error": ...}` (plus `flow_stats[name].score_error`) rather than
-aborting the run — `report/compare.py` reads that shape as a FAILED column with the
-reason. `run_case_n` repeats `run_case` with the flow list rotated per trial (cancels
-judge position bias) under `trial-XX/` and aggregates; with no judge across all trials the
-aggregate is `{"counts": {}, "winner": None}` rather than tallying `None` as a flow name.
-The three factories are injected so the whole pipeline runs offline against
-`flowbench.testing` doubles (`FakeDriver(plan, questions, run_dir=)` writes its plan to
-`run_dir/plan.md` on `start()`, where the real probe finds it); `omni_factories(scenario, *,
-git_init=False)` returns the real ones (todo_app binds `git_init=True`). The case's
-`artifact_name: str | None = "plan.md"` is a `run_case`/`run_case_n` argument: `None`
-(todo_app — no artifact, the deliverable is the running app, judged black-box by
-`acceptance.py`) means no probe is built, no `<flow>/plan.md` is written and no
-`artifact_missing`/`artifact_lines` keys appear in `run.json`. `flowbench.run.rescore_run(case_dir, run_root, *, score_flow)`
-re-runs a case's `score_flow` over an existing run dir's `<flow>/session.json` files
-— no new session, `session.json`/`transcript.md` untouched — for the CLI's
-`--rescore`.
+`run_case(case, *, run_id, make_flow_driver, make_simulator, run_judge, runs_root=None,
+artifact_grace_s=60.0, rotation=0)`. What is benchmarked is a **`Case`** — the case folder's
+runtime shape: what proves delivery, the budgets, what happens around a flow, how it is graded.
+The contract and the folder format are [`case.md`](case.md); this section is what the
+orchestrator does with one.
+
+Per flow, in `flows.yaml` order (rotated left by `rotation % N` so multi-trial runs cancel judge
+position bias):
+
+1. `case.setup(flow, flow_dir)`.
+2. the session — a flow driver plus a simulator, run through `run_agent_session` with
+   `case.max_turns`, `case.deadline_s` and, when the case declares a deliverable, an
+   `artifact_probe` bound from `case.find_deliverable`.
+3. deliverable capture: a nested file is copied to `<flow_dir>/<deliverable>` so every reader
+   looks in one place, and where it was *found* is recorded as
+   `flow_stats[flow].deliverable_path`; a directory stays where it is.
+4. `<flow_dir>/transcript.md` and `<flow_dir>/session.json` (the latter carrying `ended_by`).
+5. `case.score(flow, flow_dir, session)` → `<flow_dir>/scorecard.json`. `None` writes no card;
+   an exception is recorded as `{"error": ...}` plus `flow_stats[flow].score_error` rather than
+   aborting the run — `report/compare.py` reads that shape as a FAILED column with the reason.
+6. `case.teardown(flow, flow_dir)`, in a `finally`, so it runs even when a stage above raised.
+
+Then the judge, but ONLY if `case.judge_path` exists: all flows in one shot →
+`run.json` + `report.html`. A case with no `judge.md` (a build-shaped one like todo_app, scored
+per-flow instead) skips the stage entirely: no `_judge/` dir, no `report.html`, and
+`winner`/`winner_flow` are `None`. `check_gradable(case)` runs before any factory is built, so a
+run nothing could grade fails without spending a session.
+
+**Run layout.** `<runs_root>/<case.name>/<run_id>`, `runs_root` falling back to
+`case.settings.runs_root`; `run_case_n` with `n > 1` adds `trial-XX/` under it and writes an
+aggregate `run.json`. With no judge across all trials the aggregate is
+`{"counts": {}, "winner": None}` rather than tallying `None` as a flow name. Every session label
+is read back off that layout (`_run_parts`/`_title`/`_project`): the web-UI project is
+`<case>/<run_id>` and a title carries the case and, under `n > 1`, the trial — nothing a caller
+has to pass in and keep consistent. `run.json` records `case` and `deliverable`.
+
+**Factories** are injected so the whole pipeline runs offline against `flowbench.testing`
+doubles; `omni_factories(case)` returns the real three, and the only thing the case chooses in
+them is the models (`settings.sim_model`, `settings.judge_model`; a flow names its own). A case
+that needs a git repo in the flow dir makes one in its own `setup`.
+
+`rescore_run(case, run_root)` re-runs `case.score` over an existing run dir — the flat `n=1`
+dir and each `trial-XX/` — from what is on disk (`<flow>/session.json` + the case's current
+`flows.yaml`), rewriting `scorecard.json` and `flow_stats[flow].score_error` and deleting a card
+whose fresh score is `None`. No new session, no factory, transcripts untouched. It is what
+`flowbench run --rescore <run_id>` calls.
 
 Supporting modules, all omnigent-free at import time:
 
@@ -199,17 +238,33 @@ Supporting modules, all omnigent-free at import time:
 | `runner/judge.py` | `parse_verdict`/`parse_scores` for the prose `WINNER:`/`SCORES X:` tail, `build_judge_prompt`, `aggregate_*`, `last_json_object` for JSON judges |
 | `transcript.py` | message-item helpers shared by driver and reports (`item_text`, `dedup_items`, ...) + `render_transcript` |
 | `report/run_report.py` | run dir → self-contained `report.html` (single run and aggregate) |
-| `watch.py` | `RunWatch`: incremental anomaly scanner over a live run (omnigent log + run dir) |
+| `watch.py` | `RunWatch`: incremental anomaly scanner over a live run (omnigent log + run dir), plus `RunWatch.locate(run_id, runs_root)` — the one run dir with that id under any case — and `follow(watch, *, pid, interval, out)`, the tick loop that exits on `run.json` or a dead runner |
+| `case.py` | `Case`, `load_case`, `check_gradable`, `scenarios_root` — see [`case.md`](case.md) |
+| `settings.py` | `Settings`: `runs_root`, `sim_model`, `judge_model` |
 | `testing.py` | `FakeDriver`, `StubSim`, `MissingPlanDriver`, `ScriptedDriver`, `n_run_factories` |
 
-Case-shaped constants (`MISSING_PLAN`, `SIM_MODEL`, `JUDGE_MODEL`) are still module
-constants of `run.py`; `DONE_TOKEN`, `artifact_name` and the flow driver's `git_init` are
-per-call overrides (S01.3), defaulting to swe_planning's values. CLI entrypoints
-(`main`) stay scenario-side until S03.x.
+## cli.py — `flowbench run | watch | compare`
+
+| Command | Does |
+| --- | --- |
+| `flowbench run CASE_DIR [--n N] [--run-id ID] [--runs-root PATH] [--sim-model M] [--judge-model M] [--rescore RUN_ID]` | `load_case(CASE_DIR)` → `run_case_n` under the real omnigent factories, and prints the trial meta (`--n 1`) or the aggregate tally plus the run dir. `--rescore` re-scores that existing run id instead, starting no session. There are no budget flags: `max_turns` and `deadline_s` are the case's |
+| `flowbench watch RUN_ID [--runs-root PATH] [--pid N] [--interval S]` | `RunWatch.locate` finds the run dir under any case, then `follow` streams one line per anomaly until `run.json` lands (or `--pid` dies) |
+| `flowbench compare --run-base B --run-id ID [--out FILE]` | the side-by-side scorecard table from `<B>/<ID>/*/scorecard.json` (unchanged) |
+
+A load-time error — either of the two gradability messages in [`case.md`](case.md), or an
+unreadable case folder — is the CLI's own output: the message on stderr, exit 1, never a typer
+usage error, whose exit 2 would read as a mistyped command.
+
+**Settings precedence**, one layered `Settings` object (`pydantic-settings`): a flag beats
+`FLOWBENCH_*` in the environment, which beats `.env`, which beats `[tool.flowbench]` in
+`pyproject.toml`, which beats the default (`runs_root=runs`, `sim_model=judge_model=opus`). A
+flag that was not passed is left out of the `Settings` call, so it never shadows a lower layer.
+The resolved object reaches the case as `case.settings` — `load_case(case_dir, settings)` passes
+it through, and a `Case` built without one constructs its own.
 
 ## One execution model
 
-Scenarios run through the engine's `run_case` orchestrator — not through Inspect
+Every case runs through the engine's `run_case` orchestrator — not through Inspect
 (true for both scenarios as of S01.3, todo_app's port; the Inspect-based path was
 removed entirely in S01.4).
 Decision record: flowbench-scenarios

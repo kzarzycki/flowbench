@@ -8,7 +8,7 @@ from flowbench.types import TurnStatus
 from flowbench.watch import RunWatch, follow
 
 
-def _runs_root(tmp_path, case: str = "swe_planning", run_id: str = "todo-x") -> Path:
+def _runs_root(tmp_path, case: str = "todo_app", run_id: str = "todo-x") -> Path:
     """`<runs_root>/<case>/<run_id>` — the layout `RunWatch.locate` reads a run id
     in, and the one it derives the `omni_project` label from."""
     root = tmp_path / "runs"
@@ -20,7 +20,7 @@ def test_run_watch_tick_events(tmp_path):
     log = tmp_path / "server.log"
     log.write_text("boot line\n")
     runs_root = _runs_root(tmp_path)
-    run_root = runs_root / "swe_planning" / "todo-x"
+    run_root = runs_root / "todo_app" / "todo-x"
     w = RunWatch("todo-x", runs_root=runs_root, server_log=log)
     w._last_assistant_text = lambda sid: ""  # keep the suite off the network (#131 read)
     w._run_sessions = lambda: [
@@ -28,7 +28,7 @@ def test_run_watch_tick_events(tmp_path):
             "id": "conv_aaa",
             "status": TurnStatus.RUNNING,
             "title": "flow: plain",
-            "labels": {"omni_project": "swe_planning/todo-x"},
+            "labels": {"omni_project": "todo_app/todo-x"},
         },
     ]
     assert w.tick() == []  # baseline: pre-existing log ignored, all healthy
@@ -46,7 +46,7 @@ def test_run_watch_tick_events(tmp_path):
             "id": "conv_aaa",
             "status": TurnStatus.FAILED,
             "title": "flow: plain",
-            "labels": {"omni_project": "swe_planning/todo-x"},
+            "labels": {"omni_project": "todo_app/todo-x"},
         },
     ]
     assert any(e.startswith("SESSION FAILED") for e in w.tick())
@@ -188,14 +188,14 @@ _BANNER = "You've hit your session limit · resets 6:40pm (Europe/Zurich)"  # s0
 def _watch(tmp_path, last_text):
     log = tmp_path / "server.log"
     log.write_text("")
-    runs_root = _runs_root(tmp_path, "coding_workflow", "r1")
+    runs_root = _runs_root(tmp_path, "todo_app", "r1")
     w = RunWatch("r1", runs_root=runs_root, server_log=log)
     w._run_sessions = lambda: [
         {
             "id": "conv_q",
             "status": TurnStatus.FAILED,
             "title": "flow: superpowers",
-            "labels": {"omni_project": "coding_workflow/r1"},
+            "labels": {"omni_project": "todo_app/r1"},
         },
     ]
     w._last_assistant_text = lambda sid: last_text
@@ -250,7 +250,7 @@ class _Resp:
 def _watch_plain(tmp_path):
     log = tmp_path / "server.log"
     log.write_text("")
-    runs_root = _runs_root(tmp_path, "coding_workflow", "r1")
+    runs_root = _runs_root(tmp_path, "todo_app", "r1")
     return RunWatch("r1", runs_root=runs_root, server_log=log)
 
 

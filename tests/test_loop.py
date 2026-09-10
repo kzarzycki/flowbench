@@ -24,8 +24,8 @@ from flowbench.types import TurnStatus
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
 # Inline fixture data: an engine test must not depend on a scenario (decision 14,
-# flowbench issue #2 / S01.3) — these used to be scenarios.coding_workflow.cases.
-# todo_app.task's FIRST_PROMPT/simulator_system(), which the loop never inspects
+# flowbench issue #2 / S01.3) — these used to be the todo_app case's own
+# FIRST_PROMPT/simulator_system(), which the loop never inspects
 # beyond the DONE token and a "primed vs. relayed" text diff. The persona names
 # no token: the engine owns it and appends the end instruction at prime time.
 FIRST_PROMPT = "I want a command-line todo app in Python."
