@@ -446,6 +446,17 @@ def test_nested_seed_copy_is_skipped_for_a_modified_deeper_one(tmp_path):
     assert case.find_deliverable(flow) == deep
 
 
+def test_a_candidate_the_seed_cannot_be_compared_against_is_not_seeded(tmp_path):
+    """The seed holds `out.txt` as a file and the flow dir holds a DIRECTORY of
+    that name: reading it raises `IsADirectoryError`. An unreadable candidate is
+    not evidence that it is the seed, so the probe answers it, never crashes."""
+    case, flow = _seeded(tmp_path, "out.txt", {"out.txt": "seeded\n"})
+    flow.mkdir()
+    (flow / "out.txt").mkdir()
+
+    assert case.find_deliverable(flow) == flow / "out.txt"
+
+
 def test_an_edited_case_py_is_never_served_from_stale_bytecode(tmp_path):
     """Two same-length edits sharing one mtime second: CPython's `.pyc` check is
     `(mtime-to-the-second, size)`, so the loader must not consult the cache at all.
