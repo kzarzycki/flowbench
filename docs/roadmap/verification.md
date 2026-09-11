@@ -5,7 +5,7 @@ procedures it needs plus its story-specific assertions. Run from the flowbench r
 unless stated. `$SCENARIOS` is the scenarios checkout — per-developer path, recorded in
 `CLAUDE.local.md`.
 
-## V1 — engine offline suite
+## V1 — engine offline suite, then the smoke case
 
 ```bash
 uv run pytest -q
@@ -13,6 +13,17 @@ uv run pytest -q
 
 Green, no unexpected skips beyond the `live_agent`-marked tests. This is the default
 gate for every PR.
+
+Any change to the case, run, loop or CLI path adds the engine's own smoke case — two minutes,
+one flow, one file, and it exercises the kickoff, a simulator relay, the deliverable probe,
+`score` and the run dir (needs a live omnigent server, `ANTHROPIC_API_KEY` unset):
+
+```bash
+uv run --extra live flowbench run scenarios/smoke/hello --run-id <id>
+```
+
+Success: `<runs_root>/hello/<id>/claude/` holds `hello.txt`, `scorecard.json` with
+`objective.acceptance == 1.0`, and a `session.json` whose `ended_by` is `done`.
 
 ## V2 — scenarios-repo offline suite
 
@@ -34,26 +45,23 @@ pre-commit run --all-files
 
 ```bash
 # from $SCENARIOS; needs a running omnigent server, ANTHROPIC_API_KEY unset
-uv run --extra live python -m scenarios.swe_planning.run --run-id <id> &
-uv run python -m scenarios.swe_planning.watch <id> --pid $!
+uv run --extra live flowbench run scenarios/swe_planning/cases/smoke_todo_app --run-id <id> &
+uv run flowbench watch <id> --pid $!    # once the run dir exists
 ```
 
 Success: the watcher exits on `run.json`, no failed sessions, `winner` parsed (not
 `unknown` unless the judge genuinely refused), and each flow dir holds `plan.md` +
-`transcript.md` + `session.json`. This is mandatory after any change to `driver.py`,
-`loop.py`, or the send/retry policy.
+`transcript.md` + `session.json`. This is mandatory after any change to the driver, the
+loop, or the send/retry policy.
 
 ## V5 — live todo_app run
 
-Since S01.3, the `run_case_n` entrypoint (`flowbench run --scenario coding_workflow
---case todo_app` once S03.2 (#137) lands; the interim `python -m` entrypoint before that):
-
 ```bash
-uv run python -m scenarios.coding_workflow.run --case todo_app --run-id <id>
+uv run --extra live flowbench run scenarios/swe_e2e/cases/todo_app --run-id <id>
 ```
 
 Success: both flow dirs hold `scorecard.json`, and
-`uv run flowbench compare --run-base $RUNS/coding_workflow --run-id <id>`
+`uv run flowbench compare --run-base $RUNS/todo_app --run-id <id>`
 renders both columns without a FAILED banner.
 
 ## V6 — vocabulary sweep

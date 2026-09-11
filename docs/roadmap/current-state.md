@@ -1,42 +1,46 @@
 # Current state (2026-07-06)
 
-What exists, what works, what is debt. Line counts are `wc -l` on that date.
+What exists, what works, what is debt. Line counts are `wc -l`; the engine table below was
+re-measured on 2026-09-11, the rest of the document is as of the date above.
 
 ## Inventory
 
-**Engine** (`src/flowbench/`, ~1,060 lines on 2026-07-06; ~2,100 after S01.1 on 2026-09-07):
+**Engine** (`src/flowbench/`, ~1,060 lines on 2026-07-06; ~2,100 after S01.1 on 2026-09-07; 3,042 on 2026-09-11):
 
 | Module | Lines | Role |
 | --- | --- | --- |
-| `driver/omnigent.py` | 484 | `OmnigentDriver`: session lifecycle, send/settle/retry, capture, URLs, `git_init_repo` (S02.2). Above the epic's ~350 target: #68/#76 grew the settle machinery after the epic was written, and S02.3 is where the rest goes — see E02 S02.2 |
+| `driver/omnigent.py` | 559 | `OmnigentDriver`: session lifecycle, send/settle/retry, capture, URLs, `git_init_repo` (S02.2). Above the epic's ~350 target: #68/#76 grew the settle machinery after the epic was written, and S02.3 is where the rest goes — see E02 S02.2 |
 | `driver/bundle.py` | 142 | `render_config` / `build_bundle` / `session_metadata` as pure functions of a `BundleSpec` protocol (S02.2) |
-| `driver/base.py` | 34 | `AgentDriver` ABC (S02.2) |
+| `driver/base.py` | 30 | `AgentDriver` ABC (S02.2) |
 | `driver/__init__.py` | 29 | the package's public surface |
 | `runner/driver.py` | 24 | compat re-export, one release (S02.2) |
 | `runner/loop.py` | 22 | compat re-export, one release (S02.2) |
 | `types.py` | 57 | `TurnStatus` (`StrEnum`), `TurnResult`, `UserModel`/`Completion` protocols — the engine's turn-outcome vocabulary (S02.1) |
-| `run.py` | 311 | `run_case`/`run_case_n` orchestrator + omnigent factories (S01.1, lifted from swe_planning) |
-| `report/run_report.py` | 259 | run dir → report.html, single + aggregate (S01.1) |
-| `testing.py` | 112 | offline doubles: FakeDriver, StubSim, ScriptedDriver, n_run_factories (S01.1) |
-| `watch.py` | 100 | `RunWatch` live-run anomaly scanner (S01.1) |
-| `transcript.py` | 106 | message-item helpers + `render_transcript` (S01.1) |
+| `run.py` | 500 | `run_case`/`run_case_n`/`rescore_run` orchestrator over a `Case` + omnigent factories (S01.1 lifted from swe_planning, `Case`-taking since S03.2) |
+| `report/run_report.py` | 291 | run dir → report.html, single + aggregate (S01.1) |
+| `testing.py` | 113 | offline doubles: FakeDriver, StubSim, ScriptedDriver, n_run_factories (S01.1) |
+| `watch.py` | 203 | `RunWatch` live-run anomaly scanner (S01.1) |
+| `transcript.py` | 144 | message-item helpers + `render_transcript` (S01.1) |
 | `model.py` | 52 | `SessionModel` simulator/judge shim: one `send`, raise on a non-idle or empty turn, wrap |
 | `flowspec.py` | 36 | flows.yaml loading, kickoff composition (S01.1) |
-| `loop.py` | 110 | mediated DONE-token loop (no nudges since #67: the driver waits out busy children); moved out of `runner/` in S02.2 |
-| `report/compare.py` | 91 | side-by-side scorecard table; metric paths hardcoded to todo_app's schema |
-| `cli.py` | 36 | typer app; `compare` is the only command |
+| `loop.py` | 174 | mediated DONE-token loop (no nudges since #67: the driver waits out busy children); moved out of `runner/` in S02.2 |
+| `report/compare.py` | 102 | side-by-side scorecard table; metric paths hardcoded to todo_app's schema |
+| `cli.py` | 133 | typer app: `run` (a case dir), `watch` (a run id), `compare` (S03.2) |
+| `case.py` | 213 | `Case`, `load_case`, `check_gradable` — a case is a folder (S03.2) |
+| `settings.py` | 41 | layered `Settings`: `runs_root`, `sim_model`, `judge_model` (S03.2) |
 | `runner/judge.py` | 142 | `last_json_object` (string-aware) + prose verdict/scores parsing, aggregation (S01.1) |
 | `runner/flow.py` | 34 | frozen `Flow` dataclass (bundle fields only) |
 
 `runner/run_dir.py` (47 lines, run-dir prep + JSON output writers) is gone as of S01.3 — it
 served only the Inspect solver; `run_case` writes the run dir directly.
 
-**Reference scenario** (`scenarios/coding_workflow/cases/todo_app/`, S01.3): runs through
-`run_case`/`run_case_n` like every other scenario (no more Inspect `@task`/solver glue,
-no `claudesub`). Plain-text `task.md`/`simulator.md`/`knowledge.md`/`flows.yaml`; each flow
-is scored on its own (no comparative judge) via `scoring.py`'s `score_flow` hook —
-keyword-based clarifying-coverage scoring, subprocess black-box acceptance, JSON judge —
-into `<flow>/scorecard.json`.
+**Reference scenario** (`scenarios/swe_e2e/cases/todo_app/`, S01.3; renamed and ported to the
+Case API in S03.2): runs through `run_case`/`run_case_n` like every other case (no more Inspect
+`@task`/solver glue, no `claudesub`). Plain-text `task.md`/`simulator.md`/`knowledge.md`/
+`flows.yaml`; each flow is scored on its own (no comparative judge) by `case.py`'s
+`TodoAppCase.score` — keyword-based clarifying-coverage scoring, subprocess black-box
+acceptance, JSON judge — into `<flow>/scorecard.json`. `scenarios/smoke/hello/` is the engine's
+own live gate: one flow, one file, one relay.
 
 **Tests** (~1,360 lines): driver config/bundle/send-retry units, loop behavior, scorer
 units against canned sessions, acceptance checks against fixture apps, compare rendering.
@@ -83,17 +87,15 @@ orchestration on top of the engine — see "Downstream duplication".
 6. **`Flow` diverged from reality.** The dataclass carries bundle fields only; the
    downstream flows.yaml adds `model`, `reasoning_effort`, `prepend`, `append`,
    `turn_timeout_s` and is passed around as raw dicts. → S03.1
-7. **No `flowbench run`.** Each scenario has its own argparse `__main__`; the engine CLI
-    only compares. → S03.2 (#137)
-8. **Un-versioned metadata.** `run.json`/`scorecard.json` are convention, no
-    `schema_version`; readers guess. → S03.4
-9. **Naming/docstring drift.** "An flow" (`flow.py`), "{arm_name:" (`compare.py`,
-    retired vocabulary), `OMNIGENT_PROBE_MODEL` (pre-flowbench probe era). Typical
-    weak-model session residue: the code moved on, the prose didn't. → S00.1
-10. **Broad exception swallowing.** `close()`, `_context_tokens()`,
-    `_resend_allowed()`, `transcript.to_jsonable()` catch `Exception` silently. Correct for
-    teardown, unjustified elsewhere. → S02.6
-11. **Terminal-scraping fragility (systemic).** Idle detection via tmux pane scraping,
+7. **Un-versioned metadata.** `run.json`/`scorecard.json` are convention, no
+   `schema_version`; readers guess. → S03.4
+8. **Naming/docstring drift.** "An flow" (`flow.py`), "{arm_name:" (`compare.py`,
+   retired vocabulary), `OMNIGENT_PROBE_MODEL` (pre-flowbench probe era). Typical
+   weak-model session residue: the code moved on, the prose didn't. → S00.1
+9. **Broad exception swallowing.** `close()`, `_context_tokens()`,
+   `_resend_allowed()`, `transcript.to_jsonable()` catch `Exception` silently. Correct for
+   teardown, unjustified elsewhere. → S02.6
+10. **Terminal-scraping fragility (systemic).** Idle detection via tmux pane scraping,
     settle loops, `min_wait=4.0`, poll intervals — all downstream of omnigent lacking
     delivery acks/turn events. Hardening has diminishing returns; the fix is upstream
     (wishlist in `target-architecture.md`). → S02.5 + upstream

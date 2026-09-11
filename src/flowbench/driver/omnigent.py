@@ -124,7 +124,6 @@ class OmnigentDriver(AgentDriver):
     agent_description: str = (
         "Vanilla Claude Code under test (subscription; system prompt untouched)."
     )
-    git_init: bool = False
     turn_timeout_s: float = 240.0
     # Stall watchdog (#54, #61): a `TurnStatus.RUNNING` session waiting on a human
     # (any of _PROMPT_KEYS set) or with no heartbeat for stall_s ends the turn as
@@ -198,8 +197,6 @@ class OmnigentDriver(AgentDriver):
         from omnigent_client import OmnigentClient, SessionsChat
 
         self.run_dir.mkdir(parents=True, exist_ok=True)
-        if self.git_init and not (self.run_dir / ".git").exists():
-            git_init_repo(self.run_dir)
         self._started = time.monotonic()
         self._http = httpx.AsyncClient(base_url=self.server_url, timeout=60.0)
         self._client = OmnigentClient(base_url=self.server_url)

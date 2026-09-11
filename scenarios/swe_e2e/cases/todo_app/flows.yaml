@@ -1,20 +1,20 @@
 # A flow = a whole approach: which skills the agent has, everything else equal.
 # Order defines nothing here — this case has no comparative judge (each flow is
-# scored on its own, see scoring.py) — kept baseline-first for `compare` column
+# scored on its own, see case.py) — kept baseline-first for `compare` column
 # order.
 flows:
   - name: baseline
     harness: claude-native
-    model: sonnet
+    model: haiku
     skills: none              # bare Claude Code — no host skills, no bundle
     turn_timeout_s: 3000      # same cap for every flow: todo-app-002's superpowers
                               # build turn ran 31 min into the 1800 s default
   - name: superpowers
     harness: claude-native
-    model: sonnet
+    model: haiku
     skills: none              # host skills hidden; the bundle ships the vendored set
     turn_timeout_s: 3000
-    skill_dirs:               # (scenarios/coding_workflow/skills/, see VERSION.md)
+    skill_dirs:               # (scenarios/swe_e2e/skills/, see VERSION.md)
       - ../../skills/brainstorming
       - ../../skills/dispatching-parallel-agents
       - ../../skills/executing-plans

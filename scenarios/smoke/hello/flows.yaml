@@ -1,0 +1,8 @@
+# One flow: this case is the engine's own smoke gate, not a comparison. What it
+# proves is that a run happens at all, so the single flow is graded by the case's
+# own `score` (see case.py) and there is no judge.md to compare against.
+flows:
+  - name: claude
+    harness: claude-native
+    model: haiku            # the cheapest model that can still be asked to write a file
+    skills: none            # bare Claude Code: nothing here is worth varying

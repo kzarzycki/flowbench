@@ -2,25 +2,37 @@
 the user. Asserts the loop answers, stops on the DONE token, respects max_turns,
 and bails on a failed status."""
 
+import asyncio
 import dataclasses
 import time
+from pathlib import Path
 
 import pytest
 
 from flowbench.driver import AgentDriver, TurnResult
-from flowbench.loop import _is_done, render_tail, run_agent_session
+from flowbench.loop import (
+    DONE_TOKEN,
+    END_INSTRUCTION,
+    _is_done,
+    prime_prompt,
+    relay_prompt,
+    render_tail,
+    run_agent_session,
+)
 from flowbench.types import TurnStatus
 
+REPO_ROOT = Path(__file__).resolve().parents[1]
+
 # Inline fixture data: an engine test must not depend on a scenario (decision 14,
-# flowbench issue #2 / S01.3) — these used to be scenarios.coding_workflow.cases.
-# todo_app.task's FIRST_PROMPT/DONE_TOKEN/simulator_system(), which the loop
-# never inspects beyond the DONE token and a "primed vs. relayed" text diff.
+# flowbench issue #2 / S01.3) — these used to be the todo_app case's own
+# FIRST_PROMPT/simulator_system(), which the loop never inspects
+# beyond the DONE token and a "primed vs. relayed" text diff. The persona names
+# no token: the engine owns it and appends the end instruction at prime time.
 FIRST_PROMPT = "I want a command-line todo app in Python."
-DONE_TOKEN = "<<DONE>>"
 SIM_SYSTEM = (
     "You are role-playing a USER who wants a todo app built.\n\n"
     "ENVISIONED SHAPE: a Python CLI todo app.\n\n"
-    f"Reply with EXACTLY `{DONE_TOKEN}` when the app is delivered and nothing else."
+    "Answer only what the agent asks, in one short sentence."
 )
 
 
@@ -101,7 +113,6 @@ async def test_loop_primes_simulator_once_then_relays_deltas():
         user,
         first_prompt=FIRST_PROMPT,
         simulator_system=SIM_SYSTEM,
-        done_token=DONE_TOKEN,
         max_turns=10,
         deadline_s=999,
         artifact_grace_s=0,
@@ -139,7 +150,6 @@ async def test_loop_continues_past_a_flaked_idle_turn_and_counts_it(flaked_index
         user,
         first_prompt=FIRST_PROMPT,
         simulator_system=SIM_SYSTEM,
-        done_token=DONE_TOKEN,
         max_turns=10,
         deadline_s=999,
         artifact_grace_s=0,
@@ -164,7 +174,6 @@ async def test_relay_advances_even_when_simulator_says_continue():
         user,
         first_prompt=FIRST_PROMPT,
         simulator_system=SIM_SYSTEM,
-        done_token=DONE_TOKEN,
         max_turns=10,
         deadline_s=999,
         artifact_grace_s=0,
@@ -197,7 +206,6 @@ async def test_loop_answers_then_stops_on_done_token():
         user,
         first_prompt=FIRST_PROMPT,
         simulator_system=SIM_SYSTEM,
-        done_token=DONE_TOKEN,
         max_turns=10,
         deadline_s=999,
         artifact_grace_s=0,
@@ -219,7 +227,6 @@ async def test_loop_stops_at_max_turns():
         user,
         first_prompt=FIRST_PROMPT,
         simulator_system=SIM_SYSTEM,
-        done_token=DONE_TOKEN,
         max_turns=3,
         deadline_s=999,
         artifact_grace_s=0,
@@ -237,7 +244,6 @@ async def test_loop_bails_on_failed_status():
         user,
         first_prompt=FIRST_PROMPT,
         simulator_system=SIM_SYSTEM,
-        done_token=DONE_TOKEN,
         max_turns=5,
         deadline_s=999,
         artifact_grace_s=0,
@@ -261,7 +267,6 @@ async def test_loop_stops_on_quota():
         user,
         first_prompt=FIRST_PROMPT,
         simulator_system=SIM_SYSTEM,
-        done_token=DONE_TOKEN,
         max_turns=5,
         deadline_s=999,
         artifact_grace_s=0,
@@ -295,7 +300,6 @@ async def test_done_waits_for_pending_artifact(monkeypatch, tmp_path):
         user,
         first_prompt=FIRST_PROMPT,
         simulator_system=SIM_SYSTEM,
-        done_token=DONE_TOKEN,
         max_turns=5,
         deadline_s=999,
         artifact_grace_s=10,
@@ -327,7 +331,6 @@ async def test_done_grace_poll_is_bounded_by_wall_clock():
         user,
         first_prompt=FIRST_PROMPT,
         simulator_system=SIM_SYSTEM,
-        done_token=DONE_TOKEN,
         max_turns=5,
         deadline_s=999,
         artifact_grace_s=0.1,
@@ -352,7 +355,6 @@ async def test_no_probe_skips_poll_and_reports_no_artifact(monkeypatch):
         user,
         first_prompt=FIRST_PROMPT,
         simulator_system=SIM_SYSTEM,
-        done_token=DONE_TOKEN,
         max_turns=5,
         deadline_s=999,
         artifact_grace_s=10,
@@ -373,7 +375,6 @@ async def test_loop_records_stall_reason_and_pane(monkeypatch):
         user,
         first_prompt=FIRST_PROMPT,
         simulator_system=SIM_SYSTEM,
-        done_token=DONE_TOKEN,
         max_turns=5,
         deadline_s=999,
         artifact_grace_s=0,
@@ -382,3 +383,182 @@ async def test_loop_records_stall_reason_and_pane(monkeypatch):
     assert session["exit_status"] == TurnStatus.STALLED
     assert session["stall_reason"] == "prompt"
     assert session["pane_tail"] == "❯ y/n?"
+
+
+# --- S03.2: engine-owned done token, `ended_by`, directory deliverables -------
+
+
+def test_prime_prompt_carries_the_end_instruction():
+    # The engine owns the token, so the persona never names it: the end
+    # instruction is appended once, at prime time, AFTER the persona (the
+    # simulator reads its role first, then how to stop). Relays are pure delta —
+    # repeating the instruction every turn is what the prime/relay split avoids.
+    convo = [("user", FIRST_PROMPT), ("assistant", "what storage?")]
+    primed = prime_prompt(SIM_SYSTEM, convo)
+
+    assert END_INSTRUCTION in primed
+    assert primed.count(END_INSTRUCTION) == 1
+    assert primed.count(DONE_TOKEN) == 1  # named by the instruction, nowhere else
+    assert primed.index("ENVISIONED SHAPE") < primed.index(END_INSTRUCTION)
+    assert primed.index(END_INSTRUCTION) < primed.index(FIRST_PROMPT)
+
+    relayed = relay_prompt(convo, 1)
+    assert END_INSTRUCTION not in relayed
+    assert DONE_TOKEN not in relayed
+
+
+async def test_ended_by_done():
+    turns = [
+        TurnResult(TurnStatus.IDLE, "what storage?"),
+        TurnResult(TurnStatus.IDLE, "built it, tests pass"),
+    ]
+    driver = _FakeDriver(turns, {"items": []})
+    user = _StubModel(["a JSON file", DONE_TOKEN])
+    session = await run_agent_session(
+        driver,
+        user,
+        first_prompt=FIRST_PROMPT,
+        simulator_system=SIM_SYSTEM,
+        max_turns=10,
+        deadline_s=999,
+        artifact_grace_s=0,
+    )
+    assert session["ended_by"] == "done"
+    assert session["exit_status"] == TurnStatus.IDLE
+    assert session["turns"] == 1
+
+
+async def test_ended_by_max_turns():
+    # 50 of 69 recorded flow sessions ended `idle` and the record could not say
+    # whether the simulator ended them or the cap did. It can now.
+    driver = _FakeDriver([TurnResult(TurnStatus.IDLE, "another question?")], {"items": []})
+    user = _StubModel(["keep going"])  # never says DONE
+    session = await run_agent_session(
+        driver,
+        user,
+        first_prompt=FIRST_PROMPT,
+        simulator_system=SIM_SYSTEM,
+        max_turns=2,
+        deadline_s=999,
+        artifact_grace_s=0,
+    )
+    assert session["ended_by"] == "max_turns"
+    assert session["exit_status"] == TurnStatus.IDLE  # a healthy agent, just capped
+    assert session["turns"] == 2
+
+
+async def test_ended_by_deadline():
+    # the wall-clock backstop, mid-conversation: the cap is nowhere near and the
+    # agent is idle and healthy, so only the elapsed budget explains the exit.
+    class _SlowDriver(_FakeDriver):
+        async def send(self, text):
+            result = await super().send(text)
+            if len(self.sent) > 1:
+                await asyncio.sleep(0.08)
+            return result
+
+    driver = _SlowDriver([TurnResult(TurnStatus.IDLE, "still a question?")], {"items": []})
+    user = _StubModel(["keep going"])
+    session = await run_agent_session(
+        driver,
+        user,
+        first_prompt=FIRST_PROMPT,
+        simulator_system=SIM_SYSTEM,
+        max_turns=50,
+        deadline_s=0.05,
+        artifact_grace_s=0,
+    )
+    assert session["ended_by"] == "deadline"
+    assert session["exit_status"] == TurnStatus.IDLE
+    assert session["turns"] == 1  # not the cap, and the simulator never said DONE
+
+
+@pytest.mark.parametrize(
+    "status,expected",
+    [
+        (TurnStatus.FAILED, "failed"),
+        (TurnStatus.QUOTA, "quota"),
+        # an undocumented server status passes through verbatim (types.py: the
+        # status is `TurnStatus | str`, so this arrives as a bare string)
+        ("wedged", "wedged"),
+    ],
+)
+async def test_ended_by_terminal_status(status, expected):
+    driver = _FakeDriver([TurnResult(status, "")], {"items": []})
+    user = _StubModel(["unused"])
+    session = await run_agent_session(
+        driver,
+        user,
+        first_prompt=FIRST_PROMPT,
+        simulator_system=SIM_SYSTEM,
+        max_turns=5,
+        deadline_s=999,
+        artifact_grace_s=0,
+    )
+    assert user.seen == []
+    assert session["ended_by"] == expected
+    # a StrEnum member must land as its plain string, not "TurnStatus.FAILED"
+    assert type(session["ended_by"]) is str
+
+
+async def test_ended_by_terminal_status_beats_the_cap():
+    # The one precedence the loop can actually reach: the agent's turn crashed AND
+    # that turn was the last one the cap allowed. A crashed session is not a
+    # completed one, so the status wins over `max_turns`. `max_turns=1` is what
+    # makes this a test — with a cap the run never reaches, either order passes.
+    turns = [TurnResult(TurnStatus.IDLE, "what storage?"), TurnResult(TurnStatus.FAILED, "")]
+    driver = _FakeDriver(turns, {"items": []})
+    user = _StubModel(["a JSON file"])
+    session = await run_agent_session(
+        driver,
+        user,
+        first_prompt=FIRST_PROMPT,
+        simulator_system=SIM_SYSTEM,
+        max_turns=1,
+        deadline_s=999,
+        artifact_grace_s=0,
+    )
+    assert session["turns"] == 1  # the cap was reached, so the two checks collide
+    assert session["ended_by"] == "failed"
+
+
+async def test_directory_deliverable_is_present_with_no_text(tmp_path):
+    # a case whose deliverable is a folder (dwh_migration's ported project):
+    # presence is the probe's answer, and `.read_text()` on a directory used to
+    # raise IsADirectoryError right after DONE. Presence is `artifact_exists`
+    # everywhere — never the truthiness of `artifact_text`.
+    deliverable = tmp_path / "ported"
+    deliverable.mkdir()
+    (deliverable / "dim_customer.sql").write_text("select 1")
+
+    driver = _FakeDriver([TurnResult(TurnStatus.IDLE, "ported it")], {"items": []})
+    user = _StubModel([DONE_TOKEN])
+    session = await run_agent_session(
+        driver,
+        user,
+        first_prompt=FIRST_PROMPT,
+        simulator_system=SIM_SYSTEM,
+        max_turns=5,
+        deadline_s=999,
+        artifact_grace_s=0,
+        artifact_probe=lambda: deliverable,
+    )
+    assert session["ended_by"] == "done"
+    assert session["artifact_exists"] is True
+    assert session["artifact_path"] == str(deliverable)
+    assert session["artifact_text"] is None
+
+
+def test_no_simulator_names_a_done_token():
+    # the token is the engine's, appended at prime time; a persona that also
+    # names one can only contradict it. Each simulator.md says what "delivered"
+    # means for its case, in its own words.
+    simulators = [
+        p
+        for p in REPO_ROOT.rglob("simulator.md")
+        if not any(part in {".git", ".venv", "runs"} for part in p.parts)
+    ]
+    assert simulators, "no simulator.md found — the glob is wrong, not the repo clean"
+    for path in simulators:
+        text = path.read_text()
+        assert DONE_TOKEN not in text, path

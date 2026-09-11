@@ -5,7 +5,9 @@ touching the run's sessions, failed-session flips, stalls, a CLI limit banner
 (`QUOTA: …`, #131 — wait for the reset, nothing to debug), trial/run completion.
 Exits when the run's aggregate run.json lands (or the runner pid dies).
 
-Works standalone in a terminal, or wrapped by an agent Monitor.
+`RunWatch` is the incremental scanner, `follow` the loop that prints its events;
+`flowbench watch <run_id>` is the CLI over both. Works standalone in a terminal,
+or wrapped by an agent Monitor.
 """
 
 from __future__ import annotations
@@ -13,6 +15,7 @@ from __future__ import annotations
 import http.client
 import json
 import logging
+import os
 import time
 import urllib.request
 from pathlib import Path
@@ -38,14 +41,13 @@ class RunWatch:
         run_id: str,
         *,
         runs_root: Path,
-        scenario: str,
         server_log: Path = SERVER_LOG,
         server: str = SERVER,
         stall_s: float = 300.0,
     ):
         self.stall_s = stall_s
-        self.run_root = Path(runs_root) / run_id
-        self.project = f"{scenario}/{run_id}"
+        self.run_root = self.locate(run_id, runs_root)
+        self.project = f"{self.run_root.parent.name}/{run_id}"
         self.server_log = server_log
         self.server = server
         self._log_pos = server_log.stat().st_size if server_log.exists() else 0
@@ -54,6 +56,24 @@ class RunWatch:
         self._session_quota: set[str] = set()
         self._session_read_at: dict[str, object] = {}  # updated_at at the last item read
         self._trials_done: set[str] = set()
+
+    @staticmethod
+    def locate(run_id: str, runs_root: Path) -> Path:
+        """The one `<runs_root>/<case>/<run_id>` dir, so an operator watches a run
+        by its id alone: which case wrote it is in the layout, and the session
+        label (`<case>/<run_id>`) is read back off the path rather than retyped.
+        Nothing found is a `FileNotFoundError` — the run has not started yet, or the
+        runs root is wrong; the same id under two cases is a `ValueError` naming the
+        paths, because both exist and only the operator can say which (D17)."""
+        runs_root = Path(runs_root)
+        found = sorted(p for p in runs_root.glob(f"*/{run_id}") if p.is_dir())
+        if not found:
+            raise FileNotFoundError(f"no run dir {runs_root / '*' / run_id}")
+        if len(found) > 1:
+            raise ValueError(
+                f"run id {run_id} matches {len(found)} cases: " + ", ".join(str(p) for p in found)
+            )
+        return found[0]
 
     # --- sources -------------------------------------------------------------
 
@@ -154,3 +174,30 @@ class RunWatch:
     def run_complete(self) -> Path | None:
         p = self.run_root / "run.json"
         return p if p.is_file() else None
+
+
+def follow(watch: RunWatch, *, pid: int | None = None, interval: float = 15.0, out=print) -> None:
+    """Print one line per event until the run ends. Two exits: the run's own
+    run.json lands, or the runner pid is gone — a runner that died before writing
+    one leaves nothing to poll, so the launch log's tail is the diagnosis."""
+    while True:
+        for event in watch.tick():
+            out(event)
+        done = watch.run_complete()
+        if done is not None:
+            out(f"RUN COMPLETE: {done.read_text()}")
+            return
+        if pid is not None and not _alive(pid):
+            log_path = watch.run_root.parent / f"{watch.run_root.name}.launch.log"
+            tail = log_path.read_text()[-1500:] if log_path.exists() else "(no launch log)"
+            out(f"RUNNER EXITED without run.json — launch log tail:\n{tail}")
+            return
+        time.sleep(interval)
+
+
+def _alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except OSError:
+        return False
+    return True

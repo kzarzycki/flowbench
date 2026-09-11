@@ -7,6 +7,8 @@ bundle of skills/MCPs. Every field is declared and recorded; nothing steers the 
 so a comparison can state exactly which knobs differ.
 
 Vocabulary → **`docs/GLOSSARY.md`** (Scenario → Case → Flow → Run → Scorecard → Comparison).
+Authoring or changing a case (the folder format, the `Case` contract, discovery) →
+**`docs/design/case.md`**.
 Getting a live run working (omnigent install/topology, readiness check, the key rule) →
 **`docs/onboarding.md`**. Why omnigent is the meta-harness →
 `docs/design/decisions/2026-09-09-omnigent-as-the-meta-harness.md`.
@@ -30,15 +32,19 @@ so the path is not tracked here — record it in `CLAUDE.local.md` (untracked).
 uv sync --extra dev --extra live        # live = the omnigent runtime for live runs
 uv run pytest -q                        # offline suite (live-agent tests skipped)
 
-# drive the reference case live (needs a live omnigent server + ANTHROPIC_API_KEY unset —
-# see docs/onboarding.md):
-uv run python -m scenarios.coding_workflow.run --case todo_app --run-id <id>
+# the engine's own live gate — two minutes, one flow, one file (needs a live omnigent server
+# + ANTHROPIC_API_KEY unset — see docs/onboarding.md):
+uv run --extra live flowbench run scenarios/smoke/hello --run-id <id>
+
+# the reference case live, watched from a second shell once the run dir exists:
+uv run --extra live flowbench run scenarios/swe_e2e/cases/todo_app --run-id <id>
+uv run flowbench watch <id> --pid <runner-pid>
 
 # compare flows side by side after a run (reads <run_id>/<flow>/scorecard.json):
-uv run flowbench compare --run-base $RUNS/coding_workflow --run-id <id>
+uv run flowbench compare --run-base $RUNS/todo_app --run-id <id>
 
 # re-score an existing run's flows without re-driving anything (dead grader, scorer fix):
-uv run python -m scenarios.coding_workflow.run --rescore <run-id>
+uv run flowbench run scenarios/swe_e2e/cases/todo_app --rescore <id>
 ```
 
 ## Layout
@@ -55,45 +61,49 @@ uv run python -m scenarios.coding_workflow.run --rescore <run-id>
   away one release after S02.2.
   Touching `src/flowbench/driver/` or `src/flowbench/loop.py`? Read `docs/design/runner.md`
   first (driver/loop contracts, one-execution-model decision).
-- `src/flowbench/run.py` — `run_case`/`run_case_n`: the one orchestrator (flows + simulator +
-  optional per-flow judge or `score_flow` hook → run dir → `run.json`, `report.html`); also
-  `rescore_run(case_dir, run_root, *, score_flow)`, which re-runs `score_flow` over an existing
+- `src/flowbench/case.py` — `Case` (deliverable, budgets, setup/teardown, `score`), `load_case`
+  (nearest `case.py` from the case folder up to the inclusive `scenarios` root, exactly one
+  subclass), `check_gradable` (the two load-time errors). A case is a folder;
+  `docs/design/case.md` is the format.
+- `src/flowbench/settings.py` — `Settings`: `runs_root`, `sim_model`, `judge_model`, layered
+  init > `FLOWBENCH_*` env > `.env` > `[tool.flowbench]` > default.
+- `src/flowbench/run.py` — `run_case`/`run_case_n`: the one orchestrator, taking a `Case` (flows
+  + simulator + `case.score` + optional judge → `<runs_root>/<case>/<run_id>` → `run.json`,
+  `report.html`); also `rescore_run(case, run_root)`, which re-runs `case.score` over an existing
   run dir's `<flow>/session.json` files in place, with no new session. Helpers:
-  `model.py` (`SessionModel`), `flowspec.py` (flows.yaml), `transcript.py`, `watch.py` (`RunWatch`),
-  `report/run_report.py`, `testing.py` (offline doubles). Factories are injected;
-  `omni_factories(scenario, *, git_init=False)` = the real ones (todo_app binds
-  `git_init=True`). Which file proves delivery is `run_case`'s `artifact_name` (`None` = the
-  case declares no artifact, todo_app); `run_case` turns it into an `artifact_probe` callable
-  for `run_agent_session` — the driver never knows the artifact.
+  `model.py` (`SessionModel`), `flowspec.py` (flows.yaml), `transcript.py`, `watch.py`
+  (`RunWatch`, `locate`, `follow`), `report/run_report.py`, `testing.py` (offline doubles).
+  Factories are injected; `omni_factories(case)` = the real ones. Which path proves delivery is
+  `Case.deliverable`/`find_deliverable`; `run_case` turns it into an `artifact_probe` callable
+  for `run_agent_session` — the driver never knows the deliverable.
 - `src/flowbench/report/compare.py` — side-by-side flow comparison; a scoreless flow (missing
-  scorecard, or one whose `score_flow` raised) renders as a FAILED column, never an abort.
-- `src/flowbench/cli.py` — typer: `compare`.
-- `scenarios/<scenario>/cases/<case>/` — a case is plain-text `task.md`/`simulator.md`/
-  `knowledge.md`/`flows.yaml`, plus whatever scoring the case needs. `scenarios/<scenario>/run.py`
-  is the scenario's CLI, wiring `flowbench.run.run_case_n` with its own `done_token` and
-  (optionally) a `score_flow` hook — no judge required.
-  Reference: `scenarios/coding_workflow/cases/todo_app/` — the agent builds a Python CLI todo app
+  scorecard, or one whose `score` raised) renders as a FAILED column, never an abort.
+- `src/flowbench/cli.py` — typer: `run`, `watch`, `compare`.
+- `scenarios/<scenario>/cases/<case>/` — a case folder: plain-text `task.md`/`simulator.md`/
+  `knowledge.md`/`flows.yaml` (+ optional `judge.md`), plus an optional `case.py` and whatever
+  scoring it needs.
+  Reference: `scenarios/swe_e2e/cases/todo_app/` — the agent builds a Python CLI todo app
   from a vague first prompt; a no-leak simulated user reveals the shape only when asked; each flow
-  is scored on its own (no comparative judge) via `scoring.py` — objective black-box acceptance
-  (`acceptance.py`) + clarifying_coverage + a low-confidence judge (`scorers.py`) — into
-  `<flow>/scorecard.json`. `flows.yaml` declares the flows it benchmarks (baseline vs superpowers);
-  `skills/` vendors the superpowers skill dirs the superpowers flow bundles (see `skills/VERSION.md`).
-- `scenarios/<scenario>/scenario.py` — the scenario's rules (scorers/acceptance/eligible flows,
-  `CASE_DIR(name)`).
+  is scored on its own (no comparative judge) by `case.py`'s `TodoAppCase.score` — objective
+  black-box acceptance (`acceptance.py`) + clarifying_coverage + a low-confidence judge
+  (`scorers.py`) — into `<flow>/scorecard.json`. `flows.yaml` declares the flows it benchmarks
+  (baseline vs superpowers); `skills/` vendors the superpowers skill dirs the superpowers flow
+  bundles (see `skills/VERSION.md`).
+- `scenarios/smoke/hello/` — the engine's own live gate: one flow, one file, one simulator relay,
+  a tight budget. The second scenario beside `swe_e2e`.
 
 ## Scope (locked decisions — don't drift)
 
 - **A flow is the full configuration; nothing hidden.** Harness, model, reasoning effort, bundle,
   optional system prompt, prompt overlay, budgets — every field is declared in the flow and
-  recorded in the run manifest. Reports state which fields differ between columns; scenarios
-  decide which fields are eligible (`coding_workflow` rejects system prompts because its question
+  recorded in the run manifest. Reports state which fields differ between columns; a case decides
+  which fields are eligible (`swe_e2e`'s todo_app rejects system prompts because its question
   is whether the flow's workflow FIRES on a plain user invite — ground truth = real `Skill` tool
   calls, not narration). Today the engine `Flow` carries bundle fields only and the driver never
   passes a system prompt; S03.1 widens it. Decision record:
   `docs/design/decisions/2026-09-03-flow-is-the-full-configuration.md`.
 - **Baseline is not a privileged control** — it's just a flow whose bundle is empty
-  (`skills="none"`). A comparison may nominate one flow as the reference to read others against, but
-  that's a read-time label, not a type.
+  (`skills="none"`).
 - **Domain-specific flows and cases** (proprietary ones) live in a separate repo that depends on
   this one; this repo carries only the engine and the open reference scenario.
 

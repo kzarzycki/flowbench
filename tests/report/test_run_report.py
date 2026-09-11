@@ -127,7 +127,7 @@ def test_flow_card_falls_back_to_session_json_without_flow_stats(tmp_path):
     card = flow_card("plain", tmp_path, False, meta)
     assert card["exit"] == "idle" and card["turns"] == 3 and card["duration"] == "12s"
     assert card["tokens"] == "1,500" and card["effort"] == "?"
-    assert card["plan_lines"] == 3  # None in the fallback -> counted from plan.md
+    assert card["deliverable_lines"] == 3  # None in the fallback -> counted from plan.md
 
 
 def test_flow_card_reads_artifact_lines_from_flow_stats(tmp_path):
@@ -151,7 +151,7 @@ def test_flow_card_reads_artifact_lines_from_flow_stats(tmp_path):
         },
     }
     card = flow_card("plain", tmp_path, False, meta)
-    assert card["plan_lines"] == 4  # picked up from flow_stats.artifact_lines
+    assert card["deliverable_lines"] == 4  # picked up from flow_stats.artifact_lines
 
 
 def test_flow_card_no_plan_md_returns_empty_instead_of_raising(tmp_path):
@@ -165,5 +165,189 @@ def test_flow_card_no_plan_md_returns_empty_instead_of_raising(tmp_path):
     (d / "transcript.md").write_text("# Transcript\n\n## user\n\nhi\n")
     meta = {"models": {"plain": "opus"}, "reasoning_effort": {}}  # pre-flow_stats run.json
     card = flow_card("plain", tmp_path, False, meta)
-    assert card["plan_lines"] == 0
-    assert card["plan_html"] == ""
+    assert card["deliverable_lines"] == 0
+    assert card["deliverable_html"] == ""
+
+
+# --- the declared deliverable ------------------------------------------------
+
+TRANSCRIPT = "# Transcript\n\n## user\n\nhi\n"
+
+
+def _flow_meta(*, stats=None, **extra):
+    """run.json as the renderer reads it for a single flow `plain`; `deliverable`
+    (and its absence) comes in through **extra."""
+    return {
+        "models": {"plain": "opus"},
+        "reasoning_effort": {"plain": "xhigh"},
+        "flow_stats": {
+            "plain": {
+                "exit_status": "idle",
+                "turns": 1,
+                "duration_s": 5.0,
+                "context_tokens": 100,
+                **(stats or {}),
+            }
+        },
+        **extra,
+    }
+
+
+def _flow_dir(tmp_path):
+    d = tmp_path / "plain"
+    d.mkdir()
+    (d / "transcript.md").write_text(TRANSCRIPT)
+    return d
+
+
+def test_flow_card_reads_the_declared_deliverable(tmp_path):
+    from flowbench.report.run_report import flow_card
+
+    d = _flow_dir(tmp_path)
+    (d / "port.sql").write_text("-- ported\nselect 1\n")
+    (d / "plan.md").write_text("# a plan nobody declared\n")
+
+    card = flow_card(
+        "plain", tmp_path, False, _flow_meta(deliverable="port.sql", stats={"artifact_lines": 2})
+    )
+
+    assert card["deliverable_name"] == "port.sql"
+    assert card["deliverable_lines"] == 2
+    assert "ported" in card["deliverable_html"]
+    assert "nobody declared" not in card["deliverable_html"]
+
+
+def test_flow_card_directory_deliverable_lists_its_files(tmp_path):
+    from flowbench.report.run_report import flow_card
+
+    d = _flow_dir(tmp_path)
+    (d / "port" / "sub").mkdir(parents=True)
+    (d / "port" / "a.py").write_text("x\n")
+    (d / "port" / "sub" / "b.py").write_text("y\n")
+
+    card = flow_card(
+        "plain",
+        tmp_path,
+        False,
+        # a directory has no artifact_text, so run.json records no artifact_lines
+        # for it — the card counts the listing it renders instead
+        _flow_meta(deliverable="port", stats={"deliverable_path": "port"}),
+    )
+
+    assert card["deliverable_name"] == "port"
+    assert card["deliverable_lines"] == 3  # header + 2 files
+    assert "(port/ — 2 files)" in card["deliverable_html"]
+    assert "a.py" in card["deliverable_html"] and "sub/b.py" in card["deliverable_html"]
+
+
+def test_flow_card_finds_a_directory_the_agent_left_nested(tmp_path):
+    from flowbench.report.run_report import flow_card
+
+    d = _flow_dir(tmp_path)
+    (d / "work" / "port").mkdir(parents=True)
+    (d / "work" / "port" / "a.py").write_text("x\n")
+
+    card = flow_card(
+        "plain",
+        tmp_path,
+        False,
+        _flow_meta(deliverable="port", stats={"deliverable_path": "work/port"}),
+    )
+
+    assert card["deliverable_lines"] == 2  # header + 1 file
+    assert "(port/ — 1 files)" in card["deliverable_html"]  # labelled by the declared name
+    # Located, not just named: the path is relative to the flow dir, the same
+    # thing the judge is shown, so the reader can see where the agent left it.
+    assert "work/port/a.py" in card["deliverable_html"]
+
+
+def test_flow_card_empty_file_deliverable_is_zero_lines_but_named(tmp_path):
+    from flowbench.report.run_report import flow_card
+
+    d = _flow_dir(tmp_path)
+    (d / "plan.md").write_text("")
+
+    card = flow_card(
+        "plain", tmp_path, False, _flow_meta(deliverable="plan.md", stats={"artifact_lines": 0})
+    )
+
+    assert card["deliverable_name"] == "plan.md"  # present, so still named
+    assert card["deliverable_lines"] == 0
+    assert card["deliverable_html"] == ""
+
+
+def test_flow_card_missing_deliverable_is_zero_lines(tmp_path):
+    from flowbench.report.run_report import flow_card
+
+    _flow_dir(tmp_path)  # the flow never wrote port.sql
+
+    card = flow_card(
+        "plain", tmp_path, False, _flow_meta(deliverable="port.sql", stats={"artifact_lines": 0})
+    )
+
+    assert card["deliverable_name"] == "port.sql"
+    assert card["deliverable_lines"] == 0
+    assert card["deliverable_html"] == ""
+
+
+def test_flow_card_with_a_null_deliverable_has_no_panel(tmp_path):
+    from flowbench.report.run_report import flow_card
+
+    d = _flow_dir(tmp_path)
+    (d / "plan.md").write_text("# not declared, not rendered\n")
+
+    card = flow_card("plain", tmp_path, False, _flow_meta(deliverable=None))
+
+    assert card["deliverable_name"] is None
+    assert card["deliverable_lines"] is None  # no line count to show
+    assert card["deliverable_html"] == ""
+
+
+def test_flow_card_without_a_deliverable_key_falls_back_to_plan_md(tmp_path):
+    from flowbench.report.run_report import flow_card
+
+    d = _flow_dir(tmp_path)
+    (d / "plan.md").write_text("# Plan\n\n- step\n")
+
+    card = flow_card("plain", tmp_path, False, _flow_meta())  # run.json written before this change
+
+    assert card["deliverable_name"] == "plan.md"
+    assert card["deliverable_lines"] == 3
+    assert "<h3>Plan</h3>" in card["deliverable_html"]  # md_to_html shifts headings by two
+
+
+def test_report_renders_a_case_without_a_deliverable(tmp_path):
+    from flowbench.report.run_report import render_report
+
+    root = tmp_path / "run"
+    for name in ("plain", "superpowers"):
+        d = root / name
+        d.mkdir(parents=True)
+        (d / "transcript.md").write_text(TRANSCRIPT)
+        (d / "plan.md").write_text("# undeclared\n")
+    (root / "judge.md").write_text("# Verdict\n\nWinner: A\n")
+    (root / "run.json").write_text(
+        json.dumps(
+            {
+                "run_id": "r1",
+                "case": "todo_app",
+                "deliverable": None,
+                "labels": {"A": "plain", "B": "superpowers"},
+                "winner": "a",
+                "models": {"plain": "opus", "superpowers": "opus"},
+                "reasoning_effort": {"plain": "high", "superpowers": "high"},
+                "flow_stats": {
+                    "plain": {"exit_status": "idle", "turns": 2, "duration_s": 3.0},
+                    "superpowers": {"exit_status": "idle", "turns": 4, "duration_s": 9.0},
+                },
+            }
+        )
+    )
+
+    text = render_report(root).read_text()
+
+    assert "Winner: plain (flow A)" in text
+    assert "undeclared" not in text  # no panel for a deliverable the case never declared
+    assert "lines)</summary>" not in text
+    assert "None" not in text
+    assert "scenario" not in text  # the subtitle clause is gone

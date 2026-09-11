@@ -8,6 +8,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from flowbench.driver import AgentDriver
+from flowbench.loop import DONE_TOKEN
 from flowbench.types import TurnResult, TurnStatus
 
 
@@ -32,7 +33,7 @@ class ScriptedDriver:
 class FakeDriver(AgentDriver):
     """Replays scripted questions, then reports the plan complete; 'writes' the
     plan to `run_dir/plan.md` on disk (like a real driver would) when `run_dir`
-    is given, so the orchestrator's `find_artifact` probe finds it."""
+    is given, so a case declaring `plan.md` finds one."""
 
     def __init__(self, plan_text, questions, run_dir=None):
         self._plan = plan_text
@@ -50,7 +51,7 @@ class FakeDriver(AgentDriver):
         self.sent.append(text)
         if self._questions:
             return TurnResult(TurnStatus.IDLE, self._questions.pop(0))
-        return TurnResult(TurnStatus.IDLE, "The plan is complete and written to plan.md.", True)
+        return TurnResult(TurnStatus.IDLE, "The plan is complete and written to plan.md.")
 
     async def capture_session(self):
         items = [{"type": "message", "role": "user", "content": s} for s in self.sent]
@@ -63,7 +64,7 @@ class FakeDriver(AgentDriver):
 
 class MissingPlanDriver(FakeDriver):
     """Reports the plan complete but never produced an artifact (flow crashed):
-    `start()` writes nothing, so `find_artifact` never finds a plan."""
+    `start()` writes nothing, so the deliverable probe never finds a plan."""
 
     async def start(self):
         pass
@@ -82,7 +83,7 @@ class StubSim:
         self.closed = False
 
     async def generate(self, prompt):
-        reply = self.replies.pop(0) if self.replies else "PLAN_COMPLETE"
+        reply = self.replies.pop(0) if self.replies else DONE_TOKEN
 
         class _Out:
             completion = reply
@@ -103,7 +104,7 @@ def n_run_factories(judge_winners):
         return FakeDriver("# plain plan\nno unknown-key note.", [], run_dir=flow_dir)
 
     def make_simulator(flow, sim_dir):
-        return StubSim(["PLAN_COMPLETE"])
+        return StubSim([DONE_TOKEN])
 
     async def run_judge(judge_md, entries, judge_dir):
         w = winners.pop(0)

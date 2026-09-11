@@ -14,7 +14,9 @@ Vocabulary in [`docs/GLOSSARY.md`](docs/GLOSSARY.md):
 
 ## How it works
 
-- A **case** poses one fixed task (a vague first prompt + fixtures + acceptance criteria).
+- A **case** is a folder: a vague first prompt, a simulated user, the flows to compare, and an
+  optional `case.py` saying what proves delivery and how a flow is scored
+  ([`docs/design/case.md`](docs/design/case.md)).
 - Each **flow** runs that case under omnigent and produces a **run** → a **scorecard**.
 - Scorecards line up in a **comparison** — does a given workflow actually beat a bare agent?
 
@@ -24,8 +26,12 @@ Vocabulary in [`docs/GLOSSARY.md`](docs/GLOSSARY.md):
 uv sync --extra dev --extra live       # live = the omnigent runtime for live runs
 uv run pytest -q                       # offline suite
 
+# run a case (this one is the engine's own two-minute gate) and follow it:
+uv run --extra live flowbench run scenarios/smoke/hello --run-id <run_id>
+uv run flowbench watch <run_id>
+
 # after a run, compare flows side by side ($RUNS = your run-dir root, see docs/onboarding.md §6):
-uv run flowbench compare --run-base $RUNS/coding_workflow --run-id <run_id>
+uv run flowbench compare --run-base $RUNS/todo_app --run-id <run_id>
 ```
 
 Driving a case live needs a running [omnigent](https://github.com/omnigent-ai/omnigent) server and
@@ -36,6 +42,6 @@ rule. Why omnigent and not herdr or a CLI of our own:
 
 ## Status
 
-Early. Reference scenario: `coding_workflow` — build a Python CLI todo app from a vague first
-prompt, benchmarked baseline vs superpowers. Domain-specific scenarios can live in separate repos
-that depend on this engine.
+Early. Reference scenario: `swe_e2e` — build a Python CLI todo app from a vague first
+prompt, benchmarked baseline vs superpowers; `scenarios/smoke/hello` is the engine's own live
+gate. Domain-specific scenarios can live in separate repos that depend on this engine.

@@ -1,6 +1,6 @@
 """Render a flowbench run dir into one self-contained report.html.
 
-Pure reader: (run_root with run.json/judge.md/<flow>/{plan,transcript,session})
+Pure reader: (run_root with run.json/judge.md/<flow>/{deliverable,transcript,session})
 -> report.html next to run.json. No deps; tiny md renderer; light/dark theme.
 
     uv run python -m flowbench.report.run_report <run_root>
@@ -68,6 +68,23 @@ def transcript_html(md: str) -> str:
     return "\n".join(out)
 
 
+def _deliverable_view(flow_dir: Path, name: str, relative: str | None = None) -> str:
+    """The flow's deliverable as text to render: a file's own text, a directory's
+    sorted file listing under a `(name/ — N files)` header, or "" when the flow
+    produced none. `relative` is `flow_stats[<flow>].deliverable_path` — where the
+    deliverable was *found*, relative to the flow dir, so a nested one is read
+    where the agent left it — and falls back to the declared name for run dirs
+    written before that path was recorded."""
+    path = flow_dir / (relative or name)
+    if path.is_dir():
+        # Paths relative to the FLOW dir, matching what the judge is shown: a
+        # directory the agent left nested reads `work/port/a.sql`, so the listing
+        # says where the files are and not merely what they are called.
+        files = sorted(p.relative_to(flow_dir).as_posix() for p in path.rglob("*") if p.is_file())
+        return "\n".join([f"({name}/ — {len(files)} files)", *files])
+    return path.read_text() if path.is_file() else ""
+
+
 def flow_card(name: str, run_root: Path, is_winner: bool, meta: dict) -> dict:
     stats = (meta.get("flow_stats") or {}).get(name)
     if stats is None:  # pre-flow_stats run.json: fall back to session.json
@@ -79,8 +96,14 @@ def flow_card(name: str, run_root: Path, is_winner: bool, meta: dict) -> dict:
             "artifact_lines": None,
             "context_tokens": s.get("context_tokens"),
         }
-    p = run_root / name / "plan.md"
-    plan = p.read_text() if p.exists() else ""
+    # The case's declared deliverable; an absent key is a run dir written before
+    # it was recorded, when the deliverable was always plan.md. `None` is a case
+    # that declares none, judged on its conversations alone: no panel, no count.
+    deliverable = meta.get("deliverable", "plan.md")
+    lines, view = None, ""
+    if deliverable is not None:
+        view = _deliverable_view(run_root / name, deliverable, stats.get("deliverable_path"))
+        lines = stats.get("artifact_lines") or len(view.splitlines())
     transcript = (run_root / name / "transcript.md").read_text()
     tokens = stats.get("context_tokens")
     return {
@@ -92,8 +115,9 @@ def flow_card(name: str, run_root: Path, is_winner: bool, meta: dict) -> dict:
         "turns": stats.get("turns"),
         "duration": f"{round(stats.get('duration_s') or 0)}s",
         "tokens": f"{tokens:,}" if tokens else "–",
-        "plan_lines": stats.get("artifact_lines") or len(plan.splitlines()),
-        "plan_html": md_to_html(plan),
+        "deliverable_name": deliverable,
+        "deliverable_lines": lines,
+        "deliverable_html": md_to_html(view),
         "transcript_html": transcript_html(transcript),
     }
 
@@ -144,19 +168,29 @@ def render_report(run_root: Path) -> Path:
     winner_name = labels.get(winner_key.upper())
     cards = [flow_card(name, run_root, name == winner_name, meta) for _, name in ordered]
 
+    def lines_cell(c):  # a case that declares no deliverable has no count to show
+        return "–" if c["deliverable_lines"] is None else c["deliverable_lines"]
+
     rows = "".join(
         f"<tr><td class='{'win' if c['winner'] else ''}'>{c['name']}"
         f"{' 🏆' if c['winner'] else ''}</td><td>{c['model']}/{c['effort']}</td>"
         f"<td>{c['exit']}</td><td>{c['turns']}</td><td>{c['duration']}</td>"
-        f"<td>{c['tokens']}</td><td>{c['plan_lines']}</td></tr>"
+        f"<td>{c['tokens']}</td><td>{lines_cell(c)}</td></tr>"
         for c in cards
     )
 
     def col(c, label):
         wt = " <span class='winner-tag'>winner</span>" if c["winner"] else ""
+        # A case that declares no deliverable is compared on its conversations alone.
+        panel = (
+            f"<details open><summary>{c['deliverable_name']} "
+            f"({c['deliverable_lines']} lines)</summary>{c['deliverable_html']}</details>"
+            if c["deliverable_name"] is not None
+            else ""
+        )
         return f"""<div class="card"><h3>{label}: {c["name"]}{wt}
           <span class="tag">{c["model"]}/{c["effort"]} · {c["turns"]} turns · {c["duration"]}</span></h3>
-          <details open><summary>plan.md ({c["plan_lines"]} lines)</summary>{c["plan_html"]}</details>
+          {panel}
           <details><summary>conversation ({c["turns"]} turns)</summary>{c["transcript_html"]}</details>
         </div>"""
 
@@ -165,23 +199,21 @@ def render_report(run_root: Path) -> Path:
     )
     cols_html = "".join(col(c, letter) for (letter, _), c in zip(ordered, cards, strict=True))
     letters_str = "/".join(letter for letter, _ in ordered)
-    scenario = f" · scenario {meta['scenario']}" if meta.get("scenario") else ""
     doc = f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>flowbench · {meta["case"]} · {meta["run_id"]}</title><style>{CSS}</style></head><body><main>
 <h1>flowbench run report</h1>
-<div class="sub">case <strong>{meta["case"]}</strong> · run <strong>{meta["run_id"]}</strong>
-{scenario}</div>
+<div class="sub">case <strong>{meta["case"]}</strong> · run <strong>{meta["run_id"]}</strong></div>
 <div class="banner">🏆 {verdict_line}</div>
 
 <h2>Flows</h2>
 <table><tr><th>flow</th><th>model</th><th>exit</th><th>turns</th><th>duration</th>
-<th>context tokens</th><th>plan lines</th></tr>{rows}</table>
+<th>context tokens</th><th>deliverable lines</th></tr>{rows}</table>
 
 <h2>Judge verdict</h2>
 <div class="verdict">{md_to_html(judge_md)}</div>
 
-<h2>Plans &amp; conversations</h2>
+<h2>Deliverables &amp; conversations</h2>
 <div class="cols">{cols_html}</div>
 
 <footer>generated from {run_root} · flows {letters_str} order as judged · models {json.dumps(meta["models"])}</footer>
@@ -230,14 +262,13 @@ def render_aggregate_report(run_root: Path) -> Path:
         for t in meta["trials"]
     )
 
-    scenario = f" · scenario {meta['scenario']}" if meta.get("scenario") else ""
     doc = f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>flowbench · {meta["case"]} · {meta["run_id"]} · aggregate</title>
 <style>{CSS}</style></head><body><main>
 <h1>flowbench aggregate report</h1>
 <div class="sub">case <strong>{meta["case"]}</strong> · run <strong>{meta["run_id"]}</strong>
- · {meta["n"]} trials{scenario}</div>
+ · {meta["n"]} trials</div>
 <div class="banner">{banner}</div>
 {scores_html}
 <h2>Trials</h2>

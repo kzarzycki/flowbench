@@ -63,13 +63,13 @@ omnigent diagnose         # read-only environment snapshot, good for bug reports
 ```
 
 `omnigent stop` tears it down again. Pin whatever version you install: this repo drives
-omnigent through private-API reach-ins (`roadmap/current-state.md` #4), so a surprise upgrade
+omnigent through private-API reach-ins (`roadmap/current-state.md` #3), so a surprise upgrade
 is a real risk, not a theoretical one.
 
 ## 2. The topology (two omnigents, and only one of them drives the agent)
 
 ```
-your shell ─ uv run python -m scenarios.<scenario>.run
+your shell ─ uv run --extra live flowbench run <case_dir>
                 │  imports omnigent_client + omnigent.host.daemon_launch   ← (a) venv copy
                 │  HTTP :6767
                 ▼
@@ -150,23 +150,47 @@ venv client, §2) for `_is_box_rule`; the module moved between versions:
 
 Missing → the server runs a pre-0.12.0 omnigent; upgrade it.
 
-## 6. Where runs land
+## 6. Settings, and where runs land
 
-Run dirs are **never** inside the repo: they default to `<launching checkout>/../flowbench-runs/<scenario>/`
-(`$RUNS` in tracked docs). Live runs are launched from the scenarios checkout, so that is where
-the real run dirs are — record the concrete path in your untracked `CLAUDE.local.md`, per the
-no-per-developer-paths policy. A run dir is a plain folder of files (`run.json`,
-`<flow>/scorecard.json`, transcripts): every reader in this repo reads them, nothing wraps
-execution.
+Three settings, resolved by one layered object (`flowbench.settings.Settings`, pydantic-settings):
+
+| Setting | Flag | Default |
+| --- | --- | --- |
+| `runs_root` | `--runs-root` | `runs` (relative to the cwd; gitignored here) |
+| `sim_model` | `--sim-model` | `opus` |
+| `judge_model` | `--judge-model` | `opus` |
+
+Precedence, highest first: **the flag** → **`FLOWBENCH_*` in the environment**
+(`FLOWBENCH_RUNS_ROOT=…`) → **`.env` in the cwd** → **`[tool.flowbench]` in `pyproject.toml`** →
+the default. A flag you did not pass never shadows a lower layer. Budgets are *not* settings:
+`max_turns` and `deadline_s` belong to the case (`case.py`), because a cap the flow can or cannot
+live inside is a variable of the benchmark, not of the machine.
+
+Point `runs_root` **outside the repo** — the convention is a sibling
+`<launching checkout>/../flowbench-runs/` (`$RUNS` in tracked docs), set once in the launching
+repo's `[tool.flowbench]` or exported as `FLOWBENCH_RUNS_ROOT`; record the concrete path in your
+untracked `CLAUDE.local.md`, per the no-per-developer-paths policy. Inside it, a run is
+`<runs_root>/<case>/<run_id>` (plus `trial-XX/` when `--n > 1`) — a plain folder of files
+(`run.json`, `<flow>/scorecard.json`, transcripts): every reader in this repo reads them, nothing
+wraps execution.
 
 ## 7. Your first live run
 
-From this repo (the open reference case; `$SCENARIOS` has the private ones):
+Start with the engine's own smoke case: one flow, one file, a four-turn budget — a couple of
+minutes, and it exercises the kickoff, a simulator relay, the deliverable probe, `score` and the
+run dir. If this passes, the machine is wired up.
 
 ```bash
 unset ANTHROPIC_API_KEY
-caffeinate -i uv run --extra live python -m scenarios.coding_workflow.run \
-  --case todo_app --run-id <id>
+uv run --extra live flowbench run scenarios/smoke/hello --run-id smoke-001
+```
+
+Then the real thing — the open reference case (`$SCENARIOS` has the private ones), which takes
+about an hour per flow:
+
+```bash
+caffeinate -i uv run --extra live flowbench run \
+  scenarios/swe_e2e/cases/todo_app --run-id <id>
 ```
 
 Five rules learned the hard way:
@@ -177,11 +201,17 @@ Five rules learned the hard way:
 - **`caffeinate -i`.** An idle Mac sleeps mid-turn and the agent dies on wake
   (`native_turn_error: "Your computer went to sleep mid-response"`). `-i` does not stop
   clamshell sleep — keep the lid open, or run headless.
-- **Watch it.** `flowbench.watch.RunWatch` is an incremental anomaly scanner over a live run
-  (permission prompts, run-scoped server errors, failed sessions, `STALLED (...)`,
-  `QUOTA: ...` — a CLI limit banner, wait for the reset) — one line per event. The engine ships the class, not a CLI; the private scenarios repo wraps it as
-  `uv run python -m scenarios.swe_planning.watch <run_id> --pid <runner-pid>`. For the open
-  reference case, drive `RunWatch(...).tick()` yourself or tail the logs from §2.
+- **Watch it.** From a second shell, once the run dir exists:
+
+  ```bash
+  uv run flowbench watch <id> --pid <runner-pid>
+  ```
+
+  One line per anomaly (permission prompts, run-scoped server errors, failed sessions,
+  `STALLED (...)`, `QUOTA: ...` — a CLI limit banner, wait for the reset), until the run's
+  `run.json` lands or the `--pid` you gave it dies. The run id alone is enough: which case wrote
+  the dir is in the layout. Start it *after* the run dir exists — the watcher resolves the id
+  against `runs_root` and exits with `no run dir …` if it is not there yet.
 - **No server restart under a run.** The bridge gates every tool call through a
   `PreToolUse` hook that asks the omnigent server; when the server is down or restarting the
   hook fails *ask* by design, and Claude Code shows a permission card even under
@@ -189,17 +219,16 @@ Five rules learned the hard way:
   Anything that restarts the server (the fork's `auto-sync` after an upstream rebase,
   `omnigent host stop`, a launchd kickstart) must wait for a quiet server: no session touched
   in the last 10 min.
-- **Expect long turns.** A workflow-heavy flow can spend half an hour in one turn. Two of the
-  three budgets are per-flow fields in the case's `flows.yaml` — `turn_timeout_s` (per-turn cap)
-  and `stall_s` (heartbeat watchdog) — and are declared per case, because a cap the flow can or
-  cannot live inside is a first-order variable of the benchmark. The whole-session budget
-  `deadline_s` is run-level: `--deadline-s` on the scenario runner (default 3600 s), passed
-  through to `run_case`.
+- **Expect long turns.** A workflow-heavy flow can spend half an hour in one turn. All three
+  budgets live with the case, because a cap the flow can or cannot live inside is a first-order
+  variable of the benchmark: `turn_timeout_s` (per-turn cap) and `stall_s` (heartbeat watchdog)
+  are per-flow fields in `flows.yaml`, and the whole-session budgets `max_turns` and `deadline_s`
+  are `Case` attributes in `case.py`. The CLI has no flag for any of them.
 
 Then read the scorecards side by side:
 
 ```bash
-uv run flowbench compare --run-base $RUNS/coding_workflow --run-id <id>
+uv run flowbench compare --run-base $RUNS/todo_app --run-id <id>
 ```
 
 The omnigent session, its runner and its tmux pane are **left alive on purpose** when a run
@@ -209,10 +238,11 @@ simulator was driving.
 ## 8. Where to read next
 
 - [`GLOSSARY.md`](GLOSSARY.md) — the vocabulary, in dependency order.
-- [`design/runner.md`](design/runner.md) — driver/loop/run_case contracts.
+- [`design/case.md`](design/case.md) — the case folder format and the `Case` contract.
+- [`design/runner.md`](design/runner.md) — driver/loop/run_case contracts, and the CLI.
 - [`design/decisions/`](design/decisions/) — why a flow is the full configuration; why omnigent
   is the meta-harness.
 - [`roadmap/current-state.md`](roadmap/current-state.md) — the known warts, each pointing at the
-  epic that fixes it (private-API reach-ins and the version split are #5 there).
+  epic that fixes it (private-API reach-ins and the version split are #3 there).
 - `$SCENARIOS/docs/knowledge/omnigent.md` — operational gotchas from real runs, in the private
   scenarios repo.

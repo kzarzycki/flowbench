@@ -5,8 +5,8 @@ from pathlib import Path
 
 import pytest
 
-from scenarios.coding_workflow.cases.todo_app import scorers
-from scenarios.coding_workflow.cases.todo_app.fixtures import sessions
+from scenarios.swe_e2e.cases.todo_app import scorers
+from scenarios.swe_e2e.cases.todo_app.fixtures import sessions
 
 
 def _workspace_with(tmp_path, *, spec=False, plan=False, app=False, tests=False):
@@ -317,7 +317,7 @@ def test_collect_code_skips_an_unreadable_path(tmp_path, caplog):
     (ws / "real.py").write_text("REAL_MARKER = 1")
     (ws / "broken.py").mkdir()  # a directory named *.py: read_text() raises
 
-    caplog.set_level(logging.DEBUG, logger="scenarios.coding_workflow.cases.todo_app.scorers")
+    caplog.set_level(logging.DEBUG, logger="scenarios.swe_e2e.cases.todo_app.scorers")
     code = scorers.collect_code(ws)
 
     assert "REAL_MARKER = 1" in code
@@ -325,8 +325,7 @@ def test_collect_code_skips_an_unreadable_path(tmp_path, caplog):
     records = [
         r
         for r in caplog.records
-        if r.name == "scenarios.coding_workflow.cases.todo_app.scorers"
-        and r.levelno == logging.DEBUG
+        if r.name == "scenarios.swe_e2e.cases.todo_app.scorers" and r.levelno == logging.DEBUG
     ]
     assert len(records) == 1
     message = records[0].getMessage()
@@ -340,7 +339,7 @@ def test_collect_code_skips_undecodable_source(tmp_path, caplog):
     (ws / "ok.py").write_text("OK_MARKER = 1")
     (ws / "bad.py").write_bytes(b"\xff\xfe\x00bad")  # not UTF-8: read_text() raises
 
-    caplog.set_level(logging.DEBUG, logger="scenarios.coding_workflow.cases.todo_app.scorers")
+    caplog.set_level(logging.DEBUG, logger="scenarios.swe_e2e.cases.todo_app.scorers")
     code = scorers.collect_code(ws)
 
     assert "OK_MARKER = 1" in code
@@ -348,8 +347,7 @@ def test_collect_code_skips_undecodable_source(tmp_path, caplog):
     records = [
         r
         for r in caplog.records
-        if r.name == "scenarios.coding_workflow.cases.todo_app.scorers"
-        and r.levelno == logging.DEBUG
+        if r.name == "scenarios.swe_e2e.cases.todo_app.scorers" and r.levelno == logging.DEBUG
     ]
     assert len(records) == 1
     assert "UnicodeDecodeError" in records[0].getMessage()

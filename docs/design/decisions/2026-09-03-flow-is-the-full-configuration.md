@@ -14,9 +14,9 @@ in CLAUDE.md / roadmap README (the intent behind it is kept, see "What stays loc
 3. **Comparability is a read-time fact the report states.** A comparison lists which flow fields
    differ between its columns ("differ in: bundle" / "differ in: bundle, model"). One knob at a
    time is the recommended design, not a type constraint.
-4. **Scenarios police eligibility.** A scenario's rules may exclude flows (e.g. `coding_workflow`
+4. **The case polices eligibility.** A case's rules may exclude flows (e.g. `swe_e2e`'s todo_app
    rejects flows with a system prompt, because its question is "does the flow's workflow *fire* on
-   a plain user invite" and a system prompt makes that trivially true). `swe_planning` may allow
+   a plain user invite" and a system prompt makes that trivially true). A planning case may allow
    them. The engine does not hard-code either.
 5. **Flows are flat.** No flow × config two-level type. A `matrix:` block in `flows.yaml` expands
    to flat flows (`superpowers-{model}-{effort}`); reports group by any field.
@@ -40,6 +40,7 @@ dicts. Model and effort are launch parameters, not steering, and comparing them 
 
 - S03.1 (Flow schema v1) implements the flat schema + matrix expansion + validating loader.
 - S03.5 (generic compare) renders the "differs in" row.
-- Scenario eligibility rules become a scenario.py contract (S03.2).
+- Eligibility rules become a `Case` contract when a case needs one: S03.2 (the Case API) closed
+  the `Case` surface without an eligibility hook.
 - Priority: solidify the run framework (M0–M3: one runner, generic runtime in the engine,
   reliable runs, declarative flows) before adding flows or scenarios.
