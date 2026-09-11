@@ -5,13 +5,13 @@
 flows:
   - name: baseline
     harness: claude-native
-    model: sonnet
+    model: haiku
     skills: none              # bare Claude Code — no host skills, no bundle
     turn_timeout_s: 3000      # same cap for every flow: todo-app-002's superpowers
                               # build turn ran 31 min into the 1800 s default
   - name: superpowers
     harness: claude-native
-    model: sonnet
+    model: haiku
     skills: none              # host skills hidden; the bundle ships the vendored set
     turn_timeout_s: 3000
     skill_dirs:               # (scenarios/swe_e2e/skills/, see VERSION.md)
