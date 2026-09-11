@@ -132,6 +132,15 @@ def session_metadata(spec: BundleSpec) -> dict[str, Any]:
     elif spec.harness == "codex-native":
         # Codex's unattended stance: never prompt, sandboxed to the workspace.
         launch_args = ["--ask-for-approval", "never", "--sandbox", "workspace-write"]
+    elif spec.harness == "antigravity-native":
+        # agy's unattended stance, and its ONLY pre-emptive permission control
+        # (omnigent harnesses/antigravity_native/launch.py `_SKIP_PERMISSIONS_FLAG`).
+        # It has to ride the launch args: omnigent's runner-owned launch — the one
+        # this driver uses — passes `permission_mode=None, headless=False`, so the
+        # bundle's own `permission_mode: bypassPermissions` never reaches agy.
+        # Without it turn 1 of a 3-turn probe stalled for the whole `stall_s` on an
+        # unanswerable `request-review` prompt: the todo-app-001 freeze shape (#149).
+        launch_args = ["--dangerously-skip-permissions"]
     else:
         launch_args = []
     meta: dict[str, Any] = {"terminal_launch_args": launch_args}

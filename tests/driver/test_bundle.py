@@ -164,10 +164,18 @@ def test_golden_bundle_members_and_content_hashes(tmp_path):
     assert by_name["./tools/mcp/fetch.yaml"] == _sha(mcp_yaml)
 
 
-def test_golden_session_metadata_six_variants(tmp_path):
+def test_golden_session_metadata_eight_variants(tmp_path):
+    """Four harnesses x (bare, titled). The claude/codex/fallthrough rows are the
+    regression half: agy's row is new, the other three must stay byte-identical."""
     claude = ["--disallowedTools", "AskUserQuestion", "--permission-mode", "bypassPermissions"]
     codex = ["--ask-for-approval", "never", "--sandbox", "workspace-write"]
-    for harness, args in (("claude-native", claude), ("codex-native", codex), ("other", [])):
+    agy = ["--dangerously-skip-permissions"]
+    for harness, args in (
+        ("claude-native", claude),
+        ("codex-native", codex),
+        ("antigravity-native", agy),
+        ("other", []),
+    ):
         assert session_metadata(_spec(tmp_path, harness=harness)) == {"terminal_launch_args": args}
         assert session_metadata(
             _spec(tmp_path, harness=harness, session_title="flow: sp", project="swe/1")

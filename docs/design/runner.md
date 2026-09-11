@@ -34,10 +34,25 @@ and `flowbench.runner.loop` re-export the old names for one release.
 
 ### Where a flow's skills live at run time
 
-A flow's skills never load from the host `~/.claude`. `flowbench.driver.bundle.build_bundle`
-copies them into a per-flow tarball, POSTs it to omnigent, and the agent loads them from
-there (`--plugin-dir`); with `skills: "none"` the host skills are hidden. That is what
-makes a flow identical on any machine.
+**On a Claude harness**, a flow's skills never load from the host `~/.claude`.
+`flowbench.driver.bundle.build_bundle` copies them into a per-flow tarball, POSTs it to
+omnigent, and the agent loads them from there (`--plugin-dir`); with `skills: "none"` the host
+skills are hidden. That is what makes such a flow identical on any machine.
+
+**No other harness has that path**, so the property is harness-scoped, not universal. What
+each one carries:
+
+| Harness | Bundle skills / MCPs | `skills:` filter | `reasoning_effort` | Launch args |
+| --- | --- | --- | --- | --- |
+| `claude-native` | yes (`--plugin-dir`) | yes (`--setting-sources`) | yes | `--disallowedTools AskUserQuestion --permission-mode bypassPermissions` |
+| `codex-native` | no | no | yes | `--ask-for-approval never --sandbox workspace-write` |
+| `antigravity-native` | no — the bridge seeds the HOST's global agy skills instead | no | no — effort is part of the agy model id (`gemini-3.8-flash-low`) | `--dangerously-skip-permissions` |
+
+`OmnigentDriver.start()` logs one warning naming any field a flow declared that its harness
+will not carry, so a run never quietly reports a bundle that never loaded. It warns rather than
+refuses only until `Flow` schema v1 (S03.1) owns flow validation. The agy row's "seeds the
+host's global skills" is a hermeticity gap tracked as #151, and what it means for comparing
+across harnesses is #119.
 
 ```mermaid
 flowchart LR
@@ -63,7 +78,9 @@ flowchart LR
   cli -- reads/writes --> ws
 ```
 
-Baseline is the same picture with an empty `skills/`. Nothing else changes.
+Baseline is the same picture with an empty `skills/`. Nothing else changes. The diagram is the
+`claude-native` path; on the other harnesses the bundle is still built and POSTed, but nothing
+downstream of `cli` reads its `skills/` or `tools/mcp/`.
 
 ### Send/retry policy
 

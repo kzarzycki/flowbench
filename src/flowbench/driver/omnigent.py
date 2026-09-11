@@ -54,6 +54,25 @@ _PAGE = 200  # server-side max page for GET /v1/sessions/{id}/items
 # SSE budget; a label read that hangs must fail in the 60 s the raw client had.
 _LABEL_READ_S = 60.0
 
+# Which harnesses' omnigent bridges actually carry a declared flow field to the
+# agent. Not cosmetic: a flow that declares a field the bridge drops gets a
+# different agent than its scorecard says it got, and that is invisible in the
+# result — the one failure this benchmark cannot afford.
+#
+# Bundle skills/MCPs: only the Claude bridges materialize the bundle for the CLI
+# (`--plugin-dir` + `--setting-sources`, omnigent `inner/bundle_skills.py`, which
+# is documented as being "for exposing an agent bundle's skills to a Claude
+# harness"). codex-native has no bundle-skill path at all, and agy has none
+# either — its bridge seeds the HOST's global agy skills into the session's
+# isolated dir instead, which is also why `skills: none` cannot be honoured there.
+# Reasoning effort: agy carries effort in the model id (`gemini-3.8-flash-low`)
+# and its executor validates the field, then drops it as "informational".
+#
+# These are two different sets on purpose: codex honours effort and receives no
+# bundle. Collapsing them would make the check wrong about codex both ways.
+_BUNDLE_SKILL_HARNESSES = frozenset({"claude-native", "claude-sdk"})
+_REASONING_EFFORT_HARNESSES = frozenset({"claude-native", "claude-sdk", "codex-native"})
+
 
 def _label_read_errors() -> tuple[type[BaseException], ...]:
     """What a label read (`sessions.get()` + the label lookup) can fail with:
@@ -183,9 +202,37 @@ class OmnigentDriver(AgentDriver):
     def _create_metadata(self) -> dict[str, Any]:
         return bundle.session_metadata(self)
 
+    def _unhonoured_fields(self) -> list[str]:
+        """Declared fields this harness's bridge will not deliver to the agent.
+
+        WARNING rather than a raise, for now: `engineering-loop/agent_review.py`
+        passes `reasoning_effort` unconditionally (#152), and the hard reject
+        belongs to Flow schema v1 (S03.1/#119), where one place validates a flow
+        before any session exists."""
+        fields = []
+        if self.reasoning_effort and self.harness not in _REASONING_EFFORT_HARNESSES:
+            fields.append("reasoning_effort")
+        if self.harness not in _BUNDLE_SKILL_HARNESSES:
+            if self.skills != "all":
+                fields.append("skills")
+            if self.skill_dirs:
+                fields.append("skill_dirs")
+            if self.mcp_files:
+                fields.append("mcp_files")
+        return sorted(fields)
+
     async def start(self) -> None:
         if os.environ.get("ANTHROPIC_API_KEY"):
             raise RuntimeError("ANTHROPIC_API_KEY is set — would defeat subscription billing.")
+        unhonoured = self._unhonoured_fields()
+        if unhonoured:
+            log.warning(
+                "harness %s does not carry %s: its omnigent bridge has no path for "
+                "%s, so this session runs without what the flow declared",
+                self.harness,
+                ", ".join(unhonoured),
+                "them" if len(unhonoured) > 1 else "it",
+            )
         import httpx
 
         # UPSTREAM: https://github.com/omnigent-ai/omnigent/issues/6822 — the SDK has no hosts/runners
@@ -201,7 +248,7 @@ class OmnigentDriver(AgentDriver):
         self._http = httpx.AsyncClient(base_url=self.server_url, timeout=60.0)
         self._client = OmnigentClient(base_url=self.server_url)
 
-        host_id = await self._resolve_claude_host()
+        host_id = await self._resolve_host()
         agent_bundle = self._build_bundle()
 
         # Create with --disallowedTools so claude asks in plain text (the card
@@ -240,15 +287,24 @@ class OmnigentDriver(AgentDriver):
         )
         await wait_for_runner_online(self._http, self._runner_id, timeout_s=90)
 
-    async def _resolve_claude_host(self) -> str:
+    async def _resolve_host(self) -> str:
+        """The online host that runs THIS driver's harness. `harness` is a flow
+        field, so the lookup reads it rather than naming one: a host that is
+        online but does not run `self.harness` is not a host for this flow.
+
+        `is True`, not truthiness: a host reports each harness as `true`, `false`
+        or a diagnostic STRING (`"binary-missing"`, six of them on the reference
+        host), and the string is truthy — a loose test would launch the session
+        at a harness whose binary is absent."""
         resp = await self._http.get(f"{self.server_url}/v1/hosts")
         resp.raise_for_status()
         for h in resp.json().get("hosts", []):
-            if h.get("status") == "online" and h.get("configured_harnesses", {}).get(
-                "claude-native"
+            if (
+                h.get("status") == "online"
+                and h.get("configured_harnesses", {}).get(self.harness) is True
             ):
                 return h["host_id"]
-        raise RuntimeError("no online host with claude-native configured")
+        raise RuntimeError(f"no online host with {self.harness} configured")
 
     async def send(self, text: str) -> TurnResult:
         # ONE wall-clock budget per send: the soft checks below pre-empt every wait
