@@ -185,11 +185,14 @@ on MERGED or PARKED nothing of the item stays on disk; `.loop/` goes with the tr
 
 **LIVE (gate 5)** — after a merge touching the runner, a flow, a case or scenario
 orchestration; docs-only skips it. From `$SCENARIOS`: `caffeinate -i uv run --extra
-live python -m scenarios.swe_planning.run --run-id <id> --n 2`, watched by
-`python -m scenarios.swe_planning.watch <run_id> --pid <pid>`. Clean = no permission
-prompts, no failed sessions, no artifact_missing, `run.json` lands. Anomaly → issue
-labeled `loop:regression` with the watcher output; it outranks everything at the next
-triage. Never revert blind — quota and host flaps are environmental.
+live flowbench run scenarios/swe_planning/cases/smoke_todo_app --run-id <id> --n 2`,
+watched by `uv run flowbench watch <run_id> --pid <pid>`. Clean = no permission
+prompts, no failed sessions, no artifact_missing, `run.json` lands. The gate case
+declares only harnesses the gate requires. A harness the gate cannot guarantee on every
+host makes every story's gate 5 fail on an environment fact, which is neither clean nor
+actionable (flowbench#162). Anomaly → issue labeled `loop:regression` with the watcher
+output; it outranks everything at the next triage. Never revert blind — quota and host
+flaps are environmental.
 
 Then: spawned → stop. Otherwise back to TRIAGE.
 
