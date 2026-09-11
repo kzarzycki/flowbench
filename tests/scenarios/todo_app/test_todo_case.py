@@ -4,6 +4,7 @@ own module, so the loaded class is never the imported one: assert by name and
 behaviour."""
 
 import json
+import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -75,6 +76,10 @@ async def test_todo_app_case_setup_git_inits_the_flow_dir(tmp_path):
         capture_output=True,
         text=True,
         check=True,
+        # Scrub GIT_* the way git_init_repo does (#49): run from a git hook — the
+        # pre-push suite — and an inherited GIT_DIR points this log at the outer
+        # repo, which passes `check=True` and asserts against the wrong history.
+        env={k: v for k, v in os.environ.items() if not k.startswith("GIT_")},
     )
     assert "initial commit" in log.stdout
     await case.setup({"name": "superpowers"}, flow_dir)  # idempotent: a re-run must not fail
