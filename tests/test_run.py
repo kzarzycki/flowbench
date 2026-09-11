@@ -273,12 +273,8 @@ async def test_default_case_gets_no_repo(tmp_path):
     for name in result["meta"]["flows"]:
         assert not (root / name / ".git").exists()
     meta = json.loads((root / "run.json").read_text())
-    assert meta["workspace"] == {
-        "seed": None,
-        "git": False,
-        "seed_files": 0,
-        "seed_commit": None,
-    }
+    assert meta["workspace"] == {"seed": None, "git": False, "seed_files": 0}
+    assert all(meta["flow_stats"][n]["seed_commit"] is None for n in meta["flows"])
 
 
 async def test_setup_sees_the_seeded_workspace(tmp_path):
@@ -323,9 +319,41 @@ async def test_run_json_records_the_workspace(tmp_path):
     assert meta["workspace"]["seed"] == "seed"
     assert meta["workspace"]["git"] is True
     assert meta["workspace"]["seed_files"] == 2
-    # One recorded SHA, true for every flow dir — the point of the pinned dates.
+    assert "seed_commit" not in meta["workspace"]  # a per-flow fact, recorded per flow
+    # Each flow dir's own HEAD, and one SHA across them — the pinned dates' point.
     heads = {_git(root / name, "rev-parse", "HEAD") for name in meta["flows"]}
-    assert heads == {meta["workspace"]["seed_commit"]}
+    recorded = {meta["flow_stats"][name]["seed_commit"] for name in meta["flows"]}
+    assert heads == recorded
+    assert len(recorded) == 1
+
+
+async def test_a_pre_existing_repo_records_its_own_head(tmp_path):
+    """Why the seed commit is per flow and not one run-level value: a flow dir
+    that already holds a repo keeps that repo's HEAD, so the two flows of one run
+    can legitimately differ."""
+    case = _seeded_case(tmp_path, flows=TWO_FLOWS, workspace=Workspace(git=True))
+    stale = tmp_path / case.name / "r" / TWO_FLOWS[0]["name"]
+    stale.mkdir(parents=True)
+    (stale / "already.txt").write_text("from an earlier run")
+    for args in (
+        ["init", "-q"],
+        ["config", "user.email", "prior@example.com"],
+        ["config", "user.name", "prior"],
+        ["add", "-A"],
+        ["commit", "-q", "-m", "an earlier run"],
+    ):
+        _git(stale, *args)
+    prior_head = _git(stale, "rev-parse", "HEAD")
+    mfd, ms, rj = n_run_factories(["A"])
+
+    result = await run_case(
+        case, run_id="r", make_flow_driver=mfd, make_simulator=ms, run_judge=rj, runs_root=tmp_path
+    )
+
+    meta = json.loads((Path(result["run_root"]) / "run.json").read_text())
+    stats = meta["flow_stats"]
+    assert stats[TWO_FLOWS[0]["name"]]["seed_commit"] == prior_head
+    assert stats[TWO_FLOWS[1]["name"]]["seed_commit"] != prior_head
 
 
 async def test_untouched_seeded_deliverable_counts_as_missing(tmp_path):

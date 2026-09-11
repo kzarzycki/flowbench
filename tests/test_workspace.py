@@ -184,8 +184,18 @@ def test_seeding_ignores_inherited_git_env(tmp_path, monkeypatch):
     # A scrub that only special-cases GIT_DIR/GIT_WORK_TREE still leaks
     # GIT_INDEX_FILE: nested's add/commit then stage into the OUTER index while
     # writing blobs into nested's object store — outer's commit count stays 1,
-    # but its index now references blobs outer cannot resolve.
+    # but its index now references blobs outer cannot resolve. Compare the index
+    # bytes BEFORE running any other git command against outer: `status` itself
+    # refreshes the index's stat data and makes the byte-compare self-defeating.
     assert outer_index.read_bytes() == outer_index_before
+    status = subprocess.run(
+        ["git", "-C", str(outer), "status", "--porcelain"],
+        check=True,
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+    assert status.stdout == ""
 
 
 def test_existing_repo_is_not_recommitted(tmp_path):

@@ -103,8 +103,9 @@ async def run_case(
     probe, no grace-poll and no `artifact_missing`/`artifact_lines` in `run.json`.
 
     Each flow dir is materialized from `case.workspace` before `case.setup` runs
-    — the seed tree and, if declared, the repo holding it — and what was
-    materialized is recorded in `run.json` under `workspace`.
+    — the seed tree and, if declared, the repo holding it. `run.json` records the
+    declaration under `workspace` and each flow dir's seed commit under
+    `flow_stats[<flow>].seed_commit`.
 
     `case.score(flow, flow_dir, session)` runs after each flow's session and its
     result is written to `<flow_dir>/scorecard.json`; `None` writes no scorecard,
@@ -130,7 +131,7 @@ async def run_case(
     run_root = root / case.name / run_id
     run_root.mkdir(parents=True, exist_ok=True)
 
-    workspace_record: dict | None = None
+    workspace_declared: dict | None = None
     views: dict[str, str] = {}
     delivered: dict[str, bool] = {}
     transcripts: dict[str, str] = {}
@@ -144,7 +145,12 @@ async def run_case(
         try:
             # The declared workspace, before anything else touches the flow dir:
             # a case that overrides `setup` must not be able to lose it.
-            workspace_record = seed_workspace(case.workspace, case.case_dir, flow_dir)
+            seeded = seed_workspace(case.workspace, case.case_dir, flow_dir)
+            seed_commit = seeded.pop("seed_commit")
+            # What is left of the record is the declaration, identical for every
+            # flow by construction; the commit is the one part that is a fact
+            # about THIS flow dir, so it is recorded per flow.
+            workspace_declared = seeded
             await case.setup(flow, flow_dir)
             driver = make_flow_driver(flow, flow_dir)
             simulator = make_simulator(flow, sim_dir)
@@ -188,6 +194,7 @@ async def run_case(
                     deliverable_stats["artifact_lines"] = len((text or "").splitlines())
                 deliverable_stats["deliverable_path"] = deliverable_path
             flow_stats[name] = {
+                "seed_commit": seed_commit,
                 "exit_status": session.get("exit_status"),
                 "turns": session.get("turns"),
                 "duration_s": session.get("duration_s"),
@@ -228,9 +235,11 @@ async def run_case(
         "run_id": run_id,
         "case": case.name,
         "deliverable": case.deliverable,
-        # One value for the run: the declaration is the case's and the seed commit
-        # is pinned, so every flow dir was materialized identically.
-        "workspace": workspace_record,
+        # The declaration only — the case's, so one value for the run. Each flow
+        # dir's actual seed commit is `flow_stats[<flow>].seed_commit`: a flow dir
+        # that already held a repo keeps that repo's HEAD, so a single run-level
+        # SHA could be a lie about some other flow.
+        "workspace": workspace_declared,
         "flows": names,
         "labels": labels,  # {"A": flow_name, ...} — judge-facing, this trial only
         "rotation": rotation,

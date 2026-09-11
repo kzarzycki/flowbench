@@ -107,27 +107,37 @@ would silently change the workspace, which is exactly the defect the declaration
 The seed commit is made with the fixed identity `agent-eval <agent-eval@example.com>`, the
 message `chore: seed workspace`, signing off, and **pinned author and committer dates**
 (`SEED_COMMIT_DATE`), so one declaration produces one SHA in every flow dir and every run.
-That is why the record below is one value for the run rather than one per flow. An empty
-declaration with `git=True` commits nothing (`--allow-empty`) instead of inventing a
-`.gitkeep` the case never declared.
+The operator's own git config is neutralised for the same reason — signing off, hooks off,
+`core.autocrlf` off — since a hook-rewritten message or a rewritten line ending moves the
+SHA the pinned dates exist to fix. An empty declaration with `git=True` commits nothing
+(`--allow-empty`) instead of inventing a `.gitkeep` the case never declared.
 
-`run.json` records what was materialized, under `workspace`:
+`run.json` records what was materialized, each fact where it is true:
 
-| Key | Meaning |
-| --- | --- |
-| `seed` | the declared directory name, or `null` |
-| `git` | whether a repo was declared |
-| `seed_files` | how many files the seed tree holds |
-| `seed_commit` | the seed commit's SHA, or `null` when no repo was declared |
+| Where | Key | Meaning |
+| --- | --- | --- |
+| `workspace` | `seed` | the declared directory name, or `null` |
+| `workspace` | `git` | whether a repo was declared |
+| `workspace` | `seed_files` | how many files the seed tree holds |
+| `flow_stats[<flow>]` | `seed_commit` | that flow dir's seed commit, or `null` with no repo |
 
-**A seeded file is not a deliverable.** `find_deliverable` drops any candidate that exists
-in the seed tree and still matches it byte for byte — the flow did not produce it — and it
+The declaration is the case's, so it is one value for the run. The commit is a fact about
+one flow dir: seeding a dir that already holds a repo keeps that repo's `HEAD`, so a single
+run-level SHA could be a lie about some other flow.
+
+**A seeded file is not a deliverable.** `find_deliverable` drops any candidate FILE that
+exists in the seed tree and still matches it byte for byte — the flow did not produce it — and it
 drops them *before* the shallowest-first pick, so an untouched shallow copy cannot hide a
 modified deeper one. The comparison is against `<case_dir>/<seed>/<relpath>`, the tree that
 is already on disk and versioned with the case, so it needs no manifest and holds for a
-`git=False` declaration too. A scorer that wants to diff the whole workspace against its
-starting point uses `run.json`'s `workspace.seed_commit`, which inside a flow dir is the
-repo's root commit.
+`git=False` declaration too. A **directory** deliverable is never dropped: answering the
+question for one means reading both trees whole, and the directory shape exists precisely
+because a ported project is too large to copy. No case declares a directory its own seed
+also contains; the day one does is the day to pay for the tree compare.
+
+A scorer that wants to diff the whole workspace against its starting point uses
+`run.json`'s `flow_stats[<flow>].seed_commit`, which inside that flow dir is the repo's
+root commit.
 
 ## Two load-time errors
 

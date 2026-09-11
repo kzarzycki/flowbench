@@ -104,9 +104,22 @@ def _seed_commit(flow_dir: Path) -> str:
         env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
         env["GIT_AUTHOR_DATE"] = env["GIT_COMMITTER_DATE"] = SEED_COMMIT_DATE
         return subprocess.run(
-            # commit.gpgsign off: a signature would make the SHA depend on the
-            # operator's key, which is the opposite of the pinned dates' point.
-            ["git", "-c", "commit.gpgsign=false", "-C", str(flow_dir), *args],
+            # Neutralise the operator's own git config, which would otherwise
+            # reach into the seed: a signature or a hook-rewritten message moves
+            # the SHA the pinned dates exist to fix, and autocrlf rewrites the
+            # seeded bytes that `find_deliverable` compares against.
+            [
+                "git",
+                "-c",
+                "commit.gpgsign=false",
+                "-c",
+                "core.hooksPath=",
+                "-c",
+                "core.autocrlf=false",
+                "-C",
+                str(flow_dir),
+                *args,
+            ],
             check=True,
             capture_output=True,
             text=True,
@@ -158,9 +171,11 @@ class Case:
         root, else its first nested hit (a subagent's cwd, say), else nothing.
         A case that declares no deliverable never has one.
 
-        A candidate that is still the seed, byte for byte, is not a deliverable:
-        the flow did not produce it. Seeded candidates are dropped BEFORE the
-        pick, so an untouched shallow copy cannot hide a modified deeper one.
+        A candidate FILE that is still the seed, byte for byte, is not a
+        deliverable: the flow did not produce it. Seeded candidates are dropped
+        BEFORE the pick, so an untouched shallow copy cannot hide a modified
+        deeper one. A directory deliverable is never dropped — see
+        `_is_untouched_seed`.
 
         The nested pick is ordered — shallowest, then lexicographic — not
         `rglob`'s first yield, which follows `os.scandir` and so varies by
@@ -184,10 +199,16 @@ class Case:
         return matches[0] if matches else None
 
     def _is_untouched_seed(self, flow_dir: Path, path: Path) -> bool:
-        """Did this path come from the seed and stay identical to it? The seed
+        """Did this FILE come from the seed and stay identical to it? The seed
         tree is already on disk in the case folder, versioned with the case, so
         the comparison needs no manifest and no repo — it holds for a `git=False`
-        declaration too."""
+        declaration too.
+
+        Files only, deliberately. Answering it for a directory means reading both
+        trees whole, and the directory deliverable exists precisely because a
+        ported project is too large to copy (see "Deliverable semantics"). No case
+        declares a directory that its own seed also contains; the day one does,
+        that is the trigger to pay for the tree compare."""
         seed = self.workspace.seed
         if seed is None:
             return False
