@@ -5,7 +5,7 @@ re-measured on 2026-09-11, the rest of the document is as of the date above.
 
 ## Inventory
 
-**Engine** (`src/flowbench/`, ~1,060 lines on 2026-07-06; ~2,100 after S01.1 on 2026-09-07; 3,037 on 2026-09-11):
+**Engine** (`src/flowbench/`, ~1,060 lines on 2026-07-06; ~2,100 after S01.1 on 2026-09-07; 3,042 on 2026-09-11):
 
 | Module | Lines | Role |
 | --- | --- | --- |
@@ -23,7 +23,7 @@ re-measured on 2026-09-11, the rest of the document is as of the date above.
 | `transcript.py` | 144 | message-item helpers + `render_transcript` (S01.1) |
 | `model.py` | 52 | `SessionModel` simulator/judge shim: one `send`, raise on a non-idle or empty turn, wrap |
 | `flowspec.py` | 36 | flows.yaml loading, kickoff composition (S01.1) |
-| `loop.py` | 169 | mediated DONE-token loop (no nudges since #67: the driver waits out busy children); moved out of `runner/` in S02.2 |
+| `loop.py` | 174 | mediated DONE-token loop (no nudges since #67: the driver waits out busy children); moved out of `runner/` in S02.2 |
 | `report/compare.py` | 102 | side-by-side scorecard table; metric paths hardcoded to todo_app's schema |
 | `cli.py` | 133 | typer app: `run` (a case dir), `watch` (a run id), `compare` (S03.2) |
 | `case.py` | 213 | `Case`, `load_case`, `check_gradable` — a case is a folder (S03.2) |
