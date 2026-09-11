@@ -14,7 +14,7 @@ import shutil
 import string
 from pathlib import Path
 
-from flowbench.case import check_gradable
+from flowbench.case import check_gradable, seed_workspace
 from flowbench.driver import OmnigentDriver
 from flowbench.flowspec import compose_kickoff, load_flows
 from flowbench.loop import run_agent_session
@@ -102,6 +102,10 @@ async def run_case(
     deliverable (a build-shaped one like todo_app, judged black-box) gets no
     probe, no grace-poll and no `artifact_missing`/`artifact_lines` in `run.json`.
 
+    Each flow dir is materialized from `case.workspace` before `case.setup` runs
+    — the seed tree and, if declared, the repo holding it — and what was
+    materialized is recorded in `run.json` under `workspace`.
+
     `case.score(flow, flow_dir, session)` runs after each flow's session and its
     result is written to `<flow_dir>/scorecard.json`; `None` writes no scorecard,
     and a raised exception is recorded as `{"error": ...}` for that flow instead
@@ -126,6 +130,7 @@ async def run_case(
     run_root = root / case.name / run_id
     run_root.mkdir(parents=True, exist_ok=True)
 
+    workspace_record: dict | None = None
     views: dict[str, str] = {}
     delivered: dict[str, bool] = {}
     transcripts: dict[str, str] = {}
@@ -137,6 +142,9 @@ async def run_case(
         sim_dir = run_root / f"_sim_{name}"
         sim_dir.mkdir(parents=True, exist_ok=True)
         try:
+            # The declared workspace, before anything else touches the flow dir:
+            # a case that overrides `setup` must not be able to lose it.
+            workspace_record = seed_workspace(case.workspace, case.case_dir, flow_dir)
             await case.setup(flow, flow_dir)
             driver = make_flow_driver(flow, flow_dir)
             simulator = make_simulator(flow, sim_dir)
@@ -220,6 +228,9 @@ async def run_case(
         "run_id": run_id,
         "case": case.name,
         "deliverable": case.deliverable,
+        # One value for the run: the declaration is the case's and the seed commit
+        # is pinned, so every flow dir was materialized identically.
+        "workspace": workspace_record,
         "flows": names,
         "labels": labels,  # {"A": flow_name, ...} — judge-facing, this trial only
         "rotation": rotation,
