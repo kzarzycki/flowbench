@@ -1,6 +1,6 @@
 # A flow = a whole approach: which skills the agent has, everything else equal.
 # Order defines nothing here — this case has no comparative judge (each flow is
-# scored on its own, see scoring.py) — kept baseline-first for `compare` column
+# scored on its own, see case.py) — kept baseline-first for `compare` column
 # order.
 flows:
   - name: baseline

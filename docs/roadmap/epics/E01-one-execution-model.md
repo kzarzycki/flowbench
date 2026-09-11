@@ -69,7 +69,7 @@ Source of truth today: `flowbench-scenarios/scenarios/swe_planning/`. Mapping:
   comparable with historical runs.
 - Delete `eval.py`, `solver.py`, and the Inspect scorer decorators; add a
   `python -m scenarios.coding_workflow.run --case todo_app` entrypoint mirroring
-  swe_planning's (replaced by `flowbench run` in S03.3).
+  swe_planning's (replaced by `flowbench run` in S03.2).
 - Keep `task.py`'s simulator-profile and UNDERSPECIFIED_TOPICS content — move the prose
   into the case files, keep the keyword dict in scorers.
 - Verify: V1 (scorer tests run against the canned sessions in `fixtures/sessions.py`);

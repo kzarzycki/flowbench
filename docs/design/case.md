@@ -40,10 +40,13 @@ class is a complete case.
 | `validate() -> list[str]` | flow names | the flow names in `flows.yaml` order; reading the file *is* the validation |
 | `find_deliverable(flow_dir) -> Path \| None` | see below | the probe the loop polls after DONE and once more after capture |
 
-`setup.sh`/`teardown.sh` see `FLOW_NAME` and `FLOW_DIR` in the environment; a non-zero exit
-raises. Two more members exist for the loader, not for cases to call: `judge_path`
-(`<case_dir>/judge.md`) and `has_score_override()`, which compares `type(self).score` against
-the base method — `score` is a real method, so nothing else can tell.
+`setup.sh`/`teardown.sh` see `FLOW_NAME` and `FLOW_DIR` on top of the runner's own
+environment; a non-zero exit raises. They do **not** see `.env`: `Settings` reads that file
+into itself, not into `os.environ`, so a script that needs a credential from `.env` must be
+given it by the environment the runner was launched with. Two more members exist for the
+loader, not for cases to call: `judge_path` (`<case_dir>/judge.md`) and
+`has_score_override()`, which compares `type(self).score` against the base method — `score`
+is a real method, so nothing else can tell.
 
 ## Discovery
 

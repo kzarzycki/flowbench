@@ -1,31 +1,32 @@
 # Current state (2026-07-06)
 
-What exists, what works, what is debt. Line counts are `wc -l` on that date.
+What exists, what works, what is debt. Line counts are `wc -l`; the engine table below was
+re-measured on 2026-09-11, the rest of the document is as of the date above.
 
 ## Inventory
 
-**Engine** (`src/flowbench/`, ~1,060 lines on 2026-07-06; ~2,100 after S01.1 on 2026-09-07):
+**Engine** (`src/flowbench/`, ~1,060 lines on 2026-07-06; ~2,100 after S01.1 on 2026-09-07; 3,037 on 2026-09-11):
 
 | Module | Lines | Role |
 | --- | --- | --- |
-| `driver/omnigent.py` | 484 | `OmnigentDriver`: session lifecycle, send/settle/retry, capture, URLs, `git_init_repo` (S02.2). Above the epic's ~350 target: #68/#76 grew the settle machinery after the epic was written, and S02.3 is where the rest goes — see E02 S02.2 |
+| `driver/omnigent.py` | 559 | `OmnigentDriver`: session lifecycle, send/settle/retry, capture, URLs, `git_init_repo` (S02.2). Above the epic's ~350 target: #68/#76 grew the settle machinery after the epic was written, and S02.3 is where the rest goes — see E02 S02.2 |
 | `driver/bundle.py` | 142 | `render_config` / `build_bundle` / `session_metadata` as pure functions of a `BundleSpec` protocol (S02.2) |
-| `driver/base.py` | 34 | `AgentDriver` ABC (S02.2) |
+| `driver/base.py` | 30 | `AgentDriver` ABC (S02.2) |
 | `driver/__init__.py` | 29 | the package's public surface |
 | `runner/driver.py` | 24 | compat re-export, one release (S02.2) |
 | `runner/loop.py` | 22 | compat re-export, one release (S02.2) |
 | `types.py` | 57 | `TurnStatus` (`StrEnum`), `TurnResult`, `UserModel`/`Completion` protocols — the engine's turn-outcome vocabulary (S02.1) |
-| `run.py` | 493 | `run_case`/`run_case_n`/`rescore_run` orchestrator over a `Case` + omnigent factories (S01.1 lifted from swe_planning, `Case`-taking since S03.2) |
-| `report/run_report.py` | 259 | run dir → report.html, single + aggregate (S01.1) |
-| `testing.py` | 112 | offline doubles: FakeDriver, StubSim, ScriptedDriver, n_run_factories (S01.1) |
-| `watch.py` | 100 | `RunWatch` live-run anomaly scanner (S01.1) |
-| `transcript.py` | 106 | message-item helpers + `render_transcript` (S01.1) |
+| `run.py` | 500 | `run_case`/`run_case_n`/`rescore_run` orchestrator over a `Case` + omnigent factories (S01.1 lifted from swe_planning, `Case`-taking since S03.2) |
+| `report/run_report.py` | 291 | run dir → report.html, single + aggregate (S01.1) |
+| `testing.py` | 113 | offline doubles: FakeDriver, StubSim, ScriptedDriver, n_run_factories (S01.1) |
+| `watch.py` | 203 | `RunWatch` live-run anomaly scanner (S01.1) |
+| `transcript.py` | 144 | message-item helpers + `render_transcript` (S01.1) |
 | `model.py` | 52 | `SessionModel` simulator/judge shim: one `send`, raise on a non-idle or empty turn, wrap |
 | `flowspec.py` | 36 | flows.yaml loading, kickoff composition (S01.1) |
-| `loop.py` | 110 | mediated DONE-token loop (no nudges since #67: the driver waits out busy children); moved out of `runner/` in S02.2 |
-| `report/compare.py` | 91 | side-by-side scorecard table; metric paths hardcoded to todo_app's schema |
+| `loop.py` | 169 | mediated DONE-token loop (no nudges since #67: the driver waits out busy children); moved out of `runner/` in S02.2 |
+| `report/compare.py` | 102 | side-by-side scorecard table; metric paths hardcoded to todo_app's schema |
 | `cli.py` | 133 | typer app: `run` (a case dir), `watch` (a run id), `compare` (S03.2) |
-| `case.py` | 188 | `Case`, `load_case`, `check_gradable` — a case is a folder (S03.2) |
+| `case.py` | 213 | `Case`, `load_case`, `check_gradable` — a case is a folder (S03.2) |
 | `settings.py` | 41 | layered `Settings`: `runs_root`, `sim_model`, `judge_model` (S03.2) |
 | `runner/judge.py` | 142 | `last_json_object` (string-aware) + prose verdict/scores parsing, aggregation (S01.1) |
 | `runner/flow.py` | 34 | frozen `Flow` dataclass (bundle fields only) |

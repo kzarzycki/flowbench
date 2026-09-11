@@ -148,9 +148,14 @@ async def run_agent_session(
         # session. `idle` answered neither question: 50 of 69 recorded sessions
         # ended `idle` and the record could not say whether the simulator or the
         # cap stopped them. A non-idle terminal status is checked first — a
-        # crashed session is not a completed one, whatever the simulator said —
-        # and, being `TurnStatus | str`, is compared with `!=` and stringified
-        # with `str()` so an undocumented server status passes through verbatim.
+        # crashed session is not a completed one, whatever the simulator said.
+        # Today that ordering cannot actually be exercised: the loop breaks on a
+        # non-idle turn before consulting the simulator, so `done` implies the
+        # last turn was `idle` and the two branches never compete. It is the
+        # guard for a loop that one day re-sends after a done claim, not a
+        # precedence the current control flow reaches. Being `TurnStatus | str`,
+        # the status is compared with `!=` and stringified with `str()` so an
+        # undocumented server status passes through verbatim.
         if result.status != TurnStatus.IDLE:
             session["ended_by"] = str(result.status)
         elif done:
