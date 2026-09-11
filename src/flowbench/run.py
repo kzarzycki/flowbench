@@ -120,8 +120,10 @@ async def run_case(
     r = rotation % len(flows)
     flows = flows[r:] + flows[:r]
 
-    root = runs_root if runs_root is not None else case.settings.runs_root
-    run_root = Path(root) / case.name / run_id
+    # Resolved once, here: every dir below this root is handed to omnigent as a
+    # session workspace, and the server rejects one that is not absolute (#155).
+    root = Path(runs_root if runs_root is not None else case.settings.runs_root).resolve()
+    run_root = root / case.name / run_id
     run_root.mkdir(parents=True, exist_ok=True)
 
     views: dict[str, str] = {}
@@ -305,8 +307,8 @@ async def run_case_n(
         score_means = aggregate_scores([_name_keyed_scores(t) for t in trials])
     else:
         counts, winner, score_means = {}, None, {}
-    root = runs_root if runs_root is not None else case.settings.runs_root
-    run_root = Path(root) / case.name / run_id
+    root = Path(runs_root if runs_root is not None else case.settings.runs_root).resolve()
+    run_root = root / case.name / run_id
     aggregate_meta = {
         "run_id": run_id,
         "case": case.name,
@@ -347,7 +349,9 @@ async def rescore_run(case, run_root) -> dict[str, str]:
     it is recorded as a `KeyError` like any other scorer failure — rescoring
     against a config that no longer matches the run would be worse than a
     recorded error."""
-    run_root = Path(run_root)
+    # A scorer may start a grader session off `flow_dir` (todo_app does), and that
+    # workspace has to be absolute — same rule as `run_case`'s root (#155).
+    run_root = Path(run_root).resolve()
     flows_by_name = {f["name"]: f for f in load_flows(case.case_dir / "flows.yaml")}
 
     results: dict[str, str] = {}

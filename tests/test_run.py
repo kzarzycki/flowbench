@@ -138,6 +138,74 @@ async def test_runs_root_defaults_to_settings(tmp_path):
     assert Path(result["run_root"]) == tmp_path / "from-settings" / "feature_flag_service" / "r"
 
 
+async def test_a_relative_runs_root_is_absolute_before_any_factory_sees_it(tmp_path, monkeypatch):
+    """A run dir becomes an omnigent session workspace, and the server rejects one
+    that is not absolute (#155). Every other test here passes an already-absolute
+    `tmp_path`, which is why the broken default shipped: this one is relative."""
+    monkeypatch.chdir(tmp_path)
+    seen: list[Path] = []
+
+    def _capturing(mfd, ms):
+        def make_flow_driver(flow, flow_dir):
+            seen.append(Path(flow_dir))
+            return mfd(flow, flow_dir)
+
+        def make_simulator(flow, sim_dir):
+            seen.append(Path(sim_dir))
+            return ms(flow, sim_dir)
+
+        return make_flow_driver, make_simulator
+
+    # the settings layer — the path the default `runs_root=Path("runs")` takes
+    case = load_case(CASE_DIR, Settings(runs_root=Path("runs")))
+    mfd, ms, rj = n_run_factories(["A"])
+    mfd, ms = _capturing(mfd, ms)
+
+    result = await run_case(
+        case, run_id="rel", make_flow_driver=mfd, make_simulator=ms, run_judge=rj
+    )
+
+    assert seen and all(d.is_absolute() for d in seen), seen
+    assert Path(result["run_root"]) == tmp_path / "runs" / "feature_flag_service" / "rel"
+
+    # and the explicit relative argument, which no settings layer touches
+    seen.clear()
+    mfd, ms, rj = n_run_factories(["A"])
+    mfd, ms = _capturing(mfd, ms)
+
+    result = await run_case(
+        load_case(CASE_DIR),
+        run_id="rel-arg",
+        make_flow_driver=mfd,
+        make_simulator=ms,
+        run_judge=rj,
+        runs_root=Path("runs"),
+    )
+
+    assert seen and all(d.is_absolute() for d in seen), seen
+    assert Path(result["run_root"]) == tmp_path / "runs" / "feature_flag_service" / "rel-arg"
+
+
+async def test_run_case_n_aggregate_lands_under_an_absolute_run_root(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    mfd, ms, rj = n_run_factories(["A", "A"])
+
+    result = await run_case_n(
+        load_case(CASE_DIR),
+        run_id="rel-n",
+        n=2,
+        make_flow_driver=mfd,
+        make_simulator=ms,
+        run_judge=rj,
+        runs_root=Path("runs"),
+    )
+
+    run_root = Path(result["run_root"])
+    assert run_root.is_absolute()
+    assert run_root == tmp_path / "runs" / "feature_flag_service" / "rel-n"
+    assert (run_root / "run.json").is_file()
+
+
 async def test_case_budgets_reach_the_loop_and_done_token_does_not(tmp_path, monkeypatch):
     retired = {"done_token", "artifact_name", "score_flow", "max_turns", "deadline_s", "scenario"}
     assert retired.isdisjoint(inspect.signature(run_case).parameters)

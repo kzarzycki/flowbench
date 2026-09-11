@@ -160,7 +160,7 @@ Three settings, resolved by one layered object (`flowbench.settings.Settings`, p
 
 | Setting | Flag | Default |
 | --- | --- | --- |
-| `runs_root` | `--runs-root` | `runs` (relative to the cwd; gitignored here) |
+| `runs_root` | `--runs-root` | `runs` (resolved against the cwd; gitignored here) |
 | `sim_model` | `--sim-model` | `opus` |
 | `judge_model` | `--judge-model` | `opus` |
 

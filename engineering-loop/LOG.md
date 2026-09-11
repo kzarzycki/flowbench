@@ -213,3 +213,18 @@ Cross-session memory for both repos — flowbench (engine) and flowbench-scenari
 - Live gate on the merged engine, `FLOWBENCH_RUNS_ROOT` exported for runner *and* watcher (a watcher pointed at the default `runs/` reports an empty run): `smoke/hello` `s137-hello-2` 23.4 s against AC23's 150 s bound, `ended_by: done`, acceptance 1.0; `swe_e2e/cases/todo_app` `s137-todo` both flows `ended_by: done`, 12 turns, acceptance 1.0, `app_runs` true; `swe_planning/cases/smoke_todo_app` `s137-plan` claude and plain both `idle` with `plan.md` (11 turns/112 lines, 3 turns/73 lines), codex `failed` at 0 turns and recorded in `artifact_missing` — codex is out by owner instruction and that column was accepted as a known exception, so the judge's three-way ran as a two-way.
 - Cheap-model validation (#148 dropped both todo_app flows to haiku for cost), and it reads differently per case. `todo_app` is degenerate: haiku fired zero `Skill` calls in either flow, so `superpowers_used` is false on both columns and `workflow_adherence` is *lower* for superpowers (0.55) than baseline (0.65) — that run proves the engine drives a case end to end and ranks nothing (#156). `smoke_todo_app` still separated: the bundled flow fired `claude_code:brainstorming` from the bundle and won 5/5/4/5/5 against the plain flow's 4/2/2/4/1 on 11 turns against 3. Neither case or scorer was tuned, per the owner's directive.
 - Follow-ups filed, none fixed here: #156 (degenerate haiku comparison), #157 (a flow's skills should load from the workspace by convention, not only from the bundle), #158 (a case declares its starting workspace — seed repo in, hardcoded `git_init_repo` out), #153 (the ledger rule points an engine-side story at a repo with no ledger).
+
+## 2026-09-11 — flowbench#155 the run root is absolute before anything becomes a workspace (PR #164)
+- `flowbench run <case>` with the default `runs_root=Path("runs")` died in `OmnigentDriver.start()`
+  with `workspace must be an absolute path starting with /` — the onboarding §7 command, i.e. a new
+  developer's first live run, from the commit that introduced it (`b5eabeb`). `run_case`/`run_case_n`
+  now resolve `root` where the run dir is born, so the default, all four settings layers, the
+  `--runs-root` flag and the `runs_root=` argument are all covered at one site.
+- Gate 3 caught the half the issue missed: `--rescore` *does* start sessions — `rescore_run` hands
+  `flow_dir` to `case.score`, and todo_app's scorer builds `_judge_<flow>` beside it and drives an
+  OmnigentDriver there, so `rescore_run` resolves its own root too. `watch` stays relative on purpose
+  (it only globs). A guard belongs wherever a path becomes a workspace, not only at the default.
+- The suite missed a whole class of bug because every offline test passes an already-absolute
+  `tmp_path`: a regression test for a path bug has to `monkeypatch.chdir` and pass a RELATIVE one.
+- Live `hello/s155-live-1` (the §7 command verbatim, no `.env`, no flag): idle, 2 turns, 33.8 s,
+  acceptance 1.0, `run.json` and the deliverable landed.

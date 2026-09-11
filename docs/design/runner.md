@@ -231,8 +231,9 @@ per-flow instead) skips the stage entirely: no `_judge/` dir, no `report.html`, 
 run nothing could grade fails without spending a session.
 
 **Run layout.** `<runs_root>/<case.name>/<run_id>`, `runs_root` falling back to
-`case.settings.runs_root`; `run_case_n` with `n > 1` adds `trial-XX/` under it and writes an
-aggregate `run.json`. With no judge across all trials the aggregate is
+`case.settings.runs_root` and resolved to an absolute path there, because every dir below it is
+handed to omnigent as a session workspace; `run_case_n` with `n > 1` adds `trial-XX/` under it
+and writes an aggregate `run.json`. With no judge across all trials the aggregate is
 `{"counts": {}, "winner": None}` rather than tallying `None` as a flow name. Every session label
 is read back off that layout (`_run_parts`/`_title`/`_project`): the web-UI project is
 `<case>/<run_id>` and a title carries the case and, under `n > 1`, the trial — nothing a caller
