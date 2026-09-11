@@ -1,7 +1,7 @@
 """`scenarios/smoke/hello` — the smallest case that still exercises the whole
-engine: one flow per drivable harness, one deliverable, one simulator relay each,
-and the case's own `score`. Offline throughout (the three omnigent factories are
-doubles over `flowbench.testing`), so this doubles as the end-to-end guard that
+engine: one flow, one deliverable, one simulator relay, and the case's own
+`score`. Offline throughout (the three omnigent factories are doubles over
+`flowbench.testing`), so this doubles as the end-to-end guard that
 `flowbench run` → `compare` → `watch` still work over one run dir.
 """
 
@@ -83,7 +83,7 @@ def _doubles(sims, drivers):
 def test_case_files_and_shape():
     for name in FILES:
         assert (CASE_DIR / name).is_file(), name
-    assert not (CASE_DIR / "judge.md").exists()  # no comparison: score grades each flow
+    assert not (CASE_DIR / "judge.md").exists()  # one flow: score grades it
 
     case = load_case(CASE_DIR)
     # Discovery loads case.py by path, so the class is never the imported one:
@@ -93,13 +93,10 @@ def test_case_files_and_shape():
     assert case.deliverable == "hello.txt"
     assert (case.max_turns, case.deadline_s) == (4, 300.0)
     assert case.has_score_override()
-    assert case.validate() == ["claude", "agy"]
+    assert case.validate() == ["claude"]
 
-    claude, agy = load_flows(CASE_DIR / "flows.yaml")
-    assert (claude["harness"], claude["model"]) == ("claude-native", "haiku")
-    assert (agy["harness"], agy["model"]) == ("antigravity-native", "gemini-3.8-flash-low")
-    # The agy bridge carries neither, so the flow must not claim them (#149).
-    assert "skills" not in agy and "reasoning_effort" not in agy
+    (flow,) = load_flows(CASE_DIR / "flows.yaml")
+    assert (flow["harness"], flow["model"]) == ("claude-native", "haiku")
 
     # the task withholds both facts and says to ask; knowledge.md holds them
     task = (CASE_DIR / "task.md").read_text().lower()
@@ -124,35 +121,31 @@ def test_hello_runs_end_to_end_offline(tmp_path, monkeypatch):
     meta = json.loads((run_root / "run.json").read_text())
     assert meta["case"] == "hello"
     assert meta["deliverable"] == "hello.txt"
-    assert meta["flows"] == ["claude", "agy"]
+    assert meta["flows"] == ["claude"]
     assert "scenario" not in meta
 
-    # Every flow gets its own simulator: the prime carries the persona, the
-    # knowledge and the engine's done token; the relay carries only the agent's
-    # new line. Both reach the simulator, once per flow.
-    assert len(sims) == 2
-    for sim in sims:
-        prime, relay = sim.prompts
-        assert "role-playing" in prime and DONE_TOKEN in prime
-        assert "hello.txt" in prime  # knowledge.md rode in behind the persona
-        assert relay == f"[assistant] {WROTE}"
+    # the prime carried the persona, the knowledge and the engine's done token;
+    # the relay carried only the agent's new line — both reached the simulator.
+    (sim,) = sims
+    prime, relay = sim.prompts
+    assert "role-playing" in prime and DONE_TOKEN in prime
+    assert "hello.txt" in prime  # knowledge.md rode in behind the persona
+    assert relay == f"[assistant] {WROTE}"
 
-    for name in ("claude", "agy"):
-        session = json.loads((run_root / name / "session.json").read_text())
-        assert session["ended_by"] == "done", name
-        assert session["turns"] == 1, name  # the agent asked, was answered, delivered
-        assert session["artifact_exists"] is True, name
-        assert (run_root / name / "hello.txt").read_text() == "Hello, world!\n"
-        card = json.loads((run_root / name / "scorecard.json").read_text())
-        assert card["objective"]["acceptance"] == 1.0, name
+    session = json.loads((run_root / "claude" / "session.json").read_text())
+    assert session["ended_by"] == "done"
+    assert session["turns"] == 1  # one relay: the agent asked, was answered, delivered
+    assert session["artifact_exists"] is True
+    assert (run_root / "claude" / "hello.txt").read_text() == "Hello, world!\n"
+    card = json.loads((run_root / "claude" / "scorecard.json").read_text())
+    assert card["objective"]["acceptance"] == 1.0
 
     compared = runner.invoke(
         app, ["compare", "--run-base", str(runs_root / "hello"), "--run-id", "smoke-1"]
     )
     assert compared.exit_code == 0, compared.output
-    # `compare` reads the run dir, so its columns are sorted, not flows.yaml order.
-    assert "| metric | agy | claude |" in compared.stdout
-    assert "| acceptance | 1.0 | 1.0 |" in compared.stdout
+    assert "| metric | claude |" in compared.stdout
+    assert "| acceptance | 1.0 |" in compared.stdout
 
     watched = runner.invoke(app, ["watch", "smoke-1", "--runs-root", str(runs_root)])
     assert watched.exit_code == 0, watched.output

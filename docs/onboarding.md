@@ -105,14 +105,16 @@ agy one. A harness the host reports as `"binary-missing"` does not count. That i
 readiness check worth running:
 
 ```bash
-curl -s http://127.0.0.1:6767/v1/hosts | python3 -m json.tool | less   # or:
+curl -s http://127.0.0.1:6767/v1/hosts | python3 -m json.tool | less   # or, per harness:
+HARNESS=claude-native   # antigravity-native for an agy flow
 curl -s http://127.0.0.1:6767/v1/hosts \
-  | python3 -c 'import json,sys;print([(h["status"],h["configured_harnesses"].get("claude-native")) for h in json.load(sys.stdin)["hosts"]])'
+  | HARNESS=$HARNESS python3 -c 'import json,os,sys;h=os.environ["HARNESS"];print([(x["status"],x["configured_harnesses"].get(h)) for x in json.load(sys.stdin)["hosts"]])'
 ```
 
-You want `('online', True)`. Anything else and the run dies at `start()` with
-`no online host with claude-native configured` — which is also what you get if the machine
-sleeps mid-run (the host daemon drops off).
+You want `('online', True)`. Anything else — including `'binary-missing'`, which is truthy but
+not a working harness — and the run dies at `start()` with
+`no online host with <harness> configured`, naming the harness the flow asked for. That is also
+what you get if the machine sleeps mid-run (the host daemon drops off).
 
 There is **no health or version endpoint**: unknown paths return the web UI with HTTP 200, so
 `/healthz`-style probes always "pass". Use `/v1/hosts`.

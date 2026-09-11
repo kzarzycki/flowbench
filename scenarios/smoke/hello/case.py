@@ -13,11 +13,10 @@ from flowbench.case import Case
 
 
 class HelloCase(Case):
-    """`score` is what grades each flow — there is no `judge.md`, because the
-    flows here are one per harness the engine can drive, not rival approaches to
-    compare. The budget is tight on purpose: a greeting that needs a fifth turn
-    or five minutes is a broken engine, not a slow agent, and a gate should say
-    so fast."""
+    """One flow, so `score` is what grades it — a lone flow with no override is a
+    load error — and there is no `judge.md` to compare against. The budget is
+    tight on purpose: a greeting that needs a fifth turn or five minutes is a
+    broken engine, not a slow agent, and a gate should say so fast."""
 
     deliverable = "hello.txt"
     max_turns = 4
