@@ -13,7 +13,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8.0", "pytest-asyncio>=0.23", "ruff>=0.15.22", "pytest-cov>=5", "diff-cover>=9"]
+dev = ["pytest>=8.0", "pytest-asyncio>=0.23", "ruff>=0.16.6", "pytest-cov>=5", "diff-cover>=9"]
 # the omnigent runtime for live runs: drive a real coding agent under omnigent.
 # Optional + heavy (omnigent pulls ~64 deps, needs Node>=22, tmux):
 #   uv sync --extra dev --extra live
