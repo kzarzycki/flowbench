@@ -158,6 +158,10 @@ class Case:
         root, else its first nested hit (a subagent's cwd, say), else nothing.
         A case that declares no deliverable never has one.
 
+        A candidate that is still the seed, byte for byte, is not a deliverable:
+        the flow did not produce it. Seeded candidates are dropped BEFORE the
+        pick, so an untouched shallow copy cannot hide a modified deeper one.
+
         The nested pick is ordered — shallowest, then lexicographic — not
         `rglob`'s first yield, which follows `os.scandir` and so varies by
         filesystem. Two nested copies is ordinary (a subagent's working dir holds
@@ -167,13 +171,31 @@ class Case:
             return None
         flow_dir = Path(flow_dir)
         top = flow_dir / self.deliverable
-        if top.exists():
+        if top.exists() and not self._is_untouched_seed(flow_dir, top):
             return top
         matches = sorted(
-            flow_dir.rglob(self.deliverable),
+            (
+                p
+                for p in flow_dir.rglob(self.deliverable)
+                if not self._is_untouched_seed(flow_dir, p)
+            ),
             key=lambda p: (len(p.relative_to(flow_dir).parts), p.as_posix()),
         )
         return matches[0] if matches else None
+
+    def _is_untouched_seed(self, flow_dir: Path, path: Path) -> bool:
+        """Did this path come from the seed and stay identical to it? The seed
+        tree is already on disk in the case folder, versioned with the case, so
+        the comparison needs no manifest and no repo — it holds for a `git=False`
+        declaration too."""
+        seed = self.workspace.seed
+        if seed is None:
+            return False
+        original = self.case_dir / seed / path.relative_to(flow_dir)
+        try:
+            return original.is_file() and original.read_bytes() == path.read_bytes()
+        except OSError:
+            return False
 
     async def setup(self, flow, flow_dir) -> None:
         """Runs the case folder's `setup.sh` when it has one."""
