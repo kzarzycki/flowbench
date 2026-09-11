@@ -228,3 +228,12 @@ Cross-session memory for both repos — flowbench (engine) and flowbench-scenari
   `tmp_path`: a regression test for a path bug has to `monkeypatch.chdir` and pass a RELATIVE one.
 - Live `hello/s155-live-1` (the §7 command verbatim, no `.env`, no flag): idle, 2 turns, 33.8 s,
   acceptance 1.0, `run.json` and the deliverable landed.
+
+## 2026-09-11 — flowbench#158 a case declares its starting workspace (PR #165)
+- `Case.workspace: Workspace(seed, git)` + `seed_workspace(workspace, case_dir, flow_dir)`, called by `run_case` for every flow BEFORE `case.setup` — a case that overrides `setup` must not be able to lose its workspace, which is exactly how the old `TodoAppCase.setup` hid "starts in a repo". `git_init_repo` is deleted from `flowbench.driver` and both cases declare instead.
+- The empty declaration is first-class: no repo unless the case asked for one, and `git=True` with no seed commits nothing (`--allow-empty`) rather than inventing a `.gitkeep` no case declared.
+- The seed commit is pinned — fixed dates, fixed identity, signing/hooks/autocrlf off — so one declaration is one SHA everywhere; `tests/test_workspace.py` anchors it as a literal. Gate 3 was right that the operator's own git config, not just `GIT_*`, can move it.
+- `find_deliverable` drops a candidate FILE that still matches the seed byte for byte, filtered BEFORE the shallowest-first pick. Files only, stated as a contract: a directory compare means reading both trees whole, which is the cost the directory deliverable exists to avoid.
+- Record each fact where it is true: `run.json.workspace` = the declaration (one per run), `flow_stats[<flow>].seed_commit` = that dir's commit. A flow dir that already holds a repo keeps its `HEAD`, so one run-level SHA would be a lie about another flow — gate 3 found this; the approved spec had it wrong.
+- Follow-ups filed, not smuggled in: a seed from a pinned remote ref, and flipping `todo_app` to no-repo so "did the agent init a repo" becomes a scored signal.
+- Live `hello/s158-40e98a2` on the branch head: 1 turn, 23.7 s, acceptance 1.0, `.git` present with the anchored seed commit, 0 prompts, 0 stalls.
