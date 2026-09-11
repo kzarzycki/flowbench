@@ -349,7 +349,9 @@ async def rescore_run(case, run_root) -> dict[str, str]:
     it is recorded as a `KeyError` like any other scorer failure — rescoring
     against a config that no longer matches the run would be worse than a
     recorded error."""
-    run_root = Path(run_root)
+    # A scorer may start a grader session off `flow_dir` (todo_app does), and that
+    # workspace has to be absolute — same rule as `run_case`'s root (#155).
+    run_root = Path(run_root).resolve()
     flows_by_name = {f["name"]: f for f in load_flows(case.case_dir / "flows.yaml")}
 
     results: dict[str, str] = {}

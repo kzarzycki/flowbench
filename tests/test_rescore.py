@@ -184,6 +184,24 @@ async def _orchestrated_run(tmp_path, run_id: str) -> Path:
     return Path(result["run_root"])
 
 
+async def test_rescore_hands_the_scorer_an_absolute_flow_dir(tmp_path, monkeypatch):
+    """A scorer may start its own omnigent grader off `flow_dir` (todo_app does),
+    and the server rejects a workspace that is not absolute (#155). So a relative
+    run root has to be resolved before `case.score` sees it."""
+    run_root = await _orchestrated_run(tmp_path, "rel-rescore")
+    monkeypatch.chdir(tmp_path)
+    seen: list[Path] = []
+
+    async def score_flow(flow, flow_dir, session):
+        seen.append(Path(flow_dir))
+        return {"flow": flow["name"], "pass": 1}
+
+    result = await rescore_run(_case(score_flow), run_root.relative_to(tmp_path))
+
+    assert result == {"superpowers": "ok", "plain": "ok"}
+    assert seen and all(d.is_absolute() for d in seen), seen
+
+
 async def test_rescore_rewrites_from_disk_without_touching_sessions(tmp_path):
     run_root = await _orchestrated_run(tmp_path, "orchestrated")
     before = {
