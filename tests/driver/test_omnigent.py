@@ -1350,10 +1350,18 @@ class _FakeHttp:
                 {
                     "host_id": "h1",
                     "status": "offline",
-                    "configured_harnesses": {"claude-native": 1},
+                    "configured_harnesses": {"claude-native": True},
                 },
-                {"host_id": "h2", "status": "online", "configured_harnesses": {"codex-native": 1}},
-                {"host_id": "h3", "status": "online", "configured_harnesses": {"claude-native": 1}},
+                {
+                    "host_id": "h2",
+                    "status": "online",
+                    "configured_harnesses": {"codex-native": True},
+                },
+                {
+                    "host_id": "h3",
+                    "status": "online",
+                    "configured_harnesses": {"claude-native": True},
+                },
             ]
         )
         self.posts = []
@@ -1471,6 +1479,93 @@ async def test_start_raises_when_no_host_has_claude_native(tmp_path, monkeypatch
     d = OmnigentDriver(run_dir=tmp_path / "run")
     with pytest.raises(RuntimeError, match="no online host with claude-native"):
         await d.start()
+
+
+# --- host resolution reads the driver's own harness (#149) ------------------
+
+
+def _host(host_id, harness, *, status="online", configured=True):
+    return {
+        "host_id": host_id,
+        "status": status,
+        "configured_harnesses": {harness: configured},
+    }
+
+
+def _resolver(tmp_path, hosts, **kw):
+    d = OmnigentDriver(run_dir=tmp_path, **kw)
+    d._http = _FakeHttp(hosts=hosts)
+    return d
+
+
+async def test_resolve_host_matches_the_drivers_harness(tmp_path):
+    """The live bug: the reference host advertises BOTH harnesses, so a lookup
+    that names claude-native hands an agy flow a host it never checked."""
+    d = _resolver(
+        tmp_path,
+        [_host("claude_box", "claude-native"), _host("agy_box", "antigravity-native")],
+        harness="antigravity-native",
+    )
+    assert await d._resolve_host() == "agy_box"
+
+
+async def test_resolve_host_skips_a_host_without_the_harness(tmp_path):
+    d = _resolver(tmp_path, [_host("claude_box", "claude-native")], harness="antigravity-native")
+    with pytest.raises(RuntimeError):
+        await d._resolve_host()
+
+
+async def test_resolve_host_error_names_the_missing_harness(tmp_path):
+    d = _resolver(tmp_path, [_host("claude_box", "claude-native")], harness="antigravity-native")
+    with pytest.raises(RuntimeError) as excinfo:
+        await d._resolve_host()
+    assert "antigravity-native" in str(excinfo.value)
+    assert "claude-native" not in str(excinfo.value)
+
+
+async def test_resolve_host_rejects_a_binary_missing_harness(tmp_path):
+    """`configured_harnesses` carries `true`, `false` AND the diagnostic string
+    `"binary-missing"`, which is truthy. Six harnesses are in that state on the
+    reference host; none of them can launch a session."""
+    d = _resolver(
+        tmp_path,
+        [_host("box", "pi-native", configured="binary-missing")],
+        harness="pi-native",
+    )
+    with pytest.raises(RuntimeError):
+        await d._resolve_host()
+
+
+async def test_resolve_host_skips_an_offline_host_running_the_harness(tmp_path):
+    d = _resolver(
+        tmp_path,
+        [_host("down", "antigravity-native", status="offline")],
+        harness="antigravity-native",
+    )
+    with pytest.raises(RuntimeError):
+        await d._resolve_host()
+
+
+async def test_resolve_host_still_finds_claude_native(tmp_path):
+    """The rename changed nothing for the default path: _FakeHttp's hosts are
+    offline-claude, online-codex, online-claude, and h3 is the only match."""
+    d = OmnigentDriver(run_dir=tmp_path)
+    d._http = _FakeHttp()
+    assert await d._resolve_host() == "h3"
+
+
+async def test_start_launches_a_non_claude_harness(tmp_path, monkeypatch):
+    """Through start(), not the helper: a correct _resolve_host left unwired at
+    the call site passes every test above and still cannot run an agy flow."""
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    _, launched = _patch_start(
+        monkeypatch, _FakeHttp(hosts=[_host("agy_box", "antigravity-native")])
+    )
+    d = OmnigentDriver(
+        run_dir=tmp_path / "run", harness="antigravity-native", model="gemini-3.8-flash-low"
+    )
+    await d.start()
+    assert launched["args"][0] == "agy_box"
 
 
 # --- the paths the file's move pulled into diff-cover's scope ----------------

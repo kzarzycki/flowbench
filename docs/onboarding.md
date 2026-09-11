@@ -99,8 +99,10 @@ your shell ─ uv run --extra live flowbench run <case_dir>
 
 ## 3. Is it ready? Ask the same question the driver asks
 
-`OmnigentDriver._resolve_claude_host` needs one host that is online **and** has the
-`claude-native` harness configured. That is the only readiness check worth running:
+`OmnigentDriver._resolve_host` needs one host that is online **and** reports the flow's
+harness as exactly `true` — `claude-native` for a default flow, `antigravity-native` for an
+agy one. A harness the host reports as `"binary-missing"` does not count. That is the only
+readiness check worth running:
 
 ```bash
 curl -s http://127.0.0.1:6767/v1/hosts | python3 -m json.tool | less   # or:

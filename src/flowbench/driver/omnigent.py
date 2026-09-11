@@ -201,7 +201,7 @@ class OmnigentDriver(AgentDriver):
         self._http = httpx.AsyncClient(base_url=self.server_url, timeout=60.0)
         self._client = OmnigentClient(base_url=self.server_url)
 
-        host_id = await self._resolve_claude_host()
+        host_id = await self._resolve_host()
         agent_bundle = self._build_bundle()
 
         # Create with --disallowedTools so claude asks in plain text (the card
@@ -240,15 +240,24 @@ class OmnigentDriver(AgentDriver):
         )
         await wait_for_runner_online(self._http, self._runner_id, timeout_s=90)
 
-    async def _resolve_claude_host(self) -> str:
+    async def _resolve_host(self) -> str:
+        """The online host that runs THIS driver's harness. `harness` is a flow
+        field, so the lookup reads it rather than naming one: a host that is
+        online but does not run `self.harness` is not a host for this flow.
+
+        `is True`, not truthiness: a host reports each harness as `true`, `false`
+        or a diagnostic STRING (`"binary-missing"`, six of them on the reference
+        host), and the string is truthy — a loose test would launch the session
+        at a harness whose binary is absent."""
         resp = await self._http.get(f"{self.server_url}/v1/hosts")
         resp.raise_for_status()
         for h in resp.json().get("hosts", []):
-            if h.get("status") == "online" and h.get("configured_harnesses", {}).get(
-                "claude-native"
+            if (
+                h.get("status") == "online"
+                and h.get("configured_harnesses", {}).get(self.harness) is True
             ):
                 return h["host_id"]
-        raise RuntimeError("no online host with claude-native configured")
+        raise RuntimeError(f"no online host with {self.harness} configured")
 
     async def send(self, text: str) -> TurnResult:
         # ONE wall-clock budget per send: the soft checks below pre-empt every wait
