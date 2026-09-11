@@ -160,7 +160,7 @@ Three settings, resolved by one layered object (`flowbench.settings.Settings`, p
 
 | Setting | Flag | Default |
 | --- | --- | --- |
-| `runs_root` | `--runs-root` | `runs` (resolved against the cwd; gitignored here) |
+| `runs_root` | `--runs-root` | the sibling `<checkout>/../flowbench-runs/` |
 | `sim_model` | `--sim-model` | `opus` |
 | `judge_model` | `--judge-model` | `opus` |
 
@@ -170,10 +170,13 @@ the default. A flag you did not pass never shadows a lower layer. Budgets are *n
 `max_turns` and `deadline_s` belong to the case (`case.py`), because a cap the flow can or cannot
 live inside is a variable of the benchmark, not of the machine.
 
-Point `runs_root` **outside the repo** — the convention is a sibling
-`<launching checkout>/../flowbench-runs/` (`$RUNS` in tracked docs), set once in the launching
-repo's `[tool.flowbench]` or exported as `FLOWBENCH_RUNS_ROOT`; record the concrete path in your
-untracked `CLAUDE.local.md`, per the no-per-developer-paths policy. Inside it, a run is
+Run-dirs land **outside the repo** by default (`$RUNS` in tracked docs): beside the checkout that
+launches the run, where the checkout is the nearest ancestor of the cwd holding a `.git` entry — a
+directory in a clone, a file in a worktree. A loop worktree (`../flowbench--issue-N`) is a sibling
+of its checkout, so both write to the same `flowbench-runs/`, and `git worktree remove` at the end
+of an item cannot delete a live-gate run. With no checkout above the cwd (an installed wheel) the
+cwd is the anchor. Override per machine with `[tool.flowbench]`, `FLOWBENCH_RUNS_ROOT` or
+`--runs-root`. Inside it, a run is
 `<runs_root>/<case>/<run_id>` (plus `trial-XX/` when `--n > 1`) — a plain folder of files
 (`run.json`, `<flow>/scorecard.json`, transcripts): every reader in this repo reads them, nothing
 wraps execution.
