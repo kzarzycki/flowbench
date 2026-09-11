@@ -12,8 +12,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from flowbench.case import Case
-from flowbench.driver import OmnigentDriver, git_init_repo
+from flowbench.case import Case, Workspace
+from flowbench.driver import OmnigentDriver
 from flowbench.model import SessionModel
 from flowbench.run import _project, _title
 from scenarios.swe_e2e.cases.todo_app import scorers as sc
@@ -104,14 +104,10 @@ class TodoAppCase(Case):
 
     deliverable = None
     deadline_s = 3600.0
+    # The workflow flows branch and commit, so the flow dir starts as a repo. No
+    # seed tree: the agent builds the app from nothing, in a repo it already has.
+    workspace = Workspace(git=True)
     grader_factory = staticmethod(make_grader_omni)
-
-    async def setup(self, flow, flow_dir) -> None:
-        """The workflow flows branch and commit, so the flow dir starts as a repo
-        with something in it."""
-        flow_dir = Path(flow_dir)
-        if not (flow_dir / ".git").exists():
-            git_init_repo(flow_dir)
 
     async def score(self, flow, flow_dir, session) -> dict:
         # Through the class, never `self.`: a test patching the attribute with a

@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from flowbench.case import load_case
+from flowbench.case import Workspace, load_case, seed_workspace
 from flowbench.settings import Settings
 from scenarios.swe_e2e.cases.todo_app.case import make_grader_omni, score_todo_app
 from scenarios.swe_e2e.cases.todo_app.fixtures import sessions
@@ -63,26 +63,35 @@ def test_discovery_finds_the_case_and_its_shape():
     assert case.validate() == ["baseline", "superpowers"]
 
 
-async def test_todo_app_case_setup_git_inits_the_flow_dir(tmp_path):
+def test_todo_app_case_declares_a_git_workspace(tmp_path):
+    """The repo is a declaration now, not a line of setup code (#158): the engine
+    materializes it, so `setup` no longer has to."""
     case = load_case(CASE_DIR)
     flow_dir = tmp_path / "superpowers"
-    flow_dir.mkdir()
 
-    await case.setup({"name": "superpowers"}, flow_dir)
+    assert case.workspace == Workspace(git=True)
+
+    seed_workspace(case.workspace, case.case_dir, flow_dir)
+
+    def commits() -> str:
+        out = subprocess.run(
+            ["git", "-C", str(flow_dir), "rev-list", "--count", "HEAD"],
+            capture_output=True,
+            text=True,
+            check=True,
+            # Scrub GIT_* the way the seeding does (#49, #159): run from a git hook
+            # — the pre-push suite — and an inherited GIT_DIR points this count at
+            # the outer repo, which passes `check=True` against the wrong history.
+            env={k: v for k, v in os.environ.items() if not k.startswith("GIT_")},
+        )
+        return out.stdout.strip()
 
     assert (flow_dir / ".git").is_dir()
-    log = subprocess.run(
-        ["git", "-C", str(flow_dir), "log", "--oneline"],
-        capture_output=True,
-        text=True,
-        check=True,
-        # Scrub GIT_* the way git_init_repo does (#49): run from a git hook — the
-        # pre-push suite — and an inherited GIT_DIR points this log at the outer
-        # repo, which passes `check=True` and asserts against the wrong history.
-        env={k: v for k, v in os.environ.items() if not k.startswith("GIT_")},
-    )
-    assert "initial commit" in log.stdout
-    await case.setup({"name": "superpowers"}, flow_dir)  # idempotent: a re-run must not fail
+    assert commits() == "1"
+
+    seed_workspace(case.workspace, case.case_dir, flow_dir)  # idempotent: a re-run adds no commit
+
+    assert commits() == "1"
 
 
 async def test_todo_app_case_score_uses_the_settings_judge_model(tmp_path, monkeypatch):
