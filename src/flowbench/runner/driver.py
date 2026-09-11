@@ -10,7 +10,6 @@ from flowbench.driver import (
     OmnigentDriver,
     TurnResult,
     TurnStatus,
-    git_init_repo,
 )
 from flowbench.driver.omnigent import _PAGE
 
@@ -20,5 +19,4 @@ __all__ = [
     "TurnResult",
     "TurnStatus",
     "_PAGE",
-    "git_init_repo",
 ]

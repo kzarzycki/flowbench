@@ -17,7 +17,7 @@ and `flowbench.runner.loop` re-export the old names for one release.
 | --- | --- |
 | `base.py` | `AgentDriver` ABC |
 | `bundle.py` | `render_config` / `build_bundle` / `session_metadata` — pure functions of a `BundleSpec` |
-| `omnigent.py` | `OmnigentDriver`: lifecycle, send/settle, capture, URLs, `git_init_repo` |
+| `omnigent.py` | `OmnigentDriver`: lifecycle, send/settle, capture, URLs |
 
 - `AgentDriver` (ABC): `start / send / capture_session / close`.
   All spawning goes through implementations of this seam; scenarios and tests

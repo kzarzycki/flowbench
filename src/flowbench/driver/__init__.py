@@ -12,7 +12,7 @@ from flowbench.driver.bundle import (
     render_config,
     session_metadata,
 )
-from flowbench.driver.omnigent import OmnigentDriver, git_init_repo
+from flowbench.driver.omnigent import OmnigentDriver
 from flowbench.types import TurnResult, TurnStatus
 
 __all__ = [
@@ -23,7 +23,6 @@ __all__ = [
     "TurnResult",
     "TurnStatus",
     "build_bundle",
-    "git_init_repo",
     "render_config",
     "session_metadata",
 ]

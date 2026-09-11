@@ -100,29 +100,6 @@ _now = time.monotonic  # clock seam: the budget tests drive a fake one; never pa
 # time.monotonic itself (asyncio uses it)
 
 
-def git_init_repo(path: Path) -> None:
-    """Init a git repo with an initial commit so the workflow can branch/commit."""
-    import subprocess
-
-    path.mkdir(parents=True, exist_ok=True)
-
-    def run(*a: str):
-        # scrub GIT_* (a git hook calling us exports GIT_DIR/GIT_WORK_TREE/... that
-        # would redirect this nested git at the outer repo, #49)
-        env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
-        return subprocess.run(
-            ["git", "-C", str(path), *a], check=True, capture_output=True, text=True, env=env
-        )
-
-    run("init", "-q")
-    # local identity so commits don't depend on global git config
-    run("config", "user.email", "agent-eval@example.com")
-    run("config", "user.name", "agent-eval")
-    (path / ".gitkeep").write_text("")
-    run("add", "-A")
-    run("commit", "-q", "-m", "chore: initial commit (agent-eval run-dir)")
-
-
 @dataclass
 class OmnigentDriver(AgentDriver):
     """Drives a real `claude` REPL via a local omnigent server.

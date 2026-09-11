@@ -9,7 +9,7 @@ landed.
 
 from __future__ import annotations
 
-from flowbench.case import Case
+from flowbench.case import Case, Workspace
 
 
 class HelloCase(Case):
@@ -21,6 +21,10 @@ class HelloCase(Case):
     deliverable = "hello.txt"
     max_turns = 4
     deadline_s = 300.0
+    # A repo and nothing else. This case is the engine's live gate, so the gate
+    # covers workspace materialization; an empty commit adds no content the agent
+    # has to reason about.
+    workspace = Workspace(git=True)
 
     async def score(self, flow, flow_dir, session) -> dict:
         """Did the file arrive, and does it greet? Presence is the session's

@@ -18,7 +18,7 @@ import flowbench.loop
 import flowbench.runner.driver
 import flowbench.runner.loop
 
-_DRIVER_NAMES = ("AgentDriver", "OmnigentDriver", "TurnResult", "TurnStatus", "git_init_repo")
+_DRIVER_NAMES = ("AgentDriver", "OmnigentDriver", "TurnResult", "TurnStatus")
 _LOOP_NAMES = ("run_agent_session", "render_tail", "prime_prompt", "relay_prompt", "_is_done")
 
 

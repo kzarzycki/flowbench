@@ -9,7 +9,7 @@ import pytest
 import yaml
 
 import flowbench.run as run_mod
-from flowbench.case import Case, load_case
+from flowbench.case import Case, Workspace, load_case
 from flowbench.loop import DONE_TOKEN
 from flowbench.run import (
     MISSING_DELIVERABLE,
@@ -234,6 +234,159 @@ async def test_case_budgets_reach_the_loop_and_done_token_does_not(tmp_path, mon
     assert all(kwargs["max_turns"] == 7 for kwargs in calls)
     assert all(kwargs["deadline_s"] == 12.0 for kwargs in calls)
     assert all("done_token" not in kwargs for kwargs in calls)
+
+
+# --- the starting workspace ---------------------------------------------------
+
+
+def _git(flow_dir: Path, *args: str) -> str:
+    import os
+    import subprocess
+
+    env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+    out = subprocess.run(
+        ["git", "-C", str(flow_dir), *args], check=True, capture_output=True, text=True, env=env
+    )
+    return out.stdout.strip()
+
+
+def _seeded_case(tmp_path, *, flows, workspace, base=PlanCase, seed_files=None, **attrs):
+    """A two-flow case folder that declares `workspace`, with its seed tree."""
+    case_dir = _case_files(tmp_path / "seeded_case", flows=flows)
+    for rel, body in (seed_files or {}).items():
+        p = case_dir / "seed" / rel
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(body)
+    return type("WorkspaceCase", (base,), {"workspace": workspace, **attrs})(case_dir)
+
+
+async def test_default_case_gets_no_repo(tmp_path):
+    """The empty declaration is a declaration: the engine inits nothing."""
+    case = load_case(CASE_DIR)
+    mfd, ms, rj = n_run_factories(["A"])
+
+    result = await run_case(
+        case, run_id="r", make_flow_driver=mfd, make_simulator=ms, run_judge=rj, runs_root=tmp_path
+    )
+
+    root = Path(result["run_root"])
+    for name in result["meta"]["flows"]:
+        assert not (root / name / ".git").exists()
+    meta = json.loads((root / "run.json").read_text())
+    assert meta["workspace"] == {"seed": None, "git": False, "seed_files": 0}
+    assert all(meta["flow_stats"][n]["seed_commit"] is None for n in meta["flows"])
+
+
+async def test_setup_sees_the_seeded_workspace(tmp_path):
+    """Order: the workspace is materialized BEFORE `Case.setup`, so a case that
+    overrides setup cannot lose it."""
+    seen = []
+
+    async def setup(self, flow, flow_dir):
+        seen.append((flow_dir / "a.txt").read_text())
+
+    case = _seeded_case(
+        tmp_path,
+        flows=TWO_FLOWS,
+        workspace=Workspace(seed="seed"),
+        seed_files={"a.txt": "alpha"},
+        setup=setup,
+    )
+    mfd, ms, rj = n_run_factories(["A"])
+
+    await run_case(
+        case, run_id="r", make_flow_driver=mfd, make_simulator=ms, run_judge=rj, runs_root=tmp_path
+    )
+
+    assert seen == ["alpha", "alpha"]
+
+
+async def test_run_json_records_the_workspace(tmp_path):
+    case = _seeded_case(
+        tmp_path,
+        flows=TWO_FLOWS,
+        workspace=Workspace(seed="seed", git=True),
+        seed_files={"a.txt": "alpha", "pkg/b.py": "print('b')\n"},
+    )
+    mfd, ms, rj = n_run_factories(["A"])
+
+    result = await run_case(
+        case, run_id="r", make_flow_driver=mfd, make_simulator=ms, run_judge=rj, runs_root=tmp_path
+    )
+
+    root = Path(result["run_root"])
+    meta = json.loads((root / "run.json").read_text())
+    assert meta["workspace"]["seed"] == "seed"
+    assert meta["workspace"]["git"] is True
+    assert meta["workspace"]["seed_files"] == 2
+    assert "seed_commit" not in meta["workspace"]  # a per-flow fact, recorded per flow
+    # Each flow dir's own HEAD, and one SHA across them — the pinned dates' point.
+    heads = {_git(root / name, "rev-parse", "HEAD") for name in meta["flows"]}
+    recorded = {meta["flow_stats"][name]["seed_commit"] for name in meta["flows"]}
+    assert heads == recorded
+    assert len(recorded) == 1
+
+
+async def test_a_pre_existing_repo_records_its_own_head(tmp_path):
+    """Why the seed commit is per flow and not one run-level value: a flow dir
+    that already holds a repo keeps that repo's HEAD, so the two flows of one run
+    can legitimately differ."""
+    case = _seeded_case(tmp_path, flows=TWO_FLOWS, workspace=Workspace(git=True))
+    stale = tmp_path / case.name / "r" / TWO_FLOWS[0]["name"]
+    stale.mkdir(parents=True)
+    (stale / "already.txt").write_text("from an earlier run")
+    for args in (
+        ["init", "-q"],
+        ["config", "user.email", "prior@example.com"],
+        ["config", "user.name", "prior"],
+        ["add", "-A"],
+        ["commit", "-q", "-m", "an earlier run"],
+    ):
+        _git(stale, *args)
+    prior_head = _git(stale, "rev-parse", "HEAD")
+    mfd, ms, rj = n_run_factories(["A"])
+
+    result = await run_case(
+        case, run_id="r", make_flow_driver=mfd, make_simulator=ms, run_judge=rj, runs_root=tmp_path
+    )
+
+    meta = json.loads((Path(result["run_root"]) / "run.json").read_text())
+    stats = meta["flow_stats"]
+    assert stats[TWO_FLOWS[0]["name"]]["seed_commit"] == prior_head
+    assert stats[TWO_FLOWS[1]["name"]]["seed_commit"] != prior_head
+
+
+async def test_untouched_seeded_deliverable_counts_as_missing(tmp_path):
+    """A seeded plan.md the flow never touched is not delivery."""
+    case = _seeded_case(
+        tmp_path,
+        flows=TWO_FLOWS,
+        workspace=Workspace(seed="seed"),
+        seed_files={"plan.md": "# seeded plan\n"},
+    )
+
+    def make_flow_driver(flow, flow_dir):
+        return FakeDriver("unused", [], run_dir=None)  # writes nothing
+
+    mfd, ms, rj = n_run_factories(["A"])
+
+    result = await run_case(
+        case,
+        run_id="r",
+        make_flow_driver=make_flow_driver,
+        make_simulator=ms,
+        run_judge=rj,
+        runs_root=tmp_path,
+        artifact_grace_s=0.1,
+    )
+
+    root = Path(result["run_root"])
+    meta = json.loads((root / "run.json").read_text())
+    assert sorted(meta["artifact_missing"]) == sorted(meta["flows"])
+    for name in meta["flows"]:
+        session = json.loads((root / name / "session.json").read_text())
+        assert session["artifact_exists"] is False
+        assert (root / name / "plan.md").read_text() == "# seeded plan\n"  # still the seed
 
 
 # --- the two load-time errors ------------------------------------------------

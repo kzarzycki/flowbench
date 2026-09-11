@@ -8,7 +8,14 @@ from pathlib import Path
 
 import pytest
 
-from flowbench.case import SCENARIOS_DIR, Case, load_case, scenarios_root
+from flowbench.case import (
+    SCENARIOS_DIR,
+    Case,
+    Workspace,
+    load_case,
+    scenarios_root,
+    seed_workspace,
+)
 from flowbench.settings import Settings
 
 CASE_PY = """\
@@ -392,6 +399,62 @@ def test_find_deliverable_picks_the_shallowest_nested_match_then_lexically(tmp_p
     found = C(tmp_path).find_deliverable(flow)
     assert found is not None
     assert found.relative_to(flow).as_posix() == "a/plan.md"  # depth 2 beats depth 3; a beats z
+
+
+def _seeded(tmp_path, deliverable, seed_files):
+    """A case declaring `deliverable` and a `seed/` tree, plus its flow dir."""
+    case_dir = tmp_path / "case"
+    for rel, body in seed_files.items():
+        p = case_dir / "seed" / rel
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(body)
+    cls = type(
+        "Seeded",
+        (Case,),
+        {"deliverable": deliverable, "workspace": Workspace(seed="seed")},
+    )
+    return cls(case_dir), tmp_path / "flow"
+
+
+def test_untouched_seeded_deliverable_is_not_found(tmp_path):
+    """The seed is not delivery: a file the engine put there, unchanged, must not
+    score as this flow's work."""
+    case, flow = _seeded(tmp_path, "out.txt", {"out.txt": "seeded\n"})
+    seed_workspace(case.workspace, case.case_dir, flow)
+
+    assert case.find_deliverable(flow) is None
+
+
+def test_modified_seeded_deliverable_is_found(tmp_path):
+    case, flow = _seeded(tmp_path, "out.txt", {"out.txt": "seeded\n"})
+    seed_workspace(case.workspace, case.case_dir, flow)
+
+    (flow / "out.txt").write_text("seeded\nauthored\n")
+
+    assert case.find_deliverable(flow) == flow / "out.txt"
+
+
+def test_nested_seed_copy_is_skipped_for_a_modified_deeper_one(tmp_path):
+    """The seed filter runs BEFORE the shallowest-first pick: filtering after it
+    would answer None here, because the shallow candidate is the untouched seed."""
+    case, flow = _seeded(tmp_path, "out.txt", {"sub/out.txt": "seeded\n"})
+    seed_workspace(case.workspace, case.case_dir, flow)
+    deep = flow / "deep" / "nested" / "out.txt"
+    deep.parent.mkdir(parents=True)
+    deep.write_text("authored\n")
+
+    assert case.find_deliverable(flow) == deep
+
+
+def test_a_candidate_the_seed_cannot_be_compared_against_is_not_seeded(tmp_path):
+    """The seed holds `out.txt` as a file and the flow dir holds a DIRECTORY of
+    that name: reading it raises `IsADirectoryError`. An unreadable candidate is
+    not evidence that it is the seed, so the probe answers it, never crashes."""
+    case, flow = _seeded(tmp_path, "out.txt", {"out.txt": "seeded\n"})
+    flow.mkdir()
+    (flow / "out.txt").mkdir()
+
+    assert case.find_deliverable(flow) == flow / "out.txt"
 
 
 def test_an_edited_case_py_is_never_served_from_stale_bytecode(tmp_path):

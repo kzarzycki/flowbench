@@ -12,15 +12,130 @@ import hashlib
 import importlib.util
 import os
 import re
+import shutil
 import subprocess
 import sys
 from collections.abc import Iterator
+from dataclasses import dataclass
 from pathlib import Path
 
 from flowbench.flowspec import load_flows
 from flowbench.settings import Settings
 
 SCENARIOS_DIR = "scenarios"
+
+# Pinned so the seed commit is a function of the DECLARATION alone: the same
+# workspace seeds to the same SHA in every flow dir and every run, which is what
+# lets one run-level record in run.json be true for all of them.
+SEED_COMMIT_DATE = (
+    "2020-01-01T00:00:00Z"  # the form git echoes back, so a test can compare literally
+)
+SEED_COMMIT_MESSAGE = "chore: seed workspace"
+
+
+@dataclass(frozen=True)
+class Workspace:
+    """What a flow's working directory contains before the agent's first turn.
+
+    The default is the EMPTY declaration — an empty directory and no repo — and
+    it is a declaration, not a missing one: the engine creates no repo a case did
+    not ask for, so whether an agent sets up version control itself stays an
+    observable rather than a precondition.
+
+    `git` is the whole of "what history" an in-repo seed can express: one commit
+    holding exactly the seed. Richer history needs a cloned ref, which brings a
+    network, a cache and credentials with it — a different subsystem.
+    """
+
+    seed: str | None = None  # a directory inside the case folder, copied in
+    git: bool = False  # the tree is a repo whose single commit is the seed
+
+
+def seed_workspace(workspace: Workspace, case_dir, flow_dir) -> dict:
+    """Materialize `workspace` in `flow_dir` and answer what was done.
+
+    The single seeding step: everything the framework puts in the workspace goes
+    through here, against this one declaration, and is recorded the same way.
+    Nothing beyond the declaration is implied — an empty `Workspace()` leaves an
+    empty directory with no repo.
+
+    Answers `{"seed", "git", "seed_files", "seed_commit"}`, which `run_case`
+    writes to `run.json`."""
+    case_dir = Path(case_dir).resolve()
+    flow_dir = Path(flow_dir)
+    flow_dir.mkdir(parents=True, exist_ok=True)
+
+    seed_files = 0
+    if workspace.seed is not None:
+        src = _seed_dir(workspace.seed, case_dir)
+        shutil.copytree(src, flow_dir, dirs_exist_ok=True)
+        seed_files = sum(1 for p in src.rglob("*") if p.is_file())
+
+    seed_commit = _seed_commit(flow_dir) if workspace.git else None
+    return {
+        "seed": workspace.seed,
+        "git": workspace.git,
+        "seed_files": seed_files,
+        "seed_commit": seed_commit,
+    }
+
+
+def _seed_dir(seed: str, case_dir: Path) -> Path:
+    """The seed tree, or a `ValueError` naming the case folder and the value. A
+    seed is versioned WITH the case, so a path outside the case folder is a
+    declaration the case cannot carry, not a convenience."""
+    src = (case_dir / seed).resolve()
+    if not src.is_relative_to(case_dir):
+        raise ValueError(f"{case_dir}: workspace seed {seed!r} escapes the case folder")
+    if not src.exists():
+        raise ValueError(f"{case_dir}: workspace seed {seed!r} does not exist")
+    if not src.is_dir():
+        raise ValueError(f"{case_dir}: workspace seed {seed!r} is not a directory")
+    return src
+
+
+def _seed_commit(flow_dir: Path) -> str:
+    """Make the seed commit if there is no repo yet, and answer HEAD either way."""
+
+    def run(*args: str) -> subprocess.CompletedProcess:
+        # Scrub GIT_* before adding our own: a caller that is itself a git hook
+        # exports GIT_DIR/GIT_WORK_TREE/GIT_INDEX_FILE pointing at the OUTER repo,
+        # which would redirect this nested git at it (#49).
+        env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+        env["GIT_AUTHOR_DATE"] = env["GIT_COMMITTER_DATE"] = SEED_COMMIT_DATE
+        return subprocess.run(
+            # Neutralise the operator's own git config, which would otherwise
+            # reach into the seed: a signature or a hook-rewritten message moves
+            # the SHA the pinned dates exist to fix, and autocrlf rewrites the
+            # seeded bytes that `find_deliverable` compares against.
+            [
+                "git",
+                "-c",
+                "commit.gpgsign=false",
+                "-c",
+                "core.hooksPath=",
+                "-c",
+                "core.autocrlf=false",
+                "-C",
+                str(flow_dir),
+                *args,
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+            env=env,
+        )
+
+    if not (flow_dir / ".git").exists():
+        run("init", "-q")
+        # Local identity, so the commit does not depend on the operator's git config.
+        run("config", "user.email", "agent-eval@example.com")
+        run("config", "user.name", "agent-eval")
+        run("add", "-A")
+        # --allow-empty: an empty declaration commits nothing rather than inventing
+        # a .gitkeep the case never declared and every scorer must learn to ignore.
+        run("commit", "-q", "--allow-empty", "-m", SEED_COMMIT_MESSAGE)
+    return run("rev-parse", "HEAD").stdout.strip()
 
 
 class Case:
@@ -30,6 +145,7 @@ class Case:
     deliverable: str | None = None
     max_turns: int = 80
     deadline_s: float = 1800.0
+    workspace: Workspace = Workspace()
 
     def __init__(self, case_dir, settings: Settings | None = None):
         self.case_dir = Path(case_dir).resolve()
@@ -55,6 +171,12 @@ class Case:
         root, else its first nested hit (a subagent's cwd, say), else nothing.
         A case that declares no deliverable never has one.
 
+        A candidate FILE that is still the seed, byte for byte, is not a
+        deliverable: the flow did not produce it. Seeded candidates are dropped
+        BEFORE the pick, so an untouched shallow copy cannot hide a modified
+        deeper one. A directory deliverable is never dropped — see
+        `_is_untouched_seed`.
+
         The nested pick is ordered — shallowest, then lexicographic — not
         `rglob`'s first yield, which follows `os.scandir` and so varies by
         filesystem. Two nested copies is ordinary (a subagent's working dir holds
@@ -64,13 +186,37 @@ class Case:
             return None
         flow_dir = Path(flow_dir)
         top = flow_dir / self.deliverable
-        if top.exists():
+        if top.exists() and not self._is_untouched_seed(flow_dir, top):
             return top
         matches = sorted(
-            flow_dir.rglob(self.deliverable),
+            (
+                p
+                for p in flow_dir.rglob(self.deliverable)
+                if not self._is_untouched_seed(flow_dir, p)
+            ),
             key=lambda p: (len(p.relative_to(flow_dir).parts), p.as_posix()),
         )
         return matches[0] if matches else None
+
+    def _is_untouched_seed(self, flow_dir: Path, path: Path) -> bool:
+        """Did this FILE come from the seed and stay identical to it? The seed
+        tree is already on disk in the case folder, versioned with the case, so
+        the comparison needs no manifest and no repo — it holds for a `git=False`
+        declaration too.
+
+        Files only, deliberately. Answering it for a directory means reading both
+        trees whole, and the directory deliverable exists precisely because a
+        ported project is too large to copy (see "Deliverable semantics"). No case
+        declares a directory that its own seed also contains; the day one does,
+        that is the trigger to pay for the tree compare."""
+        seed = self.workspace.seed
+        if seed is None:
+            return False
+        original = self.case_dir / seed / path.relative_to(flow_dir)
+        try:
+            return original.is_file() and original.read_bytes() == path.read_bytes()
+        except OSError:
+            return False
 
     async def setup(self, flow, flow_dir) -> None:
         """Runs the case folder's `setup.sh` when it has one."""

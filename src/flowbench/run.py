@@ -14,7 +14,7 @@ import shutil
 import string
 from pathlib import Path
 
-from flowbench.case import check_gradable
+from flowbench.case import check_gradable, seed_workspace
 from flowbench.driver import OmnigentDriver
 from flowbench.flowspec import compose_kickoff, load_flows
 from flowbench.loop import run_agent_session
@@ -102,6 +102,11 @@ async def run_case(
     deliverable (a build-shaped one like todo_app, judged black-box) gets no
     probe, no grace-poll and no `artifact_missing`/`artifact_lines` in `run.json`.
 
+    Each flow dir is materialized from `case.workspace` before `case.setup` runs
+    — the seed tree and, if declared, the repo holding it. `run.json` records the
+    declaration under `workspace` and each flow dir's seed commit under
+    `flow_stats[<flow>].seed_commit`.
+
     `case.score(flow, flow_dir, session)` runs after each flow's session and its
     result is written to `<flow_dir>/scorecard.json`; `None` writes no scorecard,
     and a raised exception is recorded as `{"error": ...}` for that flow instead
@@ -126,6 +131,7 @@ async def run_case(
     run_root = root / case.name / run_id
     run_root.mkdir(parents=True, exist_ok=True)
 
+    workspace_declared: dict | None = None
     views: dict[str, str] = {}
     delivered: dict[str, bool] = {}
     transcripts: dict[str, str] = {}
@@ -137,6 +143,14 @@ async def run_case(
         sim_dir = run_root / f"_sim_{name}"
         sim_dir.mkdir(parents=True, exist_ok=True)
         try:
+            # The declared workspace, before anything else touches the flow dir:
+            # a case that overrides `setup` must not be able to lose it.
+            seeded = seed_workspace(case.workspace, case.case_dir, flow_dir)
+            seed_commit = seeded.pop("seed_commit")
+            # What is left of the record is the declaration, identical for every
+            # flow by construction; the commit is the one part that is a fact
+            # about THIS flow dir, so it is recorded per flow.
+            workspace_declared = seeded
             await case.setup(flow, flow_dir)
             driver = make_flow_driver(flow, flow_dir)
             simulator = make_simulator(flow, sim_dir)
@@ -180,6 +194,7 @@ async def run_case(
                     deliverable_stats["artifact_lines"] = len((text or "").splitlines())
                 deliverable_stats["deliverable_path"] = deliverable_path
             flow_stats[name] = {
+                "seed_commit": seed_commit,
                 "exit_status": session.get("exit_status"),
                 "turns": session.get("turns"),
                 "duration_s": session.get("duration_s"),
@@ -220,6 +235,11 @@ async def run_case(
         "run_id": run_id,
         "case": case.name,
         "deliverable": case.deliverable,
+        # The declaration only — the case's, so one value for the run. Each flow
+        # dir's actual seed commit is `flow_stats[<flow>].seed_commit`: a flow dir
+        # that already held a repo keeps that repo's HEAD, so a single run-level
+        # SHA could be a lie about some other flow.
+        "workspace": workspace_declared,
         "flows": names,
         "labels": labels,  # {"A": flow_name, ...} — judge-facing, this trial only
         "rotation": rotation,

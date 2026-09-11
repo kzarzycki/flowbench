@@ -19,6 +19,7 @@ orchestrator does with a case is [`runner.md`](runner.md).
 | `flows.yaml` | yes | the flows this case benchmarks, in column order (`flowspec.load_flows`) |
 | `judge.md` | no | the comparative rubric. Present = the run ends in a judge stage and a `report.html`; absent = no `_judge/` dir and `winner`/`winner_flow` are `None` |
 | `case.py` | no | one `Case` subclass, the folder's runtime shape |
+| `seed/` (any name) | no | the starting tree, copied into the flow dir when `case.py` declares it — see "The starting workspace" |
 | `setup.sh` / `teardown.sh` | no | run by the default `Case.setup`/`Case.teardown` |
 
 ## The `Case` contract
@@ -29,6 +30,7 @@ class is a complete case.
 | Member | Default | What it decides |
 | --- | --- | --- |
 | `deliverable: str \| None` | `None` | the path, relative to the flow dir, that proves this flow delivered. `None` = nothing on disk does (see "Deliverable semantics") |
+| `workspace: Workspace` | `Workspace()` | what the flow dir holds before the agent's first turn — see "The starting workspace" |
 | `max_turns: int` | `80` | simulator turns before the loop stops |
 | `deadline_s: float` | `1800.0` | wall-clock budget for one flow's whole session |
 | `async setup(flow, flow_dir)` | runs `setup.sh` | before the flow's session; the flow dir already exists |
@@ -75,6 +77,68 @@ Two mechanics that matter to anyone touching this:
   `type(case).__name__` and on behaviour; `isinstance` against an imported subclass is false by
   construction.
 
+## The starting workspace
+
+Engineering rarely starts from an empty directory, so a case says what its flow dir holds
+before the agent's first turn. `flowbench.case.Workspace` is that declaration, and
+`run_case` materializes it — for every flow, **before** `Case.setup` — through the one
+function `seed_workspace(workspace, case_dir, flow_dir)`.
+
+| Field | Default | What it declares |
+| --- | --- | --- |
+| `seed: str \| None` | `None` | a directory **inside the case folder**, copied into the flow dir. `None` = the flow dir starts empty |
+| `git: bool` | `False` | the tree is a git repo whose single commit holds exactly the seed. `False` = no repo, and the engine creates none |
+
+The default `Workspace()` is a declaration, not a missing one: nothing beyond the
+declaration is implied, so a case that wants the agent to set up version control itself
+gets a bare directory and whether the agent creates a repo stays an observable. `git` is
+the whole of "what history" an in-repo seed can express — one commit; richer history needs
+a cloned ref, which brings a network, a cache and credentials with it.
+
+`seed_workspace` is the **single** seeding step: everything the framework puts in the
+workspace goes through it, against this one declaration, recorded the same way. A seed that
+is missing, is a file, or resolves outside the case folder raises `ValueError` naming the
+case folder and the value.
+
+Why it runs before `Case.setup` rather than inside it: an override that forgot to call up
+would silently change the workspace, which is exactly the defect the declaration replaces.
+`setup` keeps its meaning — extra work *after* the declared workspace exists.
+
+The seed commit is made with the fixed identity `agent-eval <agent-eval@example.com>`, the
+message `chore: seed workspace`, signing off, and **pinned author and committer dates**
+(`SEED_COMMIT_DATE`), so one declaration produces one SHA in every flow dir and every run.
+The operator's own git config is neutralised for the same reason — signing off, hooks off,
+`core.autocrlf` off — since a hook-rewritten message or a rewritten line ending moves the
+SHA the pinned dates exist to fix. An empty declaration with `git=True` commits nothing
+(`--allow-empty`) instead of inventing a `.gitkeep` the case never declared.
+
+`run.json` records what was materialized, each fact where it is true:
+
+| Where | Key | Meaning |
+| --- | --- | --- |
+| `workspace` | `seed` | the declared directory name, or `null` |
+| `workspace` | `git` | whether a repo was declared |
+| `workspace` | `seed_files` | how many files the seed tree holds |
+| `flow_stats[<flow>]` | `seed_commit` | that flow dir's seed commit, or `null` with no repo |
+
+The declaration is the case's, so it is one value for the run. The commit is a fact about
+one flow dir: seeding a dir that already holds a repo keeps that repo's `HEAD`, so a single
+run-level SHA could be a lie about some other flow.
+
+**A seeded file is not a deliverable.** `find_deliverable` drops any candidate FILE that
+exists in the seed tree and still matches it byte for byte — the flow did not produce it — and it
+drops them *before* the shallowest-first pick, so an untouched shallow copy cannot hide a
+modified deeper one. The comparison is against `<case_dir>/<seed>/<relpath>`, the tree that
+is already on disk and versioned with the case, so it needs no manifest and holds for a
+`git=False` declaration too. A **directory** deliverable is never dropped: answering the
+question for one means reading both trees whole, and the directory shape exists precisely
+because a ported project is too large to copy. No case declares a directory its own seed
+also contains; the day one does is the day to pay for the tree compare.
+
+A scorer that wants to diff the whole workspace against its starting point uses
+`run.json`'s `flow_stats[<flow>].seed_commit`, which inside that flow dir is the repo's
+root commit.
+
 ## Two load-time errors
 
 `check_gradable(case)` raises, verbatim:
@@ -99,7 +163,8 @@ copies is ordinary (a subagent's working dir holds one), and an unordered pick w
 recorded path, the canonical copy and the rendered report differ between machines.
 
 Presence is always `session["artifact_exists"]` — the probe's answer — never the truthiness of
-`artifact_text`: an empty file and a directory both have no text.
+`artifact_text`: an empty file and a directory both have no text. A candidate that is still the seed is
+not a candidate at all ("The starting workspace").
 
 | Case | Capture | Judge sees | Report / `run.json` |
 | --- | --- | --- | --- |
@@ -119,7 +184,8 @@ flowchart TD
   load[load_case case_dir<br/>nearest case.py, one subclass] --> gate{"check_gradable"}
   gate -- "judge.md and 1 flow<br/>or 1 flow and no score()" --> err[load error, no session spent]
   gate -- ok --> flows[for each flow in flows.yaml]
-  flows --> setup[case.setup flow, flow_dir]
+  flows --> seed[seed_workspace: declared tree + history]
+  seed --> setup[case.setup flow, flow_dir]
   setup --> sess[session: kickoff, simulator relay,<br/>DONE token, max_turns, deadline_s]
   sess --> probe[case.find_deliverable<br/>grace-poll, then capture]
   probe --> write[transcript.md + session.json<br/>with ended_by]
