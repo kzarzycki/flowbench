@@ -9,7 +9,7 @@ re-measured on 2026-09-11, the rest of the document is as of the date above.
 
 | Module | Lines | Role |
 | --- | --- | --- |
-| `driver/omnigent.py` | 559 | `OmnigentDriver`: session lifecycle, send/settle/retry, capture, URLs, `git_init_repo` (S02.2). Above the epic's ~350 target: #68/#76 grew the settle machinery after the epic was written, and S02.3 is where the rest goes — see E02 S02.2 |
+| `driver/omnigent.py` | 559 | `OmnigentDriver`: session lifecycle, send/settle/retry, capture, URLs (S02.2). Above the epic's ~350 target: #68/#76 grew the settle machinery after the epic was written, and S02.3 is where the rest goes — see E02 S02.2 |
 | `driver/bundle.py` | 142 | `render_config` / `build_bundle` / `session_metadata` as pure functions of a `BundleSpec` protocol (S02.2) |
 | `driver/base.py` | 30 | `AgentDriver` ABC (S02.2) |
 | `driver/__init__.py` | 29 | the package's public surface |
