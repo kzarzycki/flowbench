@@ -3,7 +3,6 @@
 from pathlib import Path
 
 import pytest
-from typer.testing import CliRunner
 
 from flowbench.settings import Settings
 
@@ -81,8 +80,16 @@ def test_unknown_dotenv_keys_are_ignored(_isolated_cwd):
 
 
 def test_compare_is_still_a_subcommand():
+    """Dropping python-dotenv must not drop a command or an option.
+
+    Asserted against the registered click command rather than `--help` output:
+    the rendered help wraps and truncates to the terminal, so a string search
+    there passes or fails on the width of whoever runs it (it failed on CI and
+    passed on every local width).
+    """
+    import typer.main
+
     from flowbench.cli import app
 
-    result = CliRunner().invoke(app, ["compare", "--help"])
-    assert result.exit_code == 0, result.output
-    assert "--run-base" in result.output
+    compare = typer.main.get_command(app).commands["compare"]
+    assert {p.name for p in compare.params} >= {"run_base", "run_id"}
