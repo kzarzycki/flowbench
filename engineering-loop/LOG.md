@@ -245,3 +245,21 @@ Cross-session memory for both repos — flowbench (engine) and flowbench-scenari
 - Merge order inverted on purpose (scenarios first, engine second): "engine first" exists for the code dependency, this engine side is one doc paragraph, and merging it last put the live-run id in this entry instead of costing a third PR.
 - Live `smoke_todo_app/i162-7efe74c` (`--n 2`, `--runs-root ../flowbench-runs` per #166): both trials `artifact_missing: []`, all four sessions `idle`, 0 prompts/stalls/quota, winner claude 2–0. Evidence at `/Users/zarz/dev/xebia/flowbench-runs/smoke_todo_app/i162-7efe74c`.
 - Gates 1–3 ran on `antigravity-native`/gemini-3.8-flash-high (codex down, #147); gate 1 rejected round 1 for criteria that pinned no literal string — "the README states the rule" is not testable until the exact sentence is named.
+## 2026-09-11 — flowbench#166 the default runs_root is the sibling beside the launching checkout (PR #170)
+- `runs_root` defaulted to the relative `runs`, so a live gate run from a loop worktree landed
+  inside it and SHIP's `git worktree remove` deleted the evidence — #155's ledger entry cites
+  `hello/s155-live-1`, which exists nowhere on disk. The default is now
+  `<checkout>/../flowbench-runs`, the checkout being the nearest ancestor of the cwd holding a
+  `.git` entry (a directory in a clone, a file in a worktree).
+- Anchored on the checkout, not the cwd: a cwd one level into the repo resolves `../` back inside
+  the checkout, which is the bug. A loop worktree is a sibling of its clone, so both write to one
+  run root. The old `__file__` anchor (the scenarios-era answer) points at site-packages once the
+  wheel is installed.
+- A default that is a *value* cannot express "wherever you launched from": `Field(default_factory=)`
+  is what keeps the anchor a function of the cwd at `Settings()` time rather than at import time.
+- Live `hello/s166-live-1` (no flag, no env var, no `.env`): idle, 1 turn, 29.0 s, acceptance 1.0,
+  `run.json` and `hello.txt` landed — at `/Users/zarz/dev/agents/flowbench-runs/hello/s166-live-1`,
+  outside the worktree, so it survives this item's `git worktree remove`.
+- agy stalls a review turn the moment it reaches for the test suite (#151): a reviewer brief has to
+  forbid running anything, not just writing. Two gate-2 dispatches died that way before the third
+  returned a verdict.

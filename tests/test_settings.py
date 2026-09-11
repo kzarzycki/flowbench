@@ -35,9 +35,57 @@ def _write_pyproject(d: Path, table: str = "tool.flowbench", **values: str) -> N
 
 def test_defaults():
     s = Settings()
-    assert s.runs_root == Path("runs")
+    assert s.runs_root.is_absolute()
     assert s.sim_model == "opus"
     assert s.judge_model == "opus"
+
+
+def _checkout(d: Path, name: str, *, worktree: bool = False) -> Path:
+    """A checkout shape: `.git` is a directory in a clone, a file in a worktree."""
+    repo = d / name
+    repo.mkdir()
+    if worktree:
+        (repo / ".git").write_text(f"gitdir: {d / 'clone' / '.git' / 'worktrees' / name}\n")
+    else:
+        (repo / ".git").mkdir()
+    return repo
+
+
+def test_the_default_runs_root_sits_beside_a_normal_checkout(_isolated_cwd, monkeypatch):
+    monkeypatch.chdir(_checkout(_isolated_cwd, "clone"))
+    assert Settings().runs_root == _isolated_cwd / "flowbench-runs"
+
+
+def test_the_default_runs_root_of_a_worktree_is_the_checkouts(_isolated_cwd, monkeypatch):
+    """A loop worktree is a sibling of its checkout, so both land in one run root —
+    which is why `git worktree remove` cannot take the live-gate evidence (#166)."""
+    monkeypatch.chdir(_checkout(_isolated_cwd, "clone"))
+    from_clone = Settings().runs_root
+    monkeypatch.chdir(_checkout(_isolated_cwd, "clone--issue-1", worktree=True))
+    assert Settings().runs_root == from_clone == _isolated_cwd / "flowbench-runs"
+
+
+def test_the_default_is_the_checkouts_not_the_cwds(_isolated_cwd, monkeypatch):
+    repo = _checkout(_isolated_cwd, "clone")
+    deep = repo / "scenarios" / "smoke"
+    deep.mkdir(parents=True)
+    monkeypatch.chdir(deep)
+    runs_root = Settings().runs_root
+    assert runs_root == _isolated_cwd / "flowbench-runs"
+    assert repo not in runs_root.parents  # never inside the checkout
+
+
+def test_the_default_falls_back_to_the_cwd_with_no_checkout(_isolated_cwd, monkeypatch):
+    loose = _isolated_cwd / "loose"
+    loose.mkdir()
+    monkeypatch.chdir(loose)
+    assert Settings().runs_root == _isolated_cwd / "flowbench-runs"
+
+
+def test_the_ignore_file_does_not_hide_runs_in_the_checkout():
+    """Nothing writes to `<checkout>/runs/` any more, so nothing ignores it (#166)."""
+    ignore = Path(__file__).parents[1] / ".gitignore"  # the fixture has chdir'd away
+    assert "/runs/" not in ignore.read_text().split()
 
 
 @pytest.mark.parametrize(("field", "env_var", "cast"), FIELDS)

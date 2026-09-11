@@ -3,6 +3,7 @@
 
 from pathlib import Path
 
+from pydantic import Field
 from pydantic_settings import (
     BaseSettings,
     PydanticBaseSettingsSource,
@@ -11,8 +12,23 @@ from pydantic_settings import (
 )
 
 
+def default_runs_root() -> Path:
+    """Beside the checkout that launches the run: `<checkout>/../flowbench-runs`.
+
+    The checkout is the nearest ancestor of the cwd holding a `.git` entry — a directory
+    in a normal checkout, a file in a worktree — so a loop worktree
+    (`../flowbench--issue-N`) and the checkout it branched from share one run root, and
+    `git worktree remove` cannot take a run dir with it (#166). Anchoring on the cwd
+    instead would put the run dir back inside the checkout whenever the cwd is one level
+    in. With no checkout above the cwd (an installed wheel) the cwd is the anchor.
+    """
+    cwd = Path.cwd()
+    checkout = next((p for p in (cwd, *cwd.parents) if (p / ".git").exists()), cwd)
+    return checkout.parent / "flowbench-runs"
+
+
 class Settings(BaseSettings):
-    runs_root: Path = Path("runs")
+    runs_root: Path = Field(default_factory=default_runs_root)
     sim_model: str = "opus"
     judge_model: str = "opus"
 

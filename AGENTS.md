@@ -119,8 +119,8 @@ uv run flowbench run scenarios/swe_e2e/cases/todo_app --rescore <id>
   `docs/onboarding.md`.
 - Wheel ships `src/flowbench` only; in-repo `scenarios` imports work via pytest `pythonpath`
   and cwd.
-- Run-dirs (`$RUNS`) live outside the repo, beside the checkout that launches the run;
-  the path is per-developer, recorded in `CLAUDE.local.md` (untracked).
+- Run-dirs (`$RUNS`) default to the sibling `flowbench-runs/` beside the launching checkout,
+  never inside the repo — the rule and its overrides are `docs/onboarding.md` §6.
 - The comparison reader is pure `(<run_base>, <run_id>) -> markdown`; a missing/malformed scorecard
   is a FAILED column and the benchmark never aborts on one bad flow.
 

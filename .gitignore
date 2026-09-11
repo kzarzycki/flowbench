@@ -33,11 +33,8 @@ htmlcov/
 # cross-session memory + logs (local only)
 .memsearch/
 /logs/
-/runs/
 /reports/
-
-# safety net: run-dirs belong in a sibling ../flowbench-runs/, never in the repo
-flowbench-runs/
+flowbench-runs/  # a run root someone pointed at the checkout by hand
 
 # APM dependencies
 apm_modules/

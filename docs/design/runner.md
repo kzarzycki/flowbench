@@ -278,7 +278,8 @@ usage error, whose exit 2 would read as a mistyped command.
 
 **Settings precedence**, one layered `Settings` object (`pydantic-settings`): a flag beats
 `FLOWBENCH_*` in the environment, which beats `.env`, which beats `[tool.flowbench]` in
-`pyproject.toml`, which beats the default (`runs_root=runs`, `sim_model=judge_model=opus`). A
+`pyproject.toml`, which beats the default (`sim_model=judge_model=opus`; `runs_root` per
+[`onboarding.md`](../onboarding.md) §6). A
 flag that was not passed is left out of the `Settings` call, so it never shadows a lower layer.
 The resolved object reaches the case as `case.settings` — `load_case(case_dir, settings)` passes
 it through, and a `Case` built without one constructs its own.
