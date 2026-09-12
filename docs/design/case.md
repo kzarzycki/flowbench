@@ -7,7 +7,9 @@ default, so a folder of text files is already a runnable case:
 `flowbench run <case_dir>`.
 
 Vocabulary (Scenario → Case → Flow → Run) is [`../GLOSSARY.md`](../GLOSSARY.md); what the
-orchestrator does with a case is [`runner.md`](runner.md).
+orchestrator does with a case is [`runner.md`](runner.md); the shape of what it writes —
+`run.json`, `scorecard.json`, the per-flow outcome vocabulary — is
+[`run-schema.md`](run-schema.md).
 
 ## The folder
 
