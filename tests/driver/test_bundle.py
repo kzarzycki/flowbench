@@ -9,6 +9,8 @@ import tarfile
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 from flowbench.driver import OmnigentDriver, omnigent
 from flowbench.driver import bundle as bundle_mod
 from flowbench.driver.bundle import BundleSpec, build_bundle, render_config, session_metadata
@@ -39,7 +41,9 @@ def test_render_config_skills_list_is_flow_yaml(tmp_path):
     assert "skills: [a, b]" in d.render_config()
 
 
-def test_build_bundle_copies_skill_dirs_and_mcp(tmp_path):
+def test_build_bundle_carries_mcp_but_not_skills(tmp_path):
+    """A6: skills are seeded into the workspace (#157), never tarred. Carrying them
+    here too would load each one twice, under two names."""
     # two fake skills (each a dir with SKILL.md) + one MCP yaml
     skills_src = tmp_path / "src"
     for name in ("brainstorming", "tdd"):
@@ -58,8 +62,7 @@ def test_build_bundle_copies_skill_dirs_and_mcp(tmp_path):
     out = _extract(drv._build_bundle(), tmp_path / "out")
 
     assert (out / "config.yaml").exists()
-    assert (out / "skills" / "brainstorming" / "SKILL.md").read_text() == "# brainstorming"
-    assert (out / "skills" / "tdd" / "SKILL.md").exists()
+    assert not (out / "skills").exists()
     assert (out / "tools" / "mcp" / "adf.yaml").read_text() == "transport: http"
 
 
@@ -147,9 +150,6 @@ def test_golden_bundle_members_and_content_hashes(tmp_path):
     assert [(n, k) for n, k, _ in rows] == [
         (".", "dir"),
         ("./config.yaml", "file"),
-        ("./skills", "dir"),
-        ("./skills/brainstorming", "dir"),
-        ("./skills/brainstorming/SKILL.md", "file"),
         ("./tools", "dir"),
         ("./tools/mcp", "dir"),
         ("./tools/mcp/fetch.yaml", "file"),
@@ -158,9 +158,8 @@ def test_golden_bundle_members_and_content_hashes(tmp_path):
     # config.yaml's hash is run_dir-dependent, so pin it against the function
     # that produced it rather than a literal; the other two are fixed inputs.
     assert by_name["./config.yaml"] == hashlib.sha256(render_config(spec).encode()).hexdigest()
-    # Each copied file's content, unchanged: the same two hashes gates.md
-    # records from origin/master.
-    assert by_name["./skills/brainstorming/SKILL.md"] == _sha(skill_md)
+    # The MCP file's content, unchanged. The skill row is deliberately gone: since
+    # #157 a declared skill_dir leaves NO trace in the tarball.
     assert by_name["./tools/mcp/fetch.yaml"] == _sha(mcp_yaml)
 
 
@@ -213,3 +212,36 @@ def test_the_bundle_functions_left_the_driver_module():
         assert name not in vars(omnigent), f"{name} is an attribute of driver/omnigent.py"
         fn = getattr(bundle_mod, name)
         assert Path(inspect.getsourcefile(fn)).name == "bundle.py"
+
+
+@pytest.mark.parametrize(
+    "skills, expected",
+    [
+        (["project"], ["--setting-sources", "project"]),
+        (["project", "local"], ["--setting-sources", "project,local"]),
+        # "all" is omnigent's default (it emits nothing) and "none" is omnigent's
+        # own `--setting-sources ""`, appended AFTER ours — neither is ours to set.
+        ("all", []),
+        ("none", []),
+        ([], []),
+    ],
+)
+def test_setting_sources_from_a_skills_list(tmp_path, skills, expected):
+    """A7. omnigent maps a LIST to nothing at all (bundle_skills.py: "treated like
+    all for host sources"), so without this flag `skills: [project]` would leave
+    the operator's ~/.claude visible — the #151 shape."""
+    args = session_metadata(_spec(tmp_path, skills=skills))["terminal_launch_args"]
+
+    if expected:
+        assert args[-2:] == expected
+    else:
+        assert "--setting-sources" not in args
+
+
+@pytest.mark.parametrize("harness", ["codex-native", "antigravity-native", "something-else"])
+def test_setting_sources_is_claude_only(tmp_path, harness):
+    """A claude-only flag; codex exits 2 on one, which is why launch args are
+    gated on the harness in the first place."""
+    args = session_metadata(_spec(tmp_path, harness=harness, skills=["project"]))
+
+    assert "--setting-sources" not in args["terminal_launch_args"]

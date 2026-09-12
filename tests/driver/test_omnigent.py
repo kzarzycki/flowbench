@@ -1498,7 +1498,9 @@ def _bundle_bits(tmp_path):
     [
         ("reasoning_effort", "high", ["reasoning_effort"]),
         ("skills", "none", ["skills"]),
-        ("skill_dirs", "SKILL_DIR", ["skill_dirs"]),
+        # skill_dirs is NOT here: since #157 it reaches every harness through the
+        # seeded workspace, so warning about it would be false.
+        ("skill_dirs", "SKILL_DIR", []),
         ("mcp_files", "MCP_FILE", ["mcp_files"]),
     ],
 )
@@ -1521,7 +1523,7 @@ def test_warns_about_every_field_that_is_set(tmp_path):
         skill_dirs=[sk],
         mcp_files=[mcp],
     )
-    assert d._unhonoured_fields() == ["mcp_files", "reasoning_effort", "skill_dirs", "skills"]
+    assert d._unhonoured_fields() == ["mcp_files", "reasoning_effort", "skills"]
 
 
 def test_no_warning_when_the_harness_carries_them(tmp_path):
@@ -1546,12 +1548,15 @@ def test_no_warning_when_nothing_is_declared(tmp_path):
 
 def test_codex_keeps_reasoning_effort_but_not_bundle_skills(tmp_path):
     """The two capability sets are genuinely different — codex honours effort and
-    receives no bundle. One set collapses this to both names, or neither."""
-    sk, _ = _bundle_bits(tmp_path)
+    receives no bundle. One set collapses this to both names, or neither.
+
+    Since #157 `skill_dirs` is seeded into the workspace and so is delivered to
+    codex too; `mcp_files` is the field that still rides the bundle."""
+    _, mcp = _bundle_bits(tmp_path)
     d = OmnigentDriver(
-        run_dir=tmp_path, harness="codex-native", reasoning_effort="high", skill_dirs=[sk]
+        run_dir=tmp_path, harness="codex-native", reasoning_effort="high", mcp_files=[mcp]
     )
-    assert d._unhonoured_fields() == ["skill_dirs"]
+    assert d._unhonoured_fields() == ["mcp_files"]
 
 
 async def test_start_logs_the_warning_once(tmp_path, monkeypatch, caplog):

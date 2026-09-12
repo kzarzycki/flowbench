@@ -190,10 +190,11 @@ class OmnigentDriver(AgentDriver):
         if self.reasoning_effort and self.harness not in _REASONING_EFFORT_HARNESSES:
             fields.append("reasoning_effort")
         if self.harness not in _BUNDLE_SKILL_HARNESSES:
+            # `skill_dirs` is NOT here: since #157 it is seeded into the workspace,
+            # which is harness-agnostic, so every harness does receive it. Whether a
+            # given harness reads `.claude/skills/` is that harness's own convention.
             if self.skills != "all":
                 fields.append("skills")
-            if self.skill_dirs:
-                fields.append("skill_dirs")
             if self.mcp_files:
                 fields.append("mcp_files")
         return sorted(fields)
