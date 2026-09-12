@@ -41,8 +41,8 @@ and they go in before the seed commit, so they belong to the seed rather than to
 diff. The copies still come from the case's pinned dirs, never from whatever the operator has
 installed, so a flow stays identical on any machine.
 
-Nothing loads from the host `~/.claude`. `Flow.skills` names Claude Code's setting sources and
-is the only knob:
+`Flow.skills` names Claude Code's setting sources, and is the only knob deciding what the agent
+reads — the host `~/.claude` included:
 
 | `skills:` | Launch flag | What the agent sees |
 | --- | --- | --- |

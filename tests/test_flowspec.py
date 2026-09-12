@@ -127,3 +127,13 @@ def test_skills_list_with_skill_dirs_loads(tmp_path):
     (flow,) = load_flows(path)
 
     assert [Path(d).name for d in flow["skill_dirs"]] == ["greeting-file"]
+
+
+def test_skills_empty_list_is_rejected_even_without_skill_dirs(tmp_path):
+    """An empty list emits no `--setting-sources` flag at all, so the CLI's defaults
+    load the operator's own ~/.claude (#151). That leak belongs to the `skills`
+    declaration, not to `skill_dirs`, so it fails for any flow."""
+    path = _flows_file(tmp_path, [{"name": "baseline", "skills": []}])
+
+    with pytest.raises(ValueError, match="#151"):
+        load_flows(path)

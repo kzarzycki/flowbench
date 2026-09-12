@@ -193,6 +193,13 @@ def _seed_commit(flow_dir: Path, skills_placed: bool = False) -> str:
                 "git",
                 "-c",
                 "commit.gpgsign=false",
+                # Pinned on the COMMAND, so both branches below commit as the same author
+                # whatever the operator's config or the seed repo's own says. Without it the
+                # seed SHA is a function of the machine, not of the declaration.
+                "-c",
+                "user.email=agent-eval@example.com",
+                "-c",
+                "user.name=agent-eval",
                 "-c",
                 "core.hooksPath=",
                 "-c",
@@ -207,12 +214,21 @@ def _seed_commit(flow_dir: Path, skills_placed: bool = False) -> str:
             env=env,
         )
 
+    def add_skills() -> None:
+        # -f: the skills are the flow's declaration, so a `.gitignore` the seed happens to
+        # carry (`.claude/` is a common one) must not silently drop them from the seed
+        # commit and leave them showing up as the agent's work.
+        run("add", "-f", "--", ".claude/skills")
+
     if not (flow_dir / ".git").exists():
         run("init", "-q")
-        # Local identity, so the commit does not depend on the operator's git config.
+        # Persisted too, so the AGENT's own later commits in this dir have an identity
+        # even on a host that configured none.
         run("config", "user.email", "agent-eval@example.com")
         run("config", "user.name", "agent-eval")
         run("add", "-A")
+        if skills_placed:
+            add_skills()
         # --allow-empty: an empty declaration commits nothing rather than inventing
         # a .gitkeep the case never declared and every scorer must learn to ignore.
         run("commit", "-q", "--allow-empty", "-m", SEED_COMMIT_MESSAGE)
@@ -221,7 +237,7 @@ def _seed_commit(flow_dir: Path, skills_placed: bool = False) -> str:
         # already hold agent work, and an unscoped `commit` would sweep it into a
         # commit labelled as the seed — attributing the agent's output to the
         # framework and corrupting the very diff this placement exists to keep clean.
-        run("add", "--", ".claude/skills")
+        add_skills()
         if run("diff", "--cached", "--quiet", "--", ".claude/skills", check=False).returncode:
             run("commit", "-q", "-m", SEED_SKILLS_COMMIT_MESSAGE, "--", ".claude/skills")
     return run("rev-parse", "HEAD").stdout.strip()

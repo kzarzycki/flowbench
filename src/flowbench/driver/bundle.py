@@ -72,9 +72,9 @@ def render_config(spec: BundleSpec) -> str:
         cwd=str(spec.run_dir),
         harness=spec.harness,
     )
-    # Host-skill filter: "all" is omnigent's default, so emit nothing; "none"
-    # suppresses host ~/.claude skills (bundle skills still load); a list names
-    # specific sources. This is the ONLY per-flow knob besides bundle contents.
+    # Setting-source filter: "all" is omnigent's default, so emit nothing; "none"
+    # loads no sources at all; a list names specific ones. Skills live in the
+    # workspace now, so this decides whether the agent ever reads them.
     if spec.skills != "all":
         if isinstance(spec.skills, (list, tuple)):
             cfg += "skills: [" + ", ".join(spec.skills) + "]\n"

@@ -288,6 +288,50 @@ def test_seeded_skills_are_committed_into_a_seeded_repo(tmp_path):
     assert _git(flow_dir, "log", "-1", "--format=%s") == "chore: seed flow skills"
 
 
+def test_the_skills_commit_does_not_take_the_seed_repos_identity(tmp_path):
+    """A2: the seed SHA is a function of the DECLARATION. The init branch pins the
+    author by config; the seeded-repo branch inherits whatever the seed (or the
+    operator) configured unless the identity is pinned on the command itself."""
+    case_dir = _case_dir(tmp_path)
+    flow_dir = tmp_path / "flow"
+    _seed_repo(case_dir)  # configures seed@example.com
+    src = _skill_dir(tmp_path / "src", "greeting-file")
+
+    seed_workspace(Workspace(seed="seed"), case_dir, flow_dir, skill_dirs=[src])
+
+    assert (
+        _git(flow_dir, "log", "-1", "--format=%an <%ae>") == "agent-eval <agent-eval@example.com>"
+    )
+    assert (
+        _git(flow_dir, "log", "-1", "--format=%cn <%ce>") == "agent-eval <agent-eval@example.com>"
+    )
+
+
+@pytest.mark.parametrize(
+    "workspace", [Workspace(git=True), Workspace(seed="seed")], ids=["init", "seeded-repo"]
+)
+def test_a_seed_gitignoring_dot_claude_does_not_lose_the_skills(tmp_path, workspace):
+    """A2: `.claude/` is a common ignore line. Honouring it would drop the flow's
+    declared skills from the seed commit, so they would surface as the agent's own
+    work — and on the seeded-repo branch `git add` would exit non-zero besides."""
+    case_dir = _case_dir(tmp_path)
+    flow_dir = tmp_path / "flow"
+    if workspace.seed:
+        root = _seed_repo(case_dir)
+        (root / ".gitignore").write_text(".claude/\n")
+        _git(root, "add", "-A")
+        _git(root, "commit", "-q", "-m", "ignore .claude")
+    else:
+        _seed_tree(case_dir, {".gitignore": ".claude/\n"})
+        workspace = Workspace(seed="seed", git=True)
+    src = _skill_dir(tmp_path / "src", "greeting-file")
+
+    seed_workspace(workspace, case_dir, flow_dir, skill_dirs=[src])
+
+    tracked = _git(flow_dir, "ls-tree", "-r", "--name-only", "HEAD").splitlines()
+    assert ".claude/skills/greeting-file/SKILL.md" in tracked
+
+
 def test_skill_colliding_with_the_seed_raises(tmp_path):
     """A4: letting either side win silently would mean a flow ran without the
     bundle it declared."""

@@ -19,19 +19,23 @@ def compose_kickoff(flow: dict, task_text: str) -> str:
     return "\n\n".join(p for p in parts if p)
 
 
-def _check_skills_can_load(flow: dict, path) -> None:
-    """A flow declaring `skill_dirs` must declare sources that actually load them.
+def _check_skills_can_load(flow: dict, path, wants_workspace: bool) -> None:
+    """Every flow must declare setting sources that load what it says it loads.
 
     The seeding step fills `<flow_dir>/.claude/skills/`, and only the `project`
     setting source reads it. Every other shape silently loses the declared skills,
     or silently gains the operator's own — and a flow scored as though it had its
     bundle is the one lie this benchmark cannot afford, so these fail at load.
 
-    - `"none"` is omnigent's `--setting-sources ""`, appended after flowbench's own
-      args: it loads nothing at all.
     - an EMPTY list emits no flag, so the CLI falls back to its default sources and
       the host `~/.claude` leaks in (#151) — the accident that looks like `"all"`.
     - a non-string entry would die later inside `",".join`.
+
+    Those two are rejected for EVERY flow: the leak is the declaration's, not the
+    skill_dirs'. `wants_workspace` adds the rest, for a flow whose `skill_dirs` the
+    seeding step put in `<flow_dir>/.claude/skills/` — only the `project` source
+    reads that, and `"none"` (omnigent's `--setting-sources ""`, appended after
+    flowbench's own args) reads nothing at all.
 
     `"all"` is legal and explicit: its defaults do include the project source.
     """
@@ -39,11 +43,19 @@ def _check_skills_can_load(flow: dict, path) -> None:
     name = flow.get("name")
     if skills == "all":
         return
-    if not isinstance(skills, (list, tuple)) or not skills:
+    if isinstance(skills, (list, tuple)) and not skills:
+        raise ValueError(
+            f"flow {name!r} in {path}: skills [] emits no setting-sources flag at all, so the "
+            "CLI's defaults load the operator's own ~/.claude (#151) — say skills: 'all' if "
+            "that is what you mean, or name the sources"
+        )
+    if wants_workspace and not isinstance(skills, (list, tuple)):
         raise ValueError(
             f"flow {name!r} in {path}: skills {skills!r} loads nothing from the workspace, "
             "so the declared skill_dirs would be invisible — use skills: [project]"
         )
+    if not isinstance(skills, (list, tuple)):
+        return
     bad = [s for s in skills if not isinstance(s, str) or not s]
     if bad:
         raise ValueError(
@@ -66,6 +78,5 @@ def load_flows(path) -> list[dict]:
                     )
                 resolved.append(skill_dir)
             flow["skill_dirs"] = resolved
-            if resolved:
-                _check_skills_can_load(flow, path)
+        _check_skills_can_load(flow, path, wants_workspace=bool(flow.get("skill_dirs")))
     return flows
