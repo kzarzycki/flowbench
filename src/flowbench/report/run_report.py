@@ -14,6 +14,8 @@ import re
 import sys
 from pathlib import Path
 
+from flowbench.schema import RunKind, require_version, run_kind
+
 
 def md_to_html(md: str) -> str:
     """Crude markdown → html: headers, bold, code, bullet lists, paragraphs."""
@@ -159,8 +161,14 @@ footer { color:var(--muted); font-size:.8rem; margin-top:3rem }
 """
 
 
+def _schema_note(version: int) -> str:
+    """A v0 run-dir says so in the report: its manifest predates the schema."""
+    return " · schema v0" if version == 0 else ""
+
+
 def render_report(run_root: Path) -> Path:
     meta = json.loads((run_root / "run.json").read_text())
+    schema_note = _schema_note(require_version(meta, run_root / "run.json"))
     judge_md = (run_root / "judge.md").read_text()
     labels = meta["labels"]  # {"A": flow_name, "B": flow_name, ...}, this trial only
     ordered = sorted(labels.items())  # [("A", name), ("B", name), ...]
@@ -203,7 +211,7 @@ def render_report(run_root: Path) -> Path:
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>flowbench · {meta["case"]} · {meta["run_id"]}</title><style>{CSS}</style></head><body><main>
 <h1>flowbench run report</h1>
-<div class="sub">case <strong>{meta["case"]}</strong> · run <strong>{meta["run_id"]}</strong></div>
+<div class="sub">case <strong>{meta["case"]}</strong> · run <strong>{meta["run_id"]}</strong>{schema_note}</div>
 <div class="banner">🏆 {verdict_line}</div>
 
 <h2>Flows</h2>
@@ -227,6 +235,7 @@ def render_aggregate_report(run_root: Path) -> Path:
     """n>1 template path: aggregate run.json (flows/counts/winner/score_means/
     trials, all name-keyed) -> report.html linking the per-trial reports."""
     meta = json.loads((run_root / "run.json").read_text())
+    schema_note = _schema_note(require_version(meta, run_root / "run.json"))
     flows = meta["flows"]
     counts = meta["counts"]
     winner = meta["winner"]
@@ -268,7 +277,7 @@ def render_aggregate_report(run_root: Path) -> Path:
 <style>{CSS}</style></head><body><main>
 <h1>flowbench aggregate report</h1>
 <div class="sub">case <strong>{meta["case"]}</strong> · run <strong>{meta["run_id"]}</strong>
- · {meta["n"]} trials</div>
+ · {meta["n"]} trials{schema_note}</div>
 <div class="banner">{banner}</div>
 {scores_html}
 <h2>Trials</h2>
@@ -281,10 +290,12 @@ def render_aggregate_report(run_root: Path) -> Path:
 
 
 def render_any(run_root: Path) -> Path:
-    """Standalone entrypoint over either run-dir kind: the aggregate run.json is
-    the only one with a `trials` key (run.py writes both shapes)."""
+    """Standalone entrypoint over either run-dir kind: the manifest declares
+    which shape it is (`run_kind` infers it for a v0 run.json)."""
     meta = json.loads((run_root / "run.json").read_text())
-    return render_aggregate_report(run_root) if "trials" in meta else render_report(run_root)
+    if run_kind(meta) is RunKind.AGGREGATE:
+        return render_aggregate_report(run_root)
+    return render_report(run_root)
 
 
 if __name__ == "__main__":  # pragma: no cover

@@ -1,9 +1,12 @@
 import json
 
+import pytest
+
 from flowbench.report.run_report import render_aggregate_report
+from flowbench.schema import SchemaVersionError
 
 
-def _aggregate_dir(tmp_path, *, winner, counts, score_means, flows, trial_winner_flows):
+def _aggregate_dir(tmp_path, *, winner, counts, score_means, flows, trial_winner_flows, **extra):
     """Hand-built aggregate run dir: run.json only (renderer must not need more)."""
     root = tmp_path / "agg"
     root.mkdir()
@@ -19,6 +22,7 @@ def _aggregate_dir(tmp_path, *, winner, counts, score_means, flows, trial_winner
         "counts": counts,
         "winner": winner,
         "score_means": score_means,
+        **extra,
     }
     (root / "run.json").write_text(json.dumps(meta))
     return root
@@ -351,3 +355,98 @@ def test_report_renders_a_case_without_a_deliverable(tmp_path):
     assert "lines)</summary>" not in text
     assert "None" not in text
     assert "scenario" not in text  # the subtitle clause is gone
+
+
+# --- the schema version the report reads -------------------------------------
+
+
+def _trial_dir(tmp_path, **extra):
+    """Hand-built trial run dir, today's field set; `schema_version`/`kind` via extra."""
+    root = tmp_path / "run"
+    d = root / "plain"
+    d.mkdir(parents=True)
+    (d / "transcript.md").write_text(TRANSCRIPT)
+    (root / "judge.md").write_text("# Verdict\n\nWinner: A\n")
+    (root / "run.json").write_text(
+        json.dumps(
+            {
+                "run_id": "r1",
+                "case": "todo_app",
+                "deliverable": None,
+                "labels": {"A": "plain"},
+                "winner": "a",
+                "models": {"plain": "opus"},
+                "reasoning_effort": {"plain": "high"},
+                "flow_stats": {"plain": {"exit_status": "idle", "turns": 2, "duration_s": 3.0}},
+                **extra,
+            }
+        )
+    )
+    return root
+
+
+def test_v0_trial_report_says_schema_v0(tmp_path):
+    from flowbench.report.run_report import render_report
+
+    assert "schema v0" in render_report(_trial_dir(tmp_path)).read_text()
+
+
+def test_v1_trial_report_does_not_say_schema_v0(tmp_path):
+    from flowbench.report.run_report import render_report
+
+    root = _trial_dir(tmp_path, schema_version=1, kind="trial")
+    assert "schema v0" not in render_report(root).read_text()
+
+
+def _agg(tmp_path, **extra):
+    return _aggregate_dir(
+        tmp_path,
+        winner="tie",
+        counts={"superpowers": 1, "plain": 1, "tie": 0, "unknown": 0},
+        score_means={},
+        flows=["superpowers", "plain"],
+        trial_winner_flows=["superpowers", "plain"],
+        **extra,
+    )
+
+
+def test_v0_aggregate_report_says_schema_v0(tmp_path):
+    assert "schema v0" in render_aggregate_report(_agg(tmp_path)).read_text()
+
+
+def test_v1_aggregate_report_does_not_say_schema_v0(tmp_path):
+    root = _agg(tmp_path, schema_version=1, kind="aggregate")
+    assert "schema v0" not in render_aggregate_report(root).read_text()
+
+
+def test_report_rejects_a_run_json_from_a_newer_flowbench(tmp_path):
+    from flowbench.report.run_report import render_report
+
+    root = _trial_dir(tmp_path, schema_version=2, kind="trial")
+    with pytest.raises(SchemaVersionError) as e:
+        render_report(root)
+    assert "run.json" in str(e.value) and "2" in str(e.value) and "0..1" in str(e.value)
+
+
+def test_aggregate_report_rejects_a_run_json_from_a_newer_flowbench(tmp_path):
+    root = _agg(tmp_path, schema_version=2, kind="aggregate")
+    with pytest.raises(SchemaVersionError) as e:
+        render_aggregate_report(root)
+    assert "run.json" in str(e.value) and "2" in str(e.value) and "0..1" in str(e.value)
+
+
+def test_render_any_dispatches_on_the_declared_kind_not_the_trials_key(tmp_path, monkeypatch):
+    """A v1 aggregate manifest without `trials` still picks the aggregate renderer."""
+    from flowbench.report import run_report
+
+    monkeypatch.setattr(run_report, "render_aggregate_report", lambda root: "AGG")
+    monkeypatch.setattr(run_report, "render_report", lambda root: "TRIAL")
+
+    root = tmp_path / "run"
+    root.mkdir()
+    meta = {"schema_version": 1, "kind": "aggregate", "run_id": "r1", "case": "c"}
+    (root / "run.json").write_text(json.dumps(meta))
+    assert run_report.render_any(root) == "AGG"
+
+    (root / "run.json").write_text(json.dumps({**meta, "kind": "trial"}))
+    assert run_report.render_any(root) == "TRIAL"
