@@ -59,12 +59,13 @@ _LABEL_READ_S = 60.0
 # different agent than its scorecard says it got, and that is invisible in the
 # result — the one failure this benchmark cannot afford.
 #
-# Bundle skills/MCPs: only the Claude bridges materialize the bundle for the CLI
-# (`--plugin-dir` + `--setting-sources`, omnigent `inner/bundle_skills.py`, which
-# is documented as being "for exposing an agent bundle's skills to a Claude
-# harness"). codex-native has no bundle-skill path at all, and agy has none
-# either — its bridge seeds the HOST's global agy skills into the session's
-# isolated dir instead, which is also why `skills: none` cannot be honoured there.
+# Bundle MCPs and the `skills` setting sources: only the Claude bridges carry them
+# (omnigent `inner/bundle_skills.py`, documented as being "for exposing an agent
+# bundle's skills to a Claude harness"). codex-native has no bundle path at all,
+# and agy has none either — its bridge seeds the HOST's global agy skills into the
+# session's isolated dir instead, which is also why `skills` cannot be honoured
+# there. `skill_dirs` is deliberately absent from this set: since #157 it is seeded
+# into the WORKSPACE, which every harness gets.
 # Reasoning effort: agy carries effort in the model id (`gemini-3.8-flash-low`)
 # and its executor validates the field, then drops it as "informational".
 #
@@ -150,7 +151,6 @@ class OmnigentDriver(AgentDriver):
     # baseline: claude-native, host skills visible, nothing added to the bundle.
     harness: str = "claude-native"
     skills: str | list[str] = "all"  # -> config.yaml top-level skills:
-    skill_dirs: list[Path] = field(default_factory=list)
     mcp_files: list[Path] = field(default_factory=list)
     # Web-UI grouping/labelling (both optional; unset leaves the server default).
     # `session_title` is a short human title (e.g. "flow: superpowers", "judge")

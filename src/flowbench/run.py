@@ -469,7 +469,6 @@ def make_flow_driver_omni(flow: dict, flow_dir: Path) -> OmnigentDriver:
         model=flow.get("model", "opus"),
         harness=flow.get("harness", "claude-native"),
         skills=flow.get("skills", "all"),
-        skill_dirs=flow.get("skill_dirs", []),
         reasoning_effort=flow.get("reasoning_effort"),
         # A planning turn (e.g. superpowers writing-plans) runs way past the
         # driver's 240s default — live-001 lost its plan to that timeout.

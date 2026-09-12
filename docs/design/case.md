@@ -111,10 +111,12 @@ exactly the part that differs per flow. Each entry is copied to
   raises. Letting either side win silently would mean a flow ran without the bundle it
   declared. The names are read from the seed source, so re-seeding a flow dir does not
   mistake its own earlier output for a collision.
-- A workspace `.claude/settings.json` or `.claude/settings.local.json` raises. Turning on
+- A seed carrying `.claude/settings.json` or `.claude/settings.local.json` raises. Turning on
   the `project` setting source turns settings files on as well, and a flow is steered only
   by declared flow fields; the engine asserts none exists rather than inheriting one
-  silently.
+  silently. Like the collision names, this is read from the seed source: a settings file the
+  AGENT wrote mid-run is the agent's doing, not the case's declaration.
+- Two `skill_dirs` entries sharing a basename raise, for the same reason as a seed collision.
 
 Why it runs before `Case.setup` rather than inside it: an override that forgot to call up
 would silently change the workspace, which is exactly the defect the declaration replaces.

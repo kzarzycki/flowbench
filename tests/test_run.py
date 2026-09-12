@@ -983,22 +983,22 @@ def test_title_includes_trial_segment(tmp_path):
     )
 
 
-def test_make_flow_driver_threads_skill_dirs(tmp_path):
+def test_make_flow_driver_threads_the_flow_fields(tmp_path):
+    """`skill_dirs` is deliberately NOT threaded here since #157: the driver no
+    longer carries it, because the seeding step places those skills in the
+    workspace and `run_case` passes them straight to `seed_workspace`."""
     flow = {
         "name": "codex",
         "harness": "codex-native",
         "model": "gpt-5.5",
+        "skills": ["project"],
         "skill_dirs": [tmp_path / "skills" / "brainstorming"],
     }
     d = make_flow_driver_omni(flow, tmp_path)
-    assert d.skill_dirs == [tmp_path / "skills" / "brainstorming"]
+    assert not hasattr(d, "skill_dirs")
+    assert d.skills == ["project"]
     assert d.harness == "codex-native"
     assert d.model == "gpt-5.5"
-
-
-def test_make_flow_driver_defaults_no_skill_dirs(tmp_path):
-    d = make_flow_driver_omni({"name": "x"}, tmp_path)
-    assert d.skill_dirs == []
 
 
 # --- N-way (3-flow) coverage -------------------------------------------------

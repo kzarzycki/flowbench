@@ -214,6 +214,13 @@ def test_flow_declares_the_seeded_skill():
         ([{"type": "function_call", "name": "Write", "arguments": "{}"}], False),
         ([{"type": "function_call", "name": "Skill", "arguments": "not json"}], False),
         ([{"type": "function_call", "name": "Skill"}], False),
+        # valid JSON that is not an object: `.get` would raise AttributeError
+        ([{"type": "function_call", "name": "Skill", "arguments": "3"}], False),
+        ([{"type": "function_call", "name": "Skill", "arguments": "[1]"}], False),
+        ([{"type": "function_call", "name": "Skill", "arguments": "null"}], False),
+        ([{"type": "function_call", "name": "Skill", "arguments": '"x"'}], False),
+        # an object whose `skill` is not a string
+        ([{"type": "function_call", "name": "Skill", "arguments": '{"skill": 7}'}], False),
         ([], False),
     ],
 )

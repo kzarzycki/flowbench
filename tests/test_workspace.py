@@ -324,6 +324,64 @@ def test_reseeding_the_same_flow_dir_is_idempotent(tmp_path):
     assert [p.name for p in (flow_dir / ".claude" / "skills").iterdir()] == ["greeting-file"]
 
 
+def test_reseeding_does_not_commit_the_agents_work(tmp_path):
+    """The skills commit is scoped to `.claude/skills` at EVERY step. An unscoped
+    `git commit` would sweep whatever the agent staged into a commit labelled as
+    the seed — attributing the agent's output to the framework and corrupting the
+    very diff the placement exists to keep clean."""
+    case_dir = _case_dir(tmp_path)
+    flow_dir = tmp_path / "flow"
+    src = _skill_dir(tmp_path / "src", "greeting-file")
+    # A DECLARED repo, not a seeded one: re-seeding a seed that carries its own
+    # `.git` raises from the seed copytree itself (flowbench#176). The second
+    # seeding here takes the same scoped-commit branch, which is what is under test.
+    seed_workspace(Workspace(git=True), case_dir, flow_dir, skill_dirs=[src])
+    commits = _git(flow_dir, "rev-list", "--count", "HEAD")
+
+    # the agent does some work and stages it, as a workflow flow would
+    (flow_dir / "app.py").write_text("print('agent work')\n")
+    _git(flow_dir, "add", "app.py")
+
+    seed_workspace(Workspace(git=True), case_dir, flow_dir, skill_dirs=[src])
+
+    assert _git(flow_dir, "rev-list", "--count", "HEAD") == commits
+    # the COMMITTED tree, not the index — the index is dirty because the test
+    # staged app.py, which is exactly the state an unscoped commit would sweep up
+    committed = _git(flow_dir, "ls-tree", "-r", "--name-only", "HEAD").splitlines()
+    assert "app.py" not in committed
+    assert ".claude/skills/greeting-file/SKILL.md" in committed
+
+
+def test_an_agent_created_repo_is_never_committed_into(tmp_path):
+    """`.git` merely existing in the flow dir is not the engine's to write to —
+    only a declared repo, or one the SEED brought, is framework-owned history."""
+    case_dir = _case_dir(tmp_path)
+    flow_dir = tmp_path / "flow"
+    src = _skill_dir(tmp_path / "src", "greeting-file")
+    flow_dir.mkdir()
+    _git(flow_dir, "init", "-q")
+    _git(flow_dir, "config", "user.email", "agent@example.com")
+    _git(flow_dir, "config", "user.name", "agent")
+
+    record = seed_workspace(Workspace(), case_dir, flow_dir, skill_dirs=[src])
+
+    assert record["seed_commit"] is None
+    assert _git(flow_dir, "rev-list", "--count", "--all") == "0"
+    assert (flow_dir / ".claude" / "skills" / "greeting-file" / "SKILL.md").is_file()
+
+
+def test_two_skill_dirs_with_the_same_name_raise(tmp_path):
+    """Same failure as a seed collision: one would silently overwrite the other,
+    so the flow would not get what it declared."""
+    case_dir = _case_dir(tmp_path)
+    flow_dir = tmp_path / "flow"
+    a = _skill_dir(tmp_path / "a", "greeting-file")
+    b = _skill_dir(tmp_path / "b", "greeting-file")
+
+    with pytest.raises(ValueError, match="both named 'greeting-file'"):
+        seed_workspace(Workspace(), case_dir, flow_dir, skill_dirs=[a, b])
+
+
 @pytest.mark.parametrize("name", ["settings.json", "settings.local.json"])
 def test_seeded_workspace_settings_file_raises(tmp_path, name):
     """A8: silently inheriting one is the failure mode already on record."""
@@ -333,6 +391,20 @@ def test_seeded_workspace_settings_file_raises(tmp_path, name):
 
     with pytest.raises(ValueError, match=name):
         seed_workspace(Workspace(seed="seed"), case_dir, flow_dir)
+
+
+def test_an_agent_written_settings_file_does_not_fail_a_reseed(tmp_path):
+    """The assertion is about what the CASE declares, so it reads the seed source.
+    A settings file the AGENT wrote mid-run is the agent's doing, and failing the
+    next seeding over it would blame the case for something it never declared."""
+    case_dir = _case_dir(tmp_path)
+    flow_dir = tmp_path / "flow"
+    _seed_tree(case_dir, {"README.md": "project\n"})
+    seed_workspace(Workspace(seed="seed"), case_dir, flow_dir)
+    (flow_dir / ".claude").mkdir(exist_ok=True)
+    (flow_dir / ".claude" / "settings.local.json").write_text("{}\n")
+
+    seed_workspace(Workspace(seed="seed"), case_dir, flow_dir)  # does not raise
 
 
 def test_a_seed_may_carry_skills_without_settings(tmp_path):

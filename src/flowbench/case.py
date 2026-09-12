@@ -78,21 +78,29 @@ def seed_workspace(workspace: Workspace, case_dir, flow_dir, skill_dirs=()) -> d
 
     seed_files = 0
     seed_skill_names: set[str] = set()
+    seed_has_repo = False
     if workspace.seed is not None:
         src = _seed_dir(workspace.seed, case_dir)
+        _reject_workspace_settings(src)
         shutil.copytree(src, flow_dir, dirs_exist_ok=True)
         seed_files = sum(1 for p in src.rglob("*") if p.is_file())
-        # Read the SOURCE, never the materialized flow dir: after one seeding the
-        # flow dir holds the skills this step itself placed, so a snapshot taken
-        # there would call every declared skill a collision on the second run.
+        # Every fact about the seed is read from the SOURCE, never from the
+        # materialized flow dir: that dir also holds whatever the last seeding
+        # placed and whatever the AGENT then wrote, and neither is the case's
+        # declaration. A snapshot taken there would call every declared skill a
+        # collision on the second run, and would blame the case for a settings
+        # file the agent itself created.
         seed_skills = src / ".claude" / "skills"
         if seed_skills.is_dir():
             seed_skill_names = {p.name for p in seed_skills.iterdir()}
+        seed_has_repo = (src / ".git").exists()
 
-    _reject_workspace_settings(flow_dir)
     skills = _place_skills(flow_dir, skill_dirs, seed_skill_names)
 
-    needs_commit = workspace.git or (skills and (flow_dir / ".git").exists())
+    # A commit only where the framework owns the history: the declared repo, or a
+    # repo the SEED brought. Never a repo the AGENT created — `.git` merely
+    # existing in the flow dir is not the engine's to write to.
+    needs_commit = workspace.git or (skills and seed_has_repo)
     seed_commit = _seed_commit(flow_dir, bool(skills)) if needs_commit else None
     return {
         "seed": workspace.seed,
@@ -103,16 +111,20 @@ def seed_workspace(workspace: Workspace, case_dir, flow_dir, skill_dirs=()) -> d
     }
 
 
-def _reject_workspace_settings(flow_dir: Path) -> None:
-    """A settings file in the workspace is a second, undeclared steering channel.
+def _reject_workspace_settings(seed_src: Path) -> None:
+    """A settings file in the SEED is a second, undeclared steering channel.
 
     Turning the `project` setting source on — which is how a flow's skills load —
-    also turns on `<flow_dir>/.claude/settings.json`, and settings files are exactly
-    what differ between a `skills: none` flow and a `skills: [project]` one. A flow
-    is the full configuration, every knob declared and recorded, so the engine
-    asserts none exists rather than silently inheriting one."""
+    also turns on the workspace's `.claude/settings.json`, and settings files are
+    exactly what differ between a `skills: none` flow and a `skills: [project]` one.
+    A flow is the full configuration, every knob declared and recorded, so the engine
+    asserts the case seeds none rather than silently inheriting one.
+
+    Checked on the seed SOURCE, like every other seed fact: a settings file the AGENT
+    wrote mid-run is the agent's doing, and failing a repeat seeding over it would
+    blame the case for something the case never declared."""
     for name in ("settings.json", "settings.local.json"):
-        path = flow_dir / ".claude" / name
+        path = seed_src / ".claude" / name
         if path.exists():
             raise ValueError(
                 f"{path}: a case may not seed a workspace settings file — a flow is "
@@ -125,9 +137,14 @@ def _place_skills(flow_dir: Path, skill_dirs, seed_skill_names: set[str]) -> lis
     names placed. A name the SEED already carries is a collision the case author has
     to resolve: letting either side win silently would mean a flow ran without the
     bundle it declared."""
-    placed = []
+    placed: list[str] = []
     for entry in skill_dirs:
         name = Path(entry).name
+        if name in placed:
+            raise ValueError(
+                f"{flow_dir}: two skill_dirs entries are both named {name!r} — one would "
+                "silently overwrite the other, so the flow would not get what it declared"
+            )
         if name in seed_skill_names:
             raise ValueError(
                 f"{flow_dir}: flow skill {name!r} collides with one the workspace seed "
@@ -200,9 +217,13 @@ def _seed_commit(flow_dir: Path, skills_placed: bool = False) -> str:
         # a .gitkeep the case never declared and every scorer must learn to ignore.
         run("commit", "-q", "--allow-empty", "-m", SEED_COMMIT_MESSAGE)
     elif skills_placed:
+        # Scoped to the skills at EVERY step, including the commit: the flow dir may
+        # already hold agent work, and an unscoped `commit` would sweep it into a
+        # commit labelled as the seed — attributing the agent's output to the
+        # framework and corrupting the very diff this placement exists to keep clean.
         run("add", "--", ".claude/skills")
-        if run("diff", "--cached", "--quiet", check=False).returncode:
-            run("commit", "-q", "-m", SEED_SKILLS_COMMIT_MESSAGE)
+        if run("diff", "--cached", "--quiet", "--", ".claude/skills", check=False).returncode:
+            run("commit", "-q", "-m", SEED_SKILLS_COMMIT_MESSAGE, "--", ".claude/skills")
     return run("rev-parse", "HEAD").stdout.strip()
 
 

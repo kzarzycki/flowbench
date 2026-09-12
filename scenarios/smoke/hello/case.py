@@ -28,9 +28,14 @@ def _skill_fired(session: dict, name: str) -> bool:
         if item.get("type") != "function_call" or item.get("name") != "Skill":
             continue
         try:
-            skill = json.loads(item.get("arguments") or "{}").get("skill")
+            args = json.loads(item.get("arguments") or "{}")
         except (ValueError, TypeError):
             continue
+        # A scorer must not lose a whole run to one malformed item: valid JSON that
+        # is not an object (a number, a list, null) has no `.get`.
+        if not isinstance(args, dict):
+            continue
+        skill = args.get("skill")
         if isinstance(skill, str) and skill.rsplit(":", 1)[-1] == name:
             return True
     return False

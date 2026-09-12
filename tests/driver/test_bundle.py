@@ -1,6 +1,8 @@
-"""The per-flow bundle: render_config emits harness + the host-skill filter, and
-_build_bundle copies each flow's skill dirs and MCP yamls into the omnigent bundle
-layout the claude-native bridge reads (<bundle>/skills/<name>/, tools/mcp/)."""
+"""The per-flow bundle: render_config emits harness + the `skills` setting sources,
+and _build_bundle copies each flow's MCP yamls into the omnigent bundle layout the
+claude-native bridge reads (tools/mcp/). Skills are NOT in the bundle since #157 —
+they are seeded into the flow's workspace; session_metadata turns a `skills` list
+into the `--setting-sources` flag that loads them."""
 
 import hashlib
 import inspect
@@ -44,21 +46,10 @@ def test_render_config_skills_list_is_flow_yaml(tmp_path):
 def test_build_bundle_carries_mcp_but_not_skills(tmp_path):
     """A6: skills are seeded into the workspace (#157), never tarred. Carrying them
     here too would load each one twice, under two names."""
-    # two fake skills (each a dir with SKILL.md) + one MCP yaml
-    skills_src = tmp_path / "src"
-    for name in ("brainstorming", "tdd"):
-        d = skills_src / name
-        d.mkdir(parents=True)
-        (d / "SKILL.md").write_text(f"# {name}")
     mcp = tmp_path / "adf.yaml"
     mcp.write_text("transport: http")
 
-    drv = OmnigentDriver(
-        run_dir=tmp_path / "ws",
-        skills="none",
-        skill_dirs=[skills_src / "brainstorming", skills_src / "tdd"],
-        mcp_files=[mcp],
-    )
+    drv = OmnigentDriver(run_dir=tmp_path / "ws", skills="none", mcp_files=[mcp])
     out = _extract(drv._build_bundle(), tmp_path / "out")
 
     assert (out / "config.yaml").exists()
@@ -109,7 +100,6 @@ def _spec(tmp_path, **kw):
         ),
         "agent_prompt": None,
         "skills": "all",
-        "skill_dirs": [],
         "mcp_files": [],
         "session_title": None,
         "project": None,
@@ -129,14 +119,12 @@ def test_golden_render_config_three_variants(tmp_path):
 
 
 def test_golden_bundle_members_and_content_hashes(tmp_path):
-    skill_md, mcp_yaml = "# brainstorming\n", "name: fetch\n"
-    sk = tmp_path / "src" / "brainstorming"
-    sk.mkdir(parents=True)
-    (sk / "SKILL.md").write_text(skill_md)
+    mcp_yaml = "name: fetch\n"
     mcp = tmp_path / "src" / "fetch.yaml"
+    mcp.parent.mkdir(parents=True)
     mcp.write_text(mcp_yaml)
     run_dir = tmp_path / "run"
-    spec = _spec(run_dir, skills="none", skill_dirs=[sk], mcp_files=[mcp])
+    spec = _spec(run_dir, skills="none", mcp_files=[mcp])
 
     with tarfile.open(fileobj=io.BytesIO(build_bundle(spec))) as tar:
         rows = sorted(
@@ -191,12 +179,9 @@ def test_functions_need_only_the_bundlespec_fields(tmp_path):
     `spec.render_config()`, the natural transcription slip when un-methoding
     `build_bundle`) raises AttributeError here, while the driver-backed tests
     above would stay green because OmnigentDriver still has that method."""
-    sk = tmp_path / "s" / "k"
-    sk.mkdir(parents=True)
-    (sk / "SKILL.md").write_text("x\n")
     mcp = tmp_path / "m.yaml"
     mcp.write_text("y\n")
-    spec = _spec(tmp_path / "run", skills="none", skill_dirs=[sk], mcp_files=[mcp])
+    spec = _spec(tmp_path / "run", skills="none", mcp_files=[mcp])
     assert set(vars(spec)) == set(BundleSpec.__annotations__)
 
     render_config(spec)

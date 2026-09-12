@@ -1485,12 +1485,9 @@ async def test_start_raises_when_no_host_has_claude_native(tmp_path, monkeypatch
 
 
 def _bundle_bits(tmp_path):
-    sk = tmp_path / "skills" / "brainstorming"
-    sk.mkdir(parents=True)
-    (sk / "SKILL.md").write_text("# b\n")
     mcp = tmp_path / "fetch.yaml"
     mcp.write_text("transport: http\n")
-    return sk, mcp
+    return mcp
 
 
 @pytest.mark.parametrize(
@@ -1498,29 +1495,27 @@ def _bundle_bits(tmp_path):
     [
         ("reasoning_effort", "high", ["reasoning_effort"]),
         ("skills", "none", ["skills"]),
-        # skill_dirs is NOT here: since #157 it reaches every harness through the
-        # seeded workspace, so warning about it would be false.
-        ("skill_dirs", "SKILL_DIR", []),
+        # No skill_dirs row: since #157 the driver does not carry the field at all
+        # — the seeding step places those skills in the workspace, for every harness.
         ("mcp_files", "MCP_FILE", ["mcp_files"]),
     ],
 )
 def test_warns_only_about_the_field_that_is_set(tmp_path, field, value, expected):
     """One field at a time: an implementation that names all four whenever any
     one is set passes an all-fields test and fails here."""
-    sk, mcp = _bundle_bits(tmp_path)
-    value = {"SKILL_DIR": [sk], "MCP_FILE": [mcp]}.get(value, value)
+    mcp = _bundle_bits(tmp_path)
+    value = {"MCP_FILE": [mcp]}.get(value, value)
     d = OmnigentDriver(run_dir=tmp_path, harness="antigravity-native", **{field: value})
     assert d._unhonoured_fields() == expected
 
 
 def test_warns_about_every_field_that_is_set(tmp_path):
-    sk, mcp = _bundle_bits(tmp_path)
+    mcp = _bundle_bits(tmp_path)
     d = OmnigentDriver(
         run_dir=tmp_path,
         harness="antigravity-native",
         reasoning_effort="high",
         skills="none",
-        skill_dirs=[sk],
         mcp_files=[mcp],
     )
     assert d._unhonoured_fields() == ["mcp_files", "reasoning_effort", "skills"]
@@ -1528,13 +1523,12 @@ def test_warns_about_every_field_that_is_set(tmp_path):
 
 def test_no_warning_when_the_harness_carries_them(tmp_path):
     """Harness-scoped, not a blanket complaint: claude-native delivers all four."""
-    sk, mcp = _bundle_bits(tmp_path)
+    mcp = _bundle_bits(tmp_path)
     d = OmnigentDriver(
         run_dir=tmp_path,
         harness="claude-native",
         reasoning_effort="high",
         skills="none",
-        skill_dirs=[sk],
         mcp_files=[mcp],
     )
     assert d._unhonoured_fields() == []
@@ -1552,7 +1546,7 @@ def test_codex_keeps_reasoning_effort_but_not_bundle_skills(tmp_path):
 
     Since #157 `skill_dirs` is seeded into the workspace and so is delivered to
     codex too; `mcp_files` is the field that still rides the bundle."""
-    _, mcp = _bundle_bits(tmp_path)
+    mcp = _bundle_bits(tmp_path)
     d = OmnigentDriver(
         run_dir=tmp_path, harness="codex-native", reasoning_effort="high", mcp_files=[mcp]
     )
@@ -1563,14 +1557,13 @@ async def test_start_logs_the_warning_once(tmp_path, monkeypatch, caplog):
     """The wiring the pure tests above deliberately do not cover."""
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     _patch_start(monkeypatch, _FakeHttp(hosts=[_host("agy_box", "antigravity-native")]))
-    sk, mcp = _bundle_bits(tmp_path)
+    mcp = _bundle_bits(tmp_path)
     d = OmnigentDriver(
         run_dir=tmp_path / "run",
         harness="antigravity-native",
         model="gemini-3.8-flash-low",
         reasoning_effort="high",
         skills="none",
-        skill_dirs=[sk],
         mcp_files=[mcp],
     )
     with caplog.at_level(logging.WARNING, logger="flowbench.driver.omnigent"):
@@ -1583,8 +1576,8 @@ async def test_start_logs_the_warning_once(tmp_path, monkeypatch, caplog):
 async def test_start_is_quiet_for_a_harness_that_carries_the_fields(tmp_path, monkeypatch, caplog):
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     _patch_start(monkeypatch, _FakeHttp())
-    sk, _ = _bundle_bits(tmp_path)
-    d = OmnigentDriver(run_dir=tmp_path / "run", skills="none", skill_dirs=[sk])
+    mcp = _bundle_bits(tmp_path)
+    d = OmnigentDriver(run_dir=tmp_path / "run", skills="none", mcp_files=[mcp])
     with caplog.at_level(logging.WARNING, logger="flowbench.driver.omnigent"):
         await d.start()
     assert [r for r in caplog.records if r.levelno == logging.WARNING] == []

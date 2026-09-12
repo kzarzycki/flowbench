@@ -75,6 +75,49 @@ def test_skills_none_without_skill_dirs_loads(tmp_path):
     assert flow["skills"] == "none"
 
 
+@pytest.mark.parametrize(
+    "skills",
+    [
+        "none",  # --setting-sources "" — loads nothing at all
+        [],  # emits no flag, so the CLI's defaults leak the host ~/.claude (#151)
+        None,
+        "project",  # a bare string is not a source list; no flag is emitted
+    ],
+)
+def test_skills_that_cannot_load_the_workspace_are_rejected(tmp_path, skills):
+    """A flow scored as though it had a bundle it never received is the one lie
+    this benchmark cannot afford, so every shape that loses the declared skills —
+    or silently gains the operator's own — fails at load."""
+    path = _flows_file(
+        tmp_path, [{"name": "sp", "skills": skills, "skill_dirs": ["skills/greeting-file"]}]
+    )
+
+    with pytest.raises(ValueError, match="sp"):
+        load_flows(path)
+
+
+@pytest.mark.parametrize("skills", [[""], [None], ["project", 3]])
+def test_skills_entries_must_be_source_names(tmp_path, skills):
+    """A non-string entry would otherwise die inside `",".join` at session time."""
+    path = _flows_file(
+        tmp_path, [{"name": "sp", "skills": skills, "skill_dirs": ["skills/greeting-file"]}]
+    )
+
+    with pytest.raises(ValueError, match="setting-source"):
+        load_flows(path)
+
+
+def test_skills_all_with_skill_dirs_loads(tmp_path):
+    """`all` is legal and explicit: the CLI's default sources include `project`."""
+    path = _flows_file(
+        tmp_path, [{"name": "sp", "skills": "all", "skill_dirs": ["skills/greeting-file"]}]
+    )
+
+    (flow,) = load_flows(path)
+
+    assert flow["skills"] == "all"
+
+
 def test_skills_list_with_skill_dirs_loads(tmp_path):
     path = _flows_file(
         tmp_path,

@@ -30,7 +30,6 @@ class BundleSpec(Protocol):
     agent_description: str
     agent_prompt: str | None
     skills: str | list[str]
-    skill_dirs: list[Path]
     mcp_files: list[Path]
     session_title: str | None
     project: str | None
