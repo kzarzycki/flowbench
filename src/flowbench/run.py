@@ -26,6 +26,7 @@ from flowbench.runner.judge import (
     build_judge_prompt,
     parse_verdict,
 )
+from flowbench.schema import SCHEMA_VERSION, RunKind, flow_outcome, validate_run_meta
 from flowbench.transcript import render_transcript
 
 NO_DELIVERABLE = "(no deliverable declared)"
@@ -207,7 +208,17 @@ async def run_case(
                 error = f"{type(e).__name__}: {e}"
                 card = {"error": error}
                 flow_stats[name]["score_error"] = error
+            flow_stats[name]["outcome"] = flow_outcome(
+                session=session,
+                has_deliverable=has_deliverable,
+                score_error=flow_stats[name].get("score_error"),
+                card=card,
+            )
             if card is not None:
+                # The envelope key first, and only when the card does not declare
+                # its own — a case that versions its scorecard keeps that version.
+                if "schema_version" not in card:
+                    card = {"schema_version": SCHEMA_VERSION, **card}
                 (flow_dir / "scorecard.json").write_text(json.dumps(card, indent=2, default=str))
         finally:
             await case.teardown(flow, flow_dir)
@@ -232,6 +243,8 @@ async def run_case(
         winner_flow = None
 
     meta = {
+        "schema_version": SCHEMA_VERSION,
+        "kind": RunKind.TRIAL,
         "run_id": run_id,
         "case": case.name,
         "deliverable": case.deliverable,
@@ -252,9 +265,15 @@ async def run_case(
             else {}
         ),
         "flow_stats": flow_stats,
+        # Built from flow_stats, so the two maps cannot disagree. A flow that
+        # raised before flow_stats[name] was set (case.setup blew up) is absent
+        # from both.
+        "outcomes": {n: s["outcome"] for n, s in flow_stats.items()},
         "models": {f["name"]: f.get("model") for f in flows},
         "reasoning_effort": {f["name"]: f.get("reasoning_effort") for f in flows},
     }
+    # Not caught: it raises only on a manifest this engine built wrong.
+    validate_run_meta(meta)
     (run_root / "run.json").write_text(json.dumps(meta, indent=2, default=str))
     if has_judge:
         render_report(run_root)  # pure reader over the files just written
