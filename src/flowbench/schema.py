@@ -40,7 +40,11 @@ class SchemaVersionError(ValueError):
 
 
 def schema_version_of(doc: dict) -> int:
-    """The document's version; a missing `schema_version` is version 0."""
+    """The document's version; a missing `schema_version` is version 0. A document
+    that is not a mapping at all is version 0 too — `compare` reads whatever JSON a
+    run dir happens to hold and must degrade on it, never raise."""
+    if not isinstance(doc, dict):
+        return 0
     try:
         return int(doc.get("schema_version", 0))
     except (TypeError, ValueError):

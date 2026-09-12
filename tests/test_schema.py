@@ -9,6 +9,7 @@ from flowbench.schema import (
     flow_outcome,
     require_version,
     run_kind,
+    schema_version_of,
     validate_run_meta,
 )
 from flowbench.types import TurnStatus
@@ -180,3 +181,10 @@ def test_run_kind_reads_v1_and_infers_v0():
     assert run_kind({"trials": []}) is RunKind.AGGREGATE
     assert run_kind({"flow_stats": {}}) is RunKind.TRIAL
     assert run_kind({}) is None
+
+
+def test_a_document_that_is_not_a_mapping_is_version_0():
+    """`compare` reads any JSON a run dir holds; a `[]` or `null` run.json must
+    degrade to v0, not raise, or the isolation rule breaks on one bad file."""
+    for doc in ([], None, "1", 7):
+        assert schema_version_of(doc) == 0
