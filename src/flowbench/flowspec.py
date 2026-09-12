@@ -33,8 +33,7 @@ def _check_skills_can_load(flow: dict, path, wants_workspace: bool) -> None:
 
     Those two are rejected for EVERY flow: the leak is the declaration's, not the
     skill_dirs'. `wants_workspace` adds the rest, for a flow whose `skill_dirs` the
-    seeding step put in `<flow_dir>/.claude/skills/` — only the `project` source
-    reads that, and `"none"` (omnigent's `--setting-sources ""`, appended after
+    seeding step put in `<flow_dir>/.claude/skills/` — `"none"` (omnigent's `--setting-sources ""`, appended after
     flowbench's own args) reads nothing at all.
 
     `"all"` is legal and explicit: its defaults do include the project source.

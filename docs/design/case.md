@@ -148,8 +148,8 @@ the SHA the pinned dates exist to fix.
 | `flow_stats[<flow>]` | `seeded_skills` | the skill names placed into that flow dir, sorted |
 
 The declaration is the case's, so it is one value for the run. The commit and the skills
-placed are facts about one flow dir: seeding a dir that already holds a repo keeps that repo's `HEAD`, so a single
-run-level SHA could be a lie about some other flow.
+placed are facts about one flow dir: seeding a dir that already holds a repo keeps that repo's
+`HEAD`, so a single run-level SHA could be a lie about some other flow.
 
 **A seeded file is not a deliverable.** `find_deliverable` drops any candidate FILE that
 exists in the seed tree and still matches it byte for byte — the flow did not produce it — and it
