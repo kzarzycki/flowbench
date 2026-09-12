@@ -33,4 +33,14 @@ def load_flows(path) -> list[dict]:
                     )
                 resolved.append(skill_dir)
             flow["skill_dirs"] = resolved
+            if resolved and flow.get("skills") == "none":
+                # "none" is omnigent's `--setting-sources ""`, appended after our
+                # own args, which loads NOTHING — not the host ~/.claude and not
+                # the workspace .claude/skills/ the seeding step just filled. A
+                # flow that scored as if it had its bundle would be a silent lie.
+                raise ValueError(
+                    f"flow {flow.get('name')!r} in {path}: skills 'none' loads nothing "
+                    "from the workspace, so the declared skill_dirs would be invisible "
+                    "— use skills: [project]"
+                )
     return flows
