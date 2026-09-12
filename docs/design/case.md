@@ -82,7 +82,7 @@ Two mechanics that matter to anyone touching this:
 Engineering rarely starts from an empty directory, so a case says what its flow dir holds
 before the agent's first turn. `flowbench.case.Workspace` is that declaration, and
 `run_case` materializes it — for every flow, **before** `Case.setup` — through the one
-function `seed_workspace(workspace, case_dir, flow_dir)`.
+function `seed_workspace(workspace, case_dir, flow_dir, skill_dirs=())`.
 
 | Field | Default | What it declares |
 | --- | --- | --- |
@@ -100,6 +100,24 @@ workspace goes through it, against this one declaration, recorded the same way. 
 is missing, is a file, or resolves outside the case folder raises `ValueError` naming the
 case folder and the value.
 
+**The flow's skills are seeded here too**, which is why `skill_dirs` is an argument rather
+than a `Workspace` field: the declaration belongs to the case and is identical for every
+flow — that is what lets one run-level record be true for all of them — while skills are
+exactly the part that differs per flow. Each entry is copied to
+`<flow_dir>/.claude/skills/<name>/`, where the harness's own project convention finds it
+(`docs/design/runner.md` → "Where a flow's skills live at run time"). Two rules:
+
+- A skill name the **seed** already carries under `.claude/skills/` is a collision and
+  raises. Letting either side win silently would mean a flow ran without the bundle it
+  declared. The names are read from the seed source, so re-seeding a flow dir does not
+  mistake its own earlier output for a collision.
+- A seed carrying `.claude/settings.json` or `.claude/settings.local.json` raises. Turning on
+  the `project` setting source turns settings files on as well, and a flow is steered only
+  by declared flow fields; the engine asserts none exists rather than inheriting one
+  silently. Like the collision names, this is read from the seed source: a settings file the
+  AGENT wrote mid-run is the agent's doing, not the case's declaration.
+- Two `skill_dirs` entries sharing a basename raise, for the same reason as a seed collision.
+
 Why it runs before `Case.setup` rather than inside it: an override that forgot to call up
 would silently change the workspace, which is exactly the defect the declaration replaces.
 `setup` keeps its meaning — extra work *after* the declared workspace exists.
@@ -112,6 +130,13 @@ The operator's own git config is neutralised for the same reason — signing off
 SHA the pinned dates exist to fix. An empty declaration with `git=True` commits nothing
 (`--allow-empty`) instead of inventing a `.gitkeep` the case never declared.
 
+Skills are placed **before** that commit, so they belong to the seed rather than to the
+agent's diff — the workflow flows branch and commit, and a `git add -A` would otherwise
+sweep in whatever the framework placed. When the seed brought its own repo the init branch
+never runs, so a second commit (`chore: seed flow skills`) tracks just the placed skills,
+and only when something was actually staged: an empty commit on every repeat run would move
+the SHA the pinned dates exist to fix.
+
 `run.json` records what was materialized, each fact where it is true:
 
 | Where | Key | Meaning |
@@ -120,10 +145,11 @@ SHA the pinned dates exist to fix. An empty declaration with `git=True` commits 
 | `workspace` | `git` | whether a repo was declared |
 | `workspace` | `seed_files` | how many files the seed tree holds |
 | `flow_stats[<flow>]` | `seed_commit` | that flow dir's seed commit, or `null` with no repo |
+| `flow_stats[<flow>]` | `seeded_skills` | the skill names placed into that flow dir, sorted |
 
-The declaration is the case's, so it is one value for the run. The commit is a fact about
-one flow dir: seeding a dir that already holds a repo keeps that repo's `HEAD`, so a single
-run-level SHA could be a lie about some other flow.
+The declaration is the case's, so it is one value for the run. The commit and the skills
+placed are facts about one flow dir: seeding a dir that already holds a repo keeps that repo's
+`HEAD`, so a single run-level SHA could be a lie about some other flow.
 
 **A seeded file is not a deliverable.** `find_deliverable` drops any candidate FILE that
 exists in the seed tree and still matches it byte for byte — the flow did not produce it — and it
@@ -184,7 +210,7 @@ flowchart TD
   load[load_case case_dir<br/>nearest case.py, one subclass] --> gate{"check_gradable"}
   gate -- "judge.md and 1 flow<br/>or 1 flow and no score()" --> err[load error, no session spent]
   gate -- ok --> flows[for each flow in flows.yaml]
-  flows --> seed[seed_workspace: declared tree + history]
+  flows --> seed[seed_workspace: declared tree + history<br/>+ the flow's skills]
   seed --> setup[case.setup flow, flow_dir]
   setup --> sess[session: kickoff, simulator relay,<br/>DONE token, max_turns, deadline_s]
   sess --> probe[case.find_deliverable<br/>grace-poll, then capture]
