@@ -349,6 +349,8 @@ async def run_case_n(
     root = Path(runs_root if runs_root is not None else case.settings.runs_root).resolve()
     run_root = root / case.name / run_id
     aggregate_meta = {
+        "schema_version": SCHEMA_VERSION,
+        "kind": RunKind.AGGREGATE,
         "run_id": run_id,
         "case": case.name,
         "deliverable": case.deliverable,
@@ -362,6 +364,8 @@ async def run_case_n(
         "winner": winner,
         "score_means": score_means,  # per flow name, mean per criterion
     }
+    # Not caught: it raises only on a manifest this engine built wrong.
+    validate_run_meta(aggregate_meta)
     (run_root / "run.json").write_text(json.dumps(aggregate_meta, indent=2, default=str))
     render_aggregate_report(run_root)  # pure reader over the files just written
     return {

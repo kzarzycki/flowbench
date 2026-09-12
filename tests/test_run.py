@@ -22,6 +22,7 @@ from flowbench.run import (
     run_case,
     run_case_n,
 )
+from flowbench.schema import RunKind, validate_run_meta
 from flowbench.settings import Settings
 from flowbench.testing import FakeDriver, MissingPlanDriver, StubSim, n_run_factories
 from flowbench.types import TurnResult, TurnStatus
@@ -1336,9 +1337,17 @@ def test_run_case_n_unjudged_aggregate_empty(tmp_path, n):
     root = Path(result["run_root"])
     meta = json.loads((root / "run.json").read_text())
     assert meta["winner"] is None
+    assert meta["schema_version"] == 1
+    # n=1 writes run_case's own trial meta, not an aggregate.
+    expected = RunKind.AGGREGATE if n > 1 else RunKind.TRIAL
+    assert meta["kind"] == expected
+    # Round trip: the file on disk, not just the dict, satisfies its own shape.
+    assert validate_run_meta(meta) is expected
     if n > 1:  # n=1 writes run_case's own meta; the aggregate keys/report exist only for n>1
         assert meta["counts"] == {} and meta["score_means"] == {}
         assert (root / "report.html").is_file()
+        trial_meta = json.loads((root / "trial-01" / "run.json").read_text())
+        assert validate_run_meta(trial_meta) is RunKind.TRIAL
 
 
 def test_case_score_error_is_isolated(tmp_path):
