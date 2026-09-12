@@ -104,8 +104,9 @@ async def run_case(
 
     Each flow dir is materialized from `case.workspace` before `case.setup` runs
     — the seed tree and, if declared, the repo holding it. `run.json` records the
-    declaration under `workspace` and each flow dir's seed commit under
-    `flow_stats[<flow>].seed_commit`.
+    declaration under `workspace`, and each flow dir's seed commit and the skill
+    names seeded into it under `flow_stats[<flow>].seed_commit` /
+    `flow_stats[<flow>].seeded_skills`.
 
     `case.score(flow, flow_dir, session)` runs after each flow's session and its
     result is written to `<flow_dir>/scorecard.json`; `None` writes no scorecard,
@@ -145,11 +146,17 @@ async def run_case(
         try:
             # The declared workspace, before anything else touches the flow dir:
             # a case that overrides `setup` must not be able to lose it.
-            seeded = seed_workspace(case.workspace, case.case_dir, flow_dir)
+            seeded = seed_workspace(
+                case.workspace,
+                case.case_dir,
+                flow_dir,
+                skill_dirs=flow.get("skill_dirs", []),
+            )
             seed_commit = seeded.pop("seed_commit")
+            seeded_skills = seeded.pop("skills")
             # What is left of the record is the declaration, identical for every
-            # flow by construction; the commit is the one part that is a fact
-            # about THIS flow dir, so it is recorded per flow.
+            # flow by construction; the commit and the skills placed are facts
+            # about THIS flow dir, so they are recorded per flow.
             workspace_declared = seeded
             await case.setup(flow, flow_dir)
             driver = make_flow_driver(flow, flow_dir)
@@ -195,6 +202,7 @@ async def run_case(
                 deliverable_stats["deliverable_path"] = deliverable_path
             flow_stats[name] = {
                 "seed_commit": seed_commit,
+                "seeded_skills": seeded_skills,
                 "exit_status": session.get("exit_status"),
                 "turns": session.get("turns"),
                 "duration_s": session.get("duration_s"),

@@ -320,6 +320,7 @@ async def test_run_json_records_the_workspace(tmp_path):
     assert meta["workspace"]["git"] is True
     assert meta["workspace"]["seed_files"] == 2
     assert "seed_commit" not in meta["workspace"]  # a per-flow fact, recorded per flow
+    assert "skills" not in meta["workspace"]  # likewise: what THIS flow dir got
     # Each flow dir's own HEAD, and one SHA across them — the pinned dates' point.
     heads = {_git(root / name, "rev-parse", "HEAD") for name in meta["flows"]}
     recorded = {meta["flow_stats"][name]["seed_commit"] for name in meta["flows"]}
@@ -1673,3 +1674,28 @@ async def test_the_probe_is_the_cases_find_deliverable(tmp_path, monkeypatch):
         probe = kwargs["artifact_probe"]
         assert probe.func == case.find_deliverable
         assert probe.args == (root / name,)
+
+
+async def test_run_records_seeded_skills(tmp_path):
+    """A9: the run dir is the record of what the flow had — which skills were
+    placed into its workspace, per flow, not per case declaration."""
+    case_dir = _case_files(tmp_path / "skills_case", flows=TWO_FLOWS)
+    skill = case_dir / "skills" / "greeting-file"
+    skill.mkdir(parents=True)
+    (skill / "SKILL.md").write_text("---\nname: greeting-file\ndescription: x\n---\ndo it\n")
+    flows = [dict(TWO_FLOWS[0], skill_dirs=["skills/greeting-file"]), dict(TWO_FLOWS[1])]
+    (case_dir / "flows.yaml").write_text(yaml.safe_dump({"flows": flows}))
+    case = PlanCase(case_dir)
+    mfd, ms, rj = n_run_factories(["A"])
+
+    result = await run_case(
+        case, run_id="r", make_flow_driver=mfd, make_simulator=ms, run_judge=rj, runs_root=tmp_path
+    )
+
+    root = Path(result["run_root"])
+    meta = json.loads((root / "run.json").read_text())
+    with_skill, without = flows[0]["name"], flows[1]["name"]
+    assert meta["flow_stats"][with_skill]["seeded_skills"] == ["greeting-file"]
+    assert meta["flow_stats"][without]["seeded_skills"] == []
+    assert (root / with_skill / ".claude" / "skills" / "greeting-file" / "SKILL.md").is_file()
+    assert not (root / without / ".claude").exists()
