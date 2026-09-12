@@ -160,6 +160,20 @@ def test_skills_report_is_namespace_agnostic():
     assert "writing-plans" in scorers.SUPERPOWERS_SKILLS and len(scorers.SUPERPOWERS_SKILLS) == 14
 
 
+def test_skills_report_accepts_bare_workspace_names():
+    """A11. Since #157 the vendored set is seeded into the workspace rather than
+    bundled, and the workspace convention exposes a BARE name where --plugin-dir
+    exposed `claude_code:<name>`. The ground truth this case scores on — real
+    `Skill` tool calls — must not change with the loading mechanism."""
+    workspace = {"items": [sessions._skill("writing-plans")]}
+    foreign = {"items": [sessions._skill("some-other-skill")]}
+    assert scorers.skills_report(workspace)["superpowers_used"] is True
+    assert scorers.skills_report(workspace)["invoked"] == ["writing-plans"]
+    assert scorers.skills_report(foreign)["superpowers_used"] is False
+    brainstorm = {"items": [sessions._skill("brainstorming")]}
+    assert scorers.skills_report(brainstorm)["brainstorming_used"] is True
+
+
 def test_detect_phases_trusts_brainstorming_skill_call(tmp_path):
     # brainstormed must be True purely from the Skill call, even if the agent asked
     # no literal "?" question and wrote no spec yet.
