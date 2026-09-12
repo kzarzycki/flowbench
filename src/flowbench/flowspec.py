@@ -27,14 +27,17 @@ def _check_skills_can_load(flow: dict, path, wants_workspace: bool) -> None:
     or silently gains the operator's own — and a flow scored as though it had its
     bundle is the one lie this benchmark cannot afford, so these fail at load.
 
-    - an EMPTY list emits no flag, so the CLI falls back to its default sources and
-      the host `~/.claude` leaks in (#151) — the accident that looks like `"all"`.
+    - an EMPTY list emits no flag, so the CLI falls back to its default sources
+      and the host `~/.claude` leaks in (#151) — the accident that looks like
+      `"all"`.
     - a non-string entry would die later inside `",".join`.
 
     Those two are rejected for EVERY flow: the leak is the declaration's, not the
     skill_dirs'. `wants_workspace` adds the rest, for a flow whose `skill_dirs` the
-    seeding step put in `<flow_dir>/.claude/skills/` — `"none"` (omnigent's `--setting-sources ""`, appended after
-    flowbench's own args) reads nothing at all.
+    seeding step put in `<flow_dir>/.claude/skills/`: only the `project` source reads
+    that directory, so a list without it — `[user]`, `[local]` — loses the declared
+    skills and loads the operator's own in their place, and `"none"` (omnigent's
+    `--setting-sources ""`, appended after flowbench's own args) reads nothing at all.
 
     `"all"` is legal and explicit: its defaults do include the project source.
     """
@@ -60,6 +63,12 @@ def _check_skills_can_load(flow: dict, path, wants_workspace: bool) -> None:
         raise ValueError(
             f"flow {name!r} in {path}: skills entries must be non-empty setting-source "
             f"names (user, project, local); got {bad!r}"
+        )
+    if wants_workspace and "project" not in skills:
+        raise ValueError(
+            f"flow {name!r} in {path}: skills {list(skills)!r} names sources that do not "
+            "include the workspace, so the declared skill_dirs would be invisible while the "
+            "operator's own skills loaded in their place — add project"
         )
 
 

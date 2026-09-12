@@ -51,11 +51,13 @@ reads — the host `~/.claude` included:
 | `"all"` | none emitted | the CLI's default sources, host `~/.claude` included |
 
 A flow declaring `skill_dirs` must declare sources that can actually load them, checked when
-`flows.yaml` loads. `"none"` loads neither the host nor the workspace; an EMPTY list emits no
-flag at all, so the CLI falls back to its defaults and the host `~/.claude` leaks in (#151); a
-non-string entry would die later inside the flag's `",".join`. Each is rejected by name, because
-a flow scored as though it had a bundle it never received is the one lie this benchmark cannot
-afford. `"all"` is legal and explicit — its defaults do include the project source.
+`flows.yaml` loads. `"none"` loads neither the host nor the workspace; a list without `project`
+— `[user]`, `[local]` — loses the declared skills and loads the operator's own in their place.
+Two shapes are rejected for every flow, with or without `skill_dirs`: an EMPTY list emits no
+flag at all, so the CLI falls back to its defaults and the host `~/.claude` leaks in (#151), and
+a non-string entry would die later inside the flag's `",".join`. Each is rejected by name,
+because a flow scored as though it had a bundle it never received is the one lie this benchmark
+cannot afford. `"all"` is legal and explicit — its defaults do include the project source.
 flowbench emits the `[project]` flag itself because omnigent maps a list to nothing at all
 (`omnigent/inner/bundle_skills.py`); its launch args are placed before omnigent's, so ours is
 the only `--setting-sources` whenever `skills` is not `"none"`.

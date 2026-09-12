@@ -137,3 +137,16 @@ def test_skills_empty_list_is_rejected_even_without_skill_dirs(tmp_path):
 
     with pytest.raises(ValueError, match="#151"):
         load_flows(path)
+
+
+@pytest.mark.parametrize("skills", [["user"], ["local"], ["user", "local"]])
+def test_skills_without_project_cannot_see_the_workspace(tmp_path, skills):
+    """A source list that omits `project` is the worst shape of all: the declared
+    skill_dirs stay invisible AND the operator's own skills load in their place, so
+    the flow scores as though it ran the bundle it never saw."""
+    path = _flows_file(
+        tmp_path, [{"name": "sp", "skills": skills, "skill_dirs": ["skills/greeting-file"]}]
+    )
+
+    with pytest.raises(ValueError, match="add project"):
+        load_flows(path)
