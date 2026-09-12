@@ -379,3 +379,20 @@ def test_follow_exits_when_the_runner_pid_is_gone(tmp_path, monkeypatch, launch_
     assert len(lines) == 1
     assert lines[0].startswith("RUNNER EXITED without run.json")
     assert ("Traceback: boom" if launch_log else "(no launch log)") in lines[0]
+
+
+def test_trial_done_line_carries_the_outcomes(tmp_path):
+    runs_root = _runs_root(tmp_path)
+    run_root = runs_root / "todo_app" / "todo-x"
+    log = tmp_path / "server.log"
+    log.write_text("")
+    w = RunWatch("todo-x", runs_root=runs_root, server_log=log)
+    w._run_sessions = lambda: []
+    trial = run_root / "trial-01"
+    trial.mkdir()
+    (trial / "run.json").write_text(
+        json.dumps({"winner_flow": "plain", "outcomes": {"plain": "no_start"}})
+    )
+    (line,) = [e for e in w.tick() if e.startswith("TRIAL DONE")]
+    assert "winner=plain" in line
+    assert "outcomes=" in line and "no_start" in line

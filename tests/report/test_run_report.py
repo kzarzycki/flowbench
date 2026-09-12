@@ -450,3 +450,24 @@ def test_render_any_dispatches_on_the_declared_kind_not_the_trials_key(tmp_path,
 
     (root / "run.json").write_text(json.dumps({**meta, "kind": "trial"}))
     assert run_report.render_any(root) == "TRIAL"
+
+
+def test_trial_report_flow_table_shows_the_outcome(tmp_path):
+    from flowbench.report.run_report import render_report
+
+    root = _trial_dir(
+        tmp_path,
+        schema_version=1,
+        kind="trial",
+        flow_stats={
+            "plain": {
+                "exit_status": "idle",
+                "turns": 2,
+                "duration_s": 3.0,
+                "outcome": "degenerate",
+            }
+        },
+    )
+    text = render_report(root).read_text()
+    assert "<th>outcome</th>" in text
+    assert "degenerate" in text

@@ -117,6 +117,7 @@ def flow_card(name: str, run_root: Path, is_winner: bool, meta: dict) -> dict:
         "turns": stats.get("turns"),
         "duration": f"{round(stats.get('duration_s') or 0)}s",
         "tokens": f"{tokens:,}" if tokens else "–",
+        "outcome": stats.get("outcome"),
         "deliverable_name": deliverable,
         "deliverable_lines": lines,
         "deliverable_html": md_to_html(view),
@@ -183,7 +184,8 @@ def render_report(run_root: Path) -> Path:
         f"<tr><td class='{'win' if c['winner'] else ''}'>{c['name']}"
         f"{' 🏆' if c['winner'] else ''}</td><td>{c['model']}/{c['effort']}</td>"
         f"<td>{c['exit']}</td><td>{c['turns']}</td><td>{c['duration']}</td>"
-        f"<td>{c['tokens']}</td><td>{lines_cell(c)}</td></tr>"
+        f"<td>{c['tokens']}</td><td>{lines_cell(c)}</td>"
+        f"<td>{c['outcome'] or '–'}</td></tr>"
         for c in cards
     )
 
@@ -216,7 +218,7 @@ def render_report(run_root: Path) -> Path:
 
 <h2>Flows</h2>
 <table><tr><th>flow</th><th>model</th><th>exit</th><th>turns</th><th>duration</th>
-<th>context tokens</th><th>deliverable lines</th></tr>{rows}</table>
+<th>context tokens</th><th>deliverable lines</th><th>outcome</th></tr>{rows}</table>
 
 <h2>Judge verdict</h2>
 <div class="verdict">{md_to_html(judge_md)}</div>
