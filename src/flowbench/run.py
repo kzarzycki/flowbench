@@ -26,7 +26,7 @@ from flowbench.runner.judge import (
     build_judge_prompt,
     parse_verdict,
 )
-from flowbench.schema import SCHEMA_VERSION, RunKind, flow_outcome, validate_run_meta
+from flowbench.schema import SCHEMA_VERSION, RunKind, flow_outcome, run_kind, validate_run_meta
 from flowbench.transcript import render_transcript
 
 NO_DELIVERABLE = "(no deliverable declared)"
@@ -404,7 +404,7 @@ async def rescore_run(case, run_root) -> dict[str, str]:
         if not run_json_path.is_file():
             continue
         meta = json.loads(run_json_path.read_text())
-        if not isinstance(meta, dict) or "flow_stats" not in meta:
+        if not isinstance(meta, dict) or run_kind(meta) is not RunKind.TRIAL:
             continue
 
         is_trial = target != run_root
@@ -434,7 +434,18 @@ async def rescore_run(case, run_root) -> dict[str, str]:
                 # read as a fresh verdict by `compare`.
                 card_path.unlink(missing_ok=True)
             else:
+                if "schema_version" not in card:
+                    card = {"schema_version": SCHEMA_VERSION, **card}
                 card_path.write_text(json.dumps(card, indent=2, default=str))
+            # A rescore can turn `scorer_failed` into `ok` or `degenerate`, so the
+            # outcome is recomputed from the fresh card, mirror included.
+            stats["outcome"] = flow_outcome(
+                session=session,
+                has_deliverable=case.deliverable is not None,
+                score_error=stats.get("score_error"),
+                card=card,
+            )
+            meta.setdefault("outcomes", {})[name] = stats["outcome"]
             changed = True
 
         if changed:
