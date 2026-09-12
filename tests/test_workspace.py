@@ -322,3 +322,27 @@ def test_reseeding_the_same_flow_dir_is_idempotent(tmp_path):
     assert _git(flow_dir, "rev-list", "--count", "HEAD") == commits
     assert _git(flow_dir, "status", "--porcelain") == ""
     assert [p.name for p in (flow_dir / ".claude" / "skills").iterdir()] == ["greeting-file"]
+
+
+@pytest.mark.parametrize("name", ["settings.json", "settings.local.json"])
+def test_seeded_workspace_settings_file_raises(tmp_path, name):
+    """A8: silently inheriting one is the failure mode already on record."""
+    case_dir = _case_dir(tmp_path)
+    flow_dir = tmp_path / "flow"
+    _seed_tree(case_dir, {f".claude/{name}": "{}\n"})
+
+    with pytest.raises(ValueError, match=name):
+        seed_workspace(Workspace(seed="seed"), case_dir, flow_dir)
+
+
+def test_a_seed_may_carry_skills_without_settings(tmp_path):
+    """The assertion is about settings files only — a seeded project's own skills
+    are legitimate content (they are what #176's brownfield cases will carry)."""
+    case_dir = _case_dir(tmp_path)
+    flow_dir = tmp_path / "flow"
+    _seed_tree(case_dir, {".claude/skills/project-own/SKILL.md": "the project's own\n"})
+
+    record = seed_workspace(Workspace(seed="seed"), case_dir, flow_dir)
+
+    assert (flow_dir / ".claude" / "skills" / "project-own" / "SKILL.md").is_file()
+    assert record["skills"] == []

@@ -89,6 +89,7 @@ def seed_workspace(workspace: Workspace, case_dir, flow_dir, skill_dirs=()) -> d
         if seed_skills.is_dir():
             seed_skill_names = {p.name for p in seed_skills.iterdir()}
 
+    _reject_workspace_settings(flow_dir)
     skills = _place_skills(flow_dir, skill_dirs, seed_skill_names)
 
     needs_commit = workspace.git or (skills and (flow_dir / ".git").exists())
@@ -100,6 +101,23 @@ def seed_workspace(workspace: Workspace, case_dir, flow_dir, skill_dirs=()) -> d
         "seed_commit": seed_commit,
         "skills": skills,
     }
+
+
+def _reject_workspace_settings(flow_dir: Path) -> None:
+    """A settings file in the workspace is a second, undeclared steering channel.
+
+    Turning the `project` setting source on — which is how a flow's skills load —
+    also turns on `<flow_dir>/.claude/settings.json`, and settings files are exactly
+    what differ between a `skills: none` flow and a `skills: [project]` one. A flow
+    is the full configuration, every knob declared and recorded, so the engine
+    asserts none exists rather than silently inheriting one."""
+    for name in ("settings.json", "settings.local.json"):
+        path = flow_dir / ".claude" / name
+        if path.exists():
+            raise ValueError(
+                f"{path}: a case may not seed a workspace settings file — a flow is "
+                "steered only by declared flow fields"
+            )
 
 
 def _place_skills(flow_dir: Path, skill_dirs, seed_skill_names: set[str]) -> list[str]:
