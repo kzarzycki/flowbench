@@ -19,11 +19,14 @@ from pathlib import Path
 class Flow:
     """:param name: flow label (also the run-dir name and report column).
     :param harness: omnigent harness, e.g. "claude-native".
-    :param skills: host-skill filter -> config.yaml top-level `skills:`.
-        "all" (host ~/.claude visible), "none" (host skills suppressed; bundle
-        skills still load), or a list of specific sources.
+    :param skills: Claude Code's setting sources -> config.yaml top-level `skills:`.
+        "all" (the CLI's defaults, host ~/.claude visible), "none" (nothing loads
+        at all — how a baseline flow is provably bare), or a list of sources such
+        as ["project"], which loads the workspace's own .claude/skills/ and hides
+        the host. "none" together with skill_dirs is rejected at flows.yaml load.
     :param skill_dirs: individual skill directories (each holding a SKILL.md),
-        copied into <bundle>/skills/<name>/ so they load host-independent.
+        seeded into <flow_dir>/.claude/skills/<name>/ so they load by the harness's
+        own project convention, host-independent (#157).
     :param mcp_files: per-flow MCP yamls, copied into <bundle>/tools/mcp/.
     """
 

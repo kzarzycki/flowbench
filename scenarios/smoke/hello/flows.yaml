@@ -5,4 +5,9 @@ flows:
   - name: claude
     harness: claude-native
     model: haiku            # the cheapest model that can still be asked to write a file
-    skills: none            # bare Claude Code: nothing here is worth varying
+    # [project] loads the workspace's own .claude/skills/ and nothing else: the
+    # operator's ~/.claude stays hidden, so the skill below is the ONLY one the
+    # flow has. "none" would be --setting-sources "", which loads neither.
+    skills: [project]
+    skill_dirs:             # seeded to <flow_dir>/.claude/skills/, where a project keeps them
+      - skills/greeting-file

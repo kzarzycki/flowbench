@@ -12,7 +12,8 @@ flows:
   - name: superpowers
     harness: claude-native
     model: haiku
-    skills: none              # host skills hidden; the bundle ships the vendored set
+    skills: [project]         # host ~/.claude hidden; the workspace .claude/skills/
+                              # carries the vendored set, seeded from skill_dirs
     turn_timeout_s: 3000
     skill_dirs:               # (scenarios/swe_e2e/skills/, see VERSION.md)
       - ../../skills/brainstorming

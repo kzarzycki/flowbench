@@ -47,6 +47,14 @@ def _seed_tree(case_dir: Path, files: dict[str, str], name: str = "seed") -> Pat
     return root
 
 
+def _skill_dir(root: Path, name: str, body: str = "do the thing") -> Path:
+    """One skill directory, the shape `skill_dirs` entries have: a folder with a SKILL.md."""
+    d = root / name
+    d.mkdir(parents=True)
+    (d / "SKILL.md").write_text(f"---\nname: {name}\ndescription: {name}\n---\n{body}\n")
+    return d
+
+
 def test_default_declaration_is_empty_and_repoless(tmp_path):
     case_dir = _case_dir(tmp_path)
     flow_dir = tmp_path / "flow"
@@ -55,7 +63,13 @@ def test_default_declaration_is_empty_and_repoless(tmp_path):
 
     record = seed_workspace(Workspace(), case_dir, flow_dir)
 
-    assert record == {"seed": None, "git": False, "seed_files": 0, "seed_commit": None}
+    assert record == {
+        "seed": None,
+        "git": False,
+        "seed_files": 0,
+        "seed_commit": None,
+        "skills": [],
+    }
     assert list(flow_dir.iterdir()) == []
 
 
@@ -207,3 +221,244 @@ def test_existing_repo_is_not_recommitted(tmp_path):
 
     assert _git(flow_dir, "rev-list", "--count", "HEAD") == "1"
     assert second["seed_commit"] == first["seed_commit"]
+
+
+def test_skill_dirs_are_seeded_into_dot_claude(tmp_path):
+    """A1: a flow's skills land where the harness's own convention finds them."""
+    case_dir = _case_dir(tmp_path)
+    flow_dir = tmp_path / "flow"
+    src = _skill_dir(tmp_path / "src", "greeting-file")
+
+    record = seed_workspace(Workspace(), case_dir, flow_dir, skill_dirs=[src])
+
+    placed = flow_dir / ".claude" / "skills" / "greeting-file" / "SKILL.md"
+    assert placed.read_bytes() == (src / "SKILL.md").read_bytes()
+    assert record["skills"] == ["greeting-file"]
+
+
+def test_no_skill_dirs_writes_no_dot_claude(tmp_path):
+    """A3: the empty declaration stays empty — no `.claude` a case did not ask for."""
+    case_dir = _case_dir(tmp_path)
+    flow_dir = tmp_path / "flow"
+
+    record = seed_workspace(Workspace(), case_dir, flow_dir)
+
+    assert not (flow_dir / ".claude").exists()
+    assert record["skills"] == []
+
+
+def test_seeded_skills_are_in_the_seed_commit(tmp_path):
+    """A2, fresh repo: the framework's own files belong to the seed, not to the
+    agent's diff — a scorer reads that diff."""
+    case_dir = _case_dir(tmp_path)
+    flow_dir = tmp_path / "flow"
+    src = _skill_dir(tmp_path / "src", "greeting-file")
+
+    seed_workspace(Workspace(git=True), case_dir, flow_dir, skill_dirs=[src])
+
+    assert ".claude/skills/greeting-file/SKILL.md" in _git(flow_dir, "ls-files").splitlines()
+    assert _git(flow_dir, "status", "--porcelain") == ""
+
+
+def _seed_repo(case_dir: Path, name: str = "seed") -> Path:
+    """A seed tree that already carries its own repo — the brownfield shape."""
+    root = _seed_tree(case_dir, {"README.md": "project\n"}, name=name)
+    _git(root, "init", "-q")
+    _git(root, "config", "user.email", "seed@example.com")
+    _git(root, "config", "user.name", "seed")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "initial")
+    return root
+
+
+def test_seeded_skills_are_committed_into_a_seeded_repo(tmp_path):
+    """A2, pre-existing repo: `_seed_commit`'s init branch never runs here, so
+    without the second branch the skills would stay untracked and show up in the
+    agent's own `git add -A`."""
+    case_dir = _case_dir(tmp_path)
+    flow_dir = tmp_path / "flow"
+    _seed_repo(case_dir)
+    src = _skill_dir(tmp_path / "src", "greeting-file")
+
+    record = seed_workspace(Workspace(seed="seed"), case_dir, flow_dir, skill_dirs=[src])
+
+    assert ".claude/skills/greeting-file/SKILL.md" in _git(flow_dir, "ls-files").splitlines()
+    assert _git(flow_dir, "status", "--porcelain") == ""
+    assert record["seed_commit"] == _git(flow_dir, "rev-parse", "HEAD")
+    assert _git(flow_dir, "log", "-1", "--format=%s") == "chore: seed flow skills"
+
+
+def test_the_skills_commit_does_not_take_the_seed_repos_identity(tmp_path):
+    """A2: the seed SHA is a function of the DECLARATION. The init branch pins the
+    author by config; the seeded-repo branch inherits whatever the seed (or the
+    operator) configured unless the identity is pinned on the command itself."""
+    case_dir = _case_dir(tmp_path)
+    flow_dir = tmp_path / "flow"
+    _seed_repo(case_dir)  # configures seed@example.com
+    src = _skill_dir(tmp_path / "src", "greeting-file")
+
+    seed_workspace(Workspace(seed="seed"), case_dir, flow_dir, skill_dirs=[src])
+
+    assert (
+        _git(flow_dir, "log", "-1", "--format=%an <%ae>") == "agent-eval <agent-eval@example.com>"
+    )
+    assert (
+        _git(flow_dir, "log", "-1", "--format=%cn <%ce>") == "agent-eval <agent-eval@example.com>"
+    )
+
+
+@pytest.mark.parametrize(
+    "workspace", [Workspace(git=True), Workspace(seed="seed")], ids=["init", "seeded-repo"]
+)
+def test_a_seed_gitignoring_dot_claude_does_not_lose_the_skills(tmp_path, workspace):
+    """A2: `.claude/` is a common ignore line. Honouring it would drop the flow's
+    declared skills from the seed commit, so they would surface as the agent's own
+    work — and on the seeded-repo branch `git add` would exit non-zero besides."""
+    case_dir = _case_dir(tmp_path)
+    flow_dir = tmp_path / "flow"
+    if workspace.seed:
+        root = _seed_repo(case_dir)
+        (root / ".gitignore").write_text(".claude/\n")
+        _git(root, "add", "-A")
+        _git(root, "commit", "-q", "-m", "ignore .claude")
+    else:
+        _seed_tree(case_dir, {".gitignore": ".claude/\n"})
+        workspace = Workspace(seed="seed", git=True)
+    src = _skill_dir(tmp_path / "src", "greeting-file")
+
+    seed_workspace(workspace, case_dir, flow_dir, skill_dirs=[src])
+
+    tracked = _git(flow_dir, "ls-tree", "-r", "--name-only", "HEAD").splitlines()
+    assert ".claude/skills/greeting-file/SKILL.md" in tracked
+
+
+def test_skill_colliding_with_the_seed_raises(tmp_path):
+    """A4: letting either side win silently would mean a flow ran without the
+    bundle it declared."""
+    case_dir = _case_dir(tmp_path)
+    flow_dir = tmp_path / "flow"
+    _seed_tree(case_dir, {".claude/skills/greeting-file/SKILL.md": "the project's own\n"})
+    src = _skill_dir(tmp_path / "src", "greeting-file")
+
+    with pytest.raises(ValueError, match="greeting-file"):
+        seed_workspace(Workspace(seed="seed"), case_dir, flow_dir, skill_dirs=[src])
+
+
+def test_reseeding_the_same_flow_dir_is_idempotent(tmp_path):
+    """`run_case` makes the flow dir with `exist_ok=True`, so a repeated run-id
+    seeds twice. The commit COUNT is the assertion that catches a manufactured
+    empty commit; "did not raise" cannot see it.
+
+    Declared-repo only: re-seeding a workspace whose SEED carries its own `.git`
+    raises from the seed copytree itself (git objects are read-only) — flowbench#176,
+    reproduced on master and unrelated to skills. The brownfield single-seed path is
+    covered by `test_seeded_skills_are_committed_into_a_seeded_repo`."""
+    case_dir = _case_dir(tmp_path)
+    flow_dir = tmp_path / "flow"
+    src = _skill_dir(tmp_path / "src", "greeting-file")
+    workspace = Workspace(git=True)
+
+    first = seed_workspace(workspace, case_dir, flow_dir, skill_dirs=[src])
+    commits = _git(flow_dir, "rev-list", "--count", "HEAD")
+    second = seed_workspace(workspace, case_dir, flow_dir, skill_dirs=[src])
+
+    assert second == first
+    assert _git(flow_dir, "rev-list", "--count", "HEAD") == commits
+    assert _git(flow_dir, "status", "--porcelain") == ""
+    assert [p.name for p in (flow_dir / ".claude" / "skills").iterdir()] == ["greeting-file"]
+
+
+def test_reseeding_does_not_commit_the_agents_work(tmp_path):
+    """The skills commit is scoped to `.claude/skills` at EVERY step. An unscoped
+    `git commit` would sweep whatever the agent staged into a commit labelled as
+    the seed — attributing the agent's output to the framework and corrupting the
+    very diff the placement exists to keep clean."""
+    case_dir = _case_dir(tmp_path)
+    flow_dir = tmp_path / "flow"
+    src = _skill_dir(tmp_path / "src", "greeting-file")
+    # A DECLARED repo, not a seeded one: re-seeding a seed that carries its own
+    # `.git` raises from the seed copytree itself (flowbench#176). The second
+    # seeding here takes the same scoped-commit branch, which is what is under test.
+    seed_workspace(Workspace(git=True), case_dir, flow_dir, skill_dirs=[src])
+    commits = _git(flow_dir, "rev-list", "--count", "HEAD")
+
+    # the agent does some work and stages it, as a workflow flow would
+    (flow_dir / "app.py").write_text("print('agent work')\n")
+    _git(flow_dir, "add", "app.py")
+
+    seed_workspace(Workspace(git=True), case_dir, flow_dir, skill_dirs=[src])
+
+    assert _git(flow_dir, "rev-list", "--count", "HEAD") == commits
+    # the COMMITTED tree, not the index — the index is dirty because the test
+    # staged app.py, which is exactly the state an unscoped commit would sweep up
+    committed = _git(flow_dir, "ls-tree", "-r", "--name-only", "HEAD").splitlines()
+    assert "app.py" not in committed
+    assert ".claude/skills/greeting-file/SKILL.md" in committed
+
+
+def test_an_agent_created_repo_is_never_committed_into(tmp_path):
+    """`.git` merely existing in the flow dir is not the engine's to write to —
+    only a declared repo, or one the SEED brought, is framework-owned history."""
+    case_dir = _case_dir(tmp_path)
+    flow_dir = tmp_path / "flow"
+    src = _skill_dir(tmp_path / "src", "greeting-file")
+    flow_dir.mkdir()
+    _git(flow_dir, "init", "-q")
+    _git(flow_dir, "config", "user.email", "agent@example.com")
+    _git(flow_dir, "config", "user.name", "agent")
+
+    record = seed_workspace(Workspace(), case_dir, flow_dir, skill_dirs=[src])
+
+    assert record["seed_commit"] is None
+    assert _git(flow_dir, "rev-list", "--count", "--all") == "0"
+    assert (flow_dir / ".claude" / "skills" / "greeting-file" / "SKILL.md").is_file()
+
+
+def test_two_skill_dirs_with_the_same_name_raise(tmp_path):
+    """Same failure as a seed collision: one would silently overwrite the other,
+    so the flow would not get what it declared."""
+    case_dir = _case_dir(tmp_path)
+    flow_dir = tmp_path / "flow"
+    a = _skill_dir(tmp_path / "a", "greeting-file")
+    b = _skill_dir(tmp_path / "b", "greeting-file")
+
+    with pytest.raises(ValueError, match="both named 'greeting-file'"):
+        seed_workspace(Workspace(), case_dir, flow_dir, skill_dirs=[a, b])
+
+
+@pytest.mark.parametrize("name", ["settings.json", "settings.local.json"])
+def test_seeded_workspace_settings_file_raises(tmp_path, name):
+    """A8: silently inheriting one is the failure mode already on record."""
+    case_dir = _case_dir(tmp_path)
+    flow_dir = tmp_path / "flow"
+    _seed_tree(case_dir, {f".claude/{name}": "{}\n"})
+
+    with pytest.raises(ValueError, match=name):
+        seed_workspace(Workspace(seed="seed"), case_dir, flow_dir)
+
+
+def test_an_agent_written_settings_file_does_not_fail_a_reseed(tmp_path):
+    """The assertion is about what the CASE declares, so it reads the seed source.
+    A settings file the AGENT wrote mid-run is the agent's doing, and failing the
+    next seeding over it would blame the case for something it never declared."""
+    case_dir = _case_dir(tmp_path)
+    flow_dir = tmp_path / "flow"
+    _seed_tree(case_dir, {"README.md": "project\n"})
+    seed_workspace(Workspace(seed="seed"), case_dir, flow_dir)
+    (flow_dir / ".claude").mkdir(exist_ok=True)
+    (flow_dir / ".claude" / "settings.local.json").write_text("{}\n")
+
+    seed_workspace(Workspace(seed="seed"), case_dir, flow_dir)  # does not raise
+
+
+def test_a_seed_may_carry_skills_without_settings(tmp_path):
+    """The assertion is about settings files only — a seeded project's own skills
+    are legitimate content (they are what #176's brownfield cases will carry)."""
+    case_dir = _case_dir(tmp_path)
+    flow_dir = tmp_path / "flow"
+    _seed_tree(case_dir, {".claude/skills/project-own/SKILL.md": "the project's own\n"})
+
+    record = seed_workspace(Workspace(seed="seed"), case_dir, flow_dir)
+
+    assert (flow_dir / ".claude" / "skills" / "project-own" / "SKILL.md").is_file()
+    assert record["skills"] == []

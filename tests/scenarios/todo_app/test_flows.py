@@ -1,5 +1,6 @@
-"""flows.yaml: baseline vs superpowers, both bare skills="none" (host-independent),
-superpowers carrying the vendored skill_dirs bundle."""
+"""flows.yaml: baseline bare (skills="none"), superpowers loading the vendored
+skill_dirs from its workspace (skills=["project"]). Both host-independent: the
+operator's own ~/.claude is hidden either way."""
 
 from pathlib import Path
 
@@ -13,15 +14,23 @@ def _flows():
     return load_flows(CASE_DIR / "flows.yaml")
 
 
-def test_flow_names_and_skills_none():
+def test_baseline_is_bare_and_superpowers_declares_project():
+    """A10. Baseline is provably bare — `none` is `--setting-sources ""`, which
+    loads no skills from anywhere, so the comparison is not contaminated by the
+    mechanism. Superpowers names the `project` source, which loads the workspace's
+    own `.claude/skills/` and still hides the operator's `~/.claude`."""
     flows = _flows()
     assert [f["name"] for f in flows] == ["baseline", "superpowers"]
-    assert all(f.get("skills") == "none" for f in flows)
+    baseline, superpowers = flows
+    assert baseline.get("skills") == "none"
+    assert not baseline.get("skill_dirs")
+    assert superpowers.get("skills") == ["project"]
+    assert superpowers.get("skill_dirs")
 
 
 def test_no_steering():
     # neither flow carries a prepend/append system-prompt-shaped nudge — the SUT
-    # is vanilla Claude Code, whether skills == "none" or the superpowers bundle.
+    # is vanilla Claude Code, whether skills == "none" or the superpowers set.
     for f in _flows():
         assert not f.get("prepend")
         assert not f.get("append")

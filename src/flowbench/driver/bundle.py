@@ -1,8 +1,10 @@
 """Everything that shapes a flow's agent bundle, as pure functions.
 
-`render_config` emits the omnigent agent `config.yaml`; `build_bundle` tars it
-up with the flow's skill dirs and MCP files; `session_metadata` is the metadata
-form part that rides the same `POST /v1/sessions`. All three read only the
+`render_config` emits the omnigent agent `config.yaml`; `build_bundle` tars it up
+with the flow's MCP files; `session_metadata` is the metadata form part that rides
+the same `POST /v1/sessions`. Skills are NOT in the tarball: they are seeded into
+the flow's workspace at `<flow_dir>/.claude/skills/<name>/` (`case.seed_workspace`)
+and load through the harness's own project convention (#157). All three read only the
 `BundleSpec` fields below, so a `Flow` (S03.1) can drive them directly instead
 of going through a driver instance.
 """
@@ -28,7 +30,6 @@ class BundleSpec(Protocol):
     agent_description: str
     agent_prompt: str | None
     skills: str | list[str]
-    skill_dirs: list[Path]
     mcp_files: list[Path]
     session_title: str | None
     project: str | None
@@ -71,9 +72,9 @@ def render_config(spec: BundleSpec) -> str:
         cwd=str(spec.run_dir),
         harness=spec.harness,
     )
-    # Host-skill filter: "all" is omnigent's default, so emit nothing; "none"
-    # suppresses host ~/.claude skills (bundle skills still load); a list names
-    # specific sources. This is the ONLY per-flow knob besides bundle contents.
+    # Setting-source filter: "all" is omnigent's default, so emit nothing; "none"
+    # loads no sources at all; a list names specific ones. Skills live in the
+    # workspace now, so this decides whether the agent ever reads them.
     if spec.skills != "all":
         if isinstance(spec.skills, (list, tuple)):
             cfg += "skills: [" + ", ".join(spec.skills) + "]\n"
@@ -89,10 +90,10 @@ def build_bundle(spec: BundleSpec) -> bytes:
     agent_dir = Path(tempfile.mkdtemp(prefix="flowbench_drv_")) / "_agent"
     agent_dir.mkdir(parents=True)
     (agent_dir / "config.yaml").write_text(render_config(spec))
-    # Per-flow skills: each entry is ONE skill dir (holds a SKILL.md) -> the
-    # bridge surfaces <bundle>/skills/<name>/ via --plugin-dir, host-independent.
-    for src in spec.skill_dirs:
-        shutil.copytree(Path(src), agent_dir / "skills" / Path(src).name)
+    # No skills branch: `skill_dirs` is seeded into the workspace instead (#157).
+    # Carrying them here too would load each skill twice under two names — once as
+    # <plugin>:<name> via --plugin-dir and once bare — which contaminates the
+    # `Skill`-call ground truth cases score on.
     # Per-flow MCP servers: <bundle>/tools/mcp/<name>.yaml.
     if spec.mcp_files:
         mcp_dir = agent_dir / "tools" / "mcp"
@@ -129,6 +130,16 @@ def session_metadata(spec: BundleSpec) -> dict[str, Any]:
             "--permission-mode",
             "bypassPermissions",
         ]
+        # A `skills` LIST names Claude Code's setting sources (user/project/local),
+        # and flowbench has to emit the flag itself: omnigent maps a list to NOTHING
+        # ("treated like all for host sources", omnigent/inner/bundle_skills.py), so
+        # the host ~/.claude would stay visible. These launch args are placed BEFORE
+        # omnigent's own (`augment_claude_args`), so ours is the only such flag —
+        # but only while skills != "none", where omnigent appends
+        # `--setting-sources ""` after us and would win. That pairing is rejected at
+        # flows.yaml load time.
+        if isinstance(spec.skills, (list, tuple)) and spec.skills:
+            launch_args += ["--setting-sources", ",".join(spec.skills)]
     elif spec.harness == "codex-native":
         # Codex's unattended stance: never prompt, sandboxed to the workspace.
         launch_args = ["--ask-for-approval", "never", "--sandbox", "workspace-write"]

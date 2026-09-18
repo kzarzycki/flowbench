@@ -34,53 +34,76 @@ and `flowbench.runner.loop` re-export the old names for one release.
 
 ### Where a flow's skills live at run time
 
-**On a Claude harness**, a flow's skills never load from the host `~/.claude`.
-`flowbench.driver.bundle.build_bundle` copies them into a per-flow tarball, POSTs it to
-omnigent, and the agent loads them from there (`--plugin-dir`); with `skills: "none"` the host
-skills are hidden. That is what makes such a flow identical on any machine.
+A flow's skills sit in its **workspace**, at `<run_dir>/<flow>/.claude/skills/<name>/`, and the
+agent finds them the way it finds any project's skills. `case.seed_workspace` places them there
+from the flow's `skill_dirs` — the one seeding step, alongside the case's declared seed tree —
+and they go in before the seed commit, so they belong to the seed rather than to the agent's
+diff. The copies still come from the case's pinned dirs, never from whatever the operator has
+installed, so a flow stays identical on any machine.
 
-**No other harness has that path**, so the property is harness-scoped, not universal. What
-each one carries:
+`Flow.skills` names Claude Code's setting sources, and is the only knob deciding what the agent
+reads — the host `~/.claude` included:
 
-| Harness | Bundle skills / MCPs | `skills:` filter | `reasoning_effort` | Launch args |
-| --- | --- | --- | --- | --- |
-| `claude-native` | yes (`--plugin-dir`) | yes (`--setting-sources`) | yes | `--disallowedTools AskUserQuestion --permission-mode bypassPermissions` |
-| `codex-native` | no | no | yes | `--ask-for-approval never --sandbox workspace-write` |
-| `antigravity-native` | no — the bridge seeds the HOST's global agy skills instead | no | no — effort is part of the agy model id (`gemini-3.8-flash-low`) | `--dangerously-skip-permissions` |
+| `skills:` | Launch flag | What the agent sees |
+| --- | --- | --- |
+| `[project]` | `--setting-sources project` (flowbench's own launch args) | the workspace's `.claude/skills/` only |
+| `"none"` | `--setting-sources ""` (omnigent's) | nothing — this is how a baseline flow is provably bare |
+| `"all"` | none emitted | the CLI's default sources, host `~/.claude` included |
 
-`OmnigentDriver.start()` logs one warning naming any field a flow declared that its harness
-will not carry, so a run never quietly reports a bundle that never loaded. It warns rather than
-refuses only until `Flow` schema v1 (S03.1) owns flow validation. The agy row's "seeds the
-host's global skills" is a hermeticity gap tracked as #151, and what it means for comparing
-across harnesses is #119.
+A flow declaring `skill_dirs` must declare sources that can actually load them, checked when
+`flows.yaml` loads. `"none"` loads neither the host nor the workspace; a list without `project`
+— `[user]`, `[local]` — loses the declared skills and loads the operator's own in their place.
+Two shapes are rejected for every flow, with or without `skill_dirs`: an EMPTY list emits no
+flag at all, so the CLI falls back to its defaults and the host `~/.claude` leaks in (#151), and
+a non-string entry would die later inside the flag's `",".join`. Each is rejected by name,
+because a flow scored as though it had a bundle it never received is the one lie this benchmark
+cannot afford. `"all"` is legal and explicit — its defaults do include the project source.
+flowbench emits the `[project]` flag itself because omnigent maps a list to nothing at all
+(`omnigent/inner/bundle_skills.py`); its launch args are placed before omnigent's, so ours is
+the only `--setting-sources` whenever `skills` is not `"none"`.
+
+The bundle still exists, and still carries `config.yaml` and `tools/mcp/*.yaml` — MCPs have the
+same move available (`.mcp.json` at the project root) and have not taken it.
+
+**Per-harness capabilities**, since only some of this is universal. Seeding is harness-agnostic:
+every harness gets the workspace, and whether it reads `.claude/skills/` is its own convention.
+
+| Harness | Workspace skills | `--setting-sources` | Bundle MCPs | `reasoning_effort` | Launch args |
+| --- | --- | --- | --- | --- | --- |
+| `claude-native` | yes, by convention | yes | yes | yes | `--disallowedTools AskUserQuestion --permission-mode bypassPermissions` |
+| `codex-native` | seeded, not read | no | no | yes | `--ask-for-approval never --sandbox workspace-write` |
+| `antigravity-native` | seeded, not read | no | no | no — effort is part of the agy model id (`gemini-3.8-flash-low`) | `--dangerously-skip-permissions` |
+
+`OmnigentDriver.start()` logs one warning naming any field a flow declared that its harness will
+not carry, so a run never quietly reports a capability that never loaded. It warns rather than
+refuses only until `Flow` schema v1 (S03.1) owns flow validation. The agy row additionally seeds
+the HOST's global agy skills, a hermeticity gap tracked as #151; what all this means for
+comparing across harnesses is #119.
 
 ```mermaid
 flowchart LR
   subgraph src[Sources on disk]
-    sp[superpowers plugin dir]
-    own[our skill dirs<br/>each with SKILL.md]
+    own[the case's pinned skill dirs<br/>each with SKILL.md]
+    seed[the case's seed tree<br/>optional]
     mcp[per-flow MCP yaml]
   end
-  f[Flow: harness, skills filter,<br/>skill_dirs, mcp_files]
+  f[Flow: harness, skills sources,<br/>skill_dirs, mcp_files]
   subgraph bundle[agent.tar.gz, built per flow]
-    cfg[config.yaml<br/>harness, skills: none]
-    sk[skills/&lt;name&gt;/SKILL.md]
+    cfg[config.yaml<br/>harness]
     tm[tools/mcp/*.yaml]
   end
   subgraph sess[omnigent session]
-    cli[claude CLI, vanilla<br/>--plugin-dir → bundle skills<br/>host ~/.claude skills hidden]
-    ws[workspace/ = run dir/&lt;flow&gt;/]
+    cli[claude CLI, vanilla<br/>--setting-sources project<br/>host ~/.claude hidden]
+    ws[workspace/ = run dir/&lt;flow&gt;/<br/>.claude/skills/&lt;name&gt;/]
   end
-  sp & own --> sk
+  own & seed -- seed_workspace --> ws
   mcp --> tm
   f --> cfg
   bundle -- POST --> sess
   cli -- reads/writes --> ws
 ```
 
-Baseline is the same picture with an empty `skills/`. Nothing else changes. The diagram is the
-`claude-native` path; on the other harnesses the bundle is still built and POSTed, but nothing
-downstream of `cli` reads its `skills/` or `tools/mcp/`.
+A baseline flow is the same picture with no `.claude/` at all and `--setting-sources ""`.
 
 ### Send/retry policy
 
