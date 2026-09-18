@@ -22,8 +22,10 @@ from flowbench.run import (
     run_case,
     run_case_n,
 )
+from flowbench.schema import RunKind, validate_run_meta
 from flowbench.settings import Settings
 from flowbench.testing import FakeDriver, MissingPlanDriver, StubSim, n_run_factories
+from flowbench.types import TurnResult, TurnStatus
 from tests.report.test_run_report import _aggregate_dir
 
 CASE_DIR = Path(__file__).parent / "fixtures" / "feature_flag_service"
@@ -316,6 +318,8 @@ async def test_run_json_records_the_workspace(tmp_path):
 
     root = Path(result["run_root"])
     meta = json.loads((root / "run.json").read_text())
+    assert meta["schema_version"] == 1
+    assert meta["kind"] == "trial"
     assert meta["workspace"]["seed"] == "seed"
     assert meta["workspace"]["git"] is True
     assert meta["workspace"]["seed_files"] == 2
@@ -595,7 +599,8 @@ async def test_score_returning_none_writes_no_scorecard(tmp_path):
 
     root = Path(result["run_root"])
     assert json.loads((root / "superpowers" / "scorecard.json").read_text()) == {
-        "flow": "superpowers"
+        "schema_version": 1,
+        "flow": "superpowers",
     }
     assert not (root / "plain" / "scorecard.json").exists()
 
@@ -619,6 +624,7 @@ async def test_one_flow_case_runs_and_scores(tmp_path):
 
     root = Path(result["run_root"])
     assert json.loads((root / "plain" / "scorecard.json").read_text()) == {
+        "schema_version": 1,
         "flow": "plain",
         "objective": {"acceptance": 1.0},
     }
@@ -1301,7 +1307,7 @@ def test_case_score_writes_a_scorecard_per_flow_with_no_judge(tmp_path):
     root = Path(result["run_root"])
     for name in ("superpowers", "plain"):
         card = json.loads((root / name / "scorecard.json").read_text())
-        assert card == {"flow": name, "objective": {"acceptance": 1.0}}
+        assert card == {"schema_version": 1, "flow": name, "objective": {"acceptance": 1.0}}
     assert not (root / "_judge").exists()
     assert not (root / "judge.md").exists()
     assert not (root / "report.html").exists()
@@ -1331,9 +1337,17 @@ def test_run_case_n_unjudged_aggregate_empty(tmp_path, n):
     root = Path(result["run_root"])
     meta = json.loads((root / "run.json").read_text())
     assert meta["winner"] is None
+    assert meta["schema_version"] == 1
+    # n=1 writes run_case's own trial meta, not an aggregate.
+    expected = RunKind.AGGREGATE if n > 1 else RunKind.TRIAL
+    assert meta["kind"] == expected
+    # Round trip: the file on disk, not just the dict, satisfies its own shape.
+    assert validate_run_meta(meta) is expected
     if n > 1:  # n=1 writes run_case's own meta; the aggregate keys/report exist only for n>1
         assert meta["counts"] == {} and meta["score_means"] == {}
         assert (root / "report.html").is_file()
+        trial_meta = json.loads((root / "trial-01" / "run.json").read_text())
+        assert validate_run_meta(trial_meta) is RunKind.TRIAL
 
 
 def test_case_score_error_is_isolated(tmp_path):
@@ -1359,11 +1373,18 @@ def test_case_score_error_is_isolated(tmp_path):
     )
     root = Path(result["run_root"])
     sp_card = json.loads((root / "superpowers" / "scorecard.json").read_text())
-    assert sp_card == {"error": "RuntimeError: boom"}
+    assert sp_card == {"schema_version": 1, "error": "RuntimeError: boom"}
     plain_card = json.loads((root / "plain" / "scorecard.json").read_text())
-    assert plain_card == {"flow": "plain", "objective": {"acceptance": 1.0}}
+    assert plain_card == {
+        "schema_version": 1,
+        "flow": "plain",
+        "objective": {"acceptance": 1.0},
+    }
     meta = json.loads((root / "run.json").read_text())
     assert meta["flow_stats"]["superpowers"]["score_error"] == "RuntimeError: boom"
+    assert meta["flow_stats"]["superpowers"]["outcome"] == "scorer_failed"
+    assert meta["outcomes"]["superpowers"] == "scorer_failed"
+    assert meta["outcomes"]["plain"] == "ok"
     assert calls["n"] == 2
 
     from flowbench.report.compare import compare_table, load_scorecards
@@ -1374,6 +1395,106 @@ def test_case_score_error_is_isolated(tmp_path):
     lines = table.splitlines()
     status_line = next(line for line in lines if line.startswith("| _status_"))
     assert "ok" in status_line
+
+
+async def test_scorecards_are_stamped_with_the_schema_version(tmp_path):
+    """AC3: the engine stamps a card that carries no version; a card that
+    declares its own keeps it."""
+
+    async def score(flow, flow_dir, session):
+        if flow["name"] == "superpowers":
+            return {"schema_version": 99, "flow": "superpowers"}
+        return {"flow": "plain"}
+
+    mfd, ms, _ = n_run_factories([])
+    result = await run_case(
+        _unjudged_case(tmp_path, score),
+        run_id="stamp-run",
+        make_flow_driver=mfd,
+        make_simulator=ms,
+        run_judge=None,
+        runs_root=tmp_path,
+    )
+
+    root = Path(result["run_root"])
+    assert json.loads((root / "superpowers" / "scorecard.json").read_text()) == {
+        "schema_version": 99,
+        "flow": "superpowers",
+    }
+    assert json.loads((root / "plain" / "scorecard.json").read_text()) == {
+        "schema_version": 1,
+        "flow": "plain",
+    }
+
+
+class NeverStartsDriver(FakeDriver):
+    """A flow whose very first turn fails: the loop breaks before `turns += 1`,
+    so the session records `turns=0` and `exit_status="failed"`."""
+
+    async def start(self):
+        pass
+
+    async def send(self, text):
+        self.sent.append(text)
+        return TurnResult(TurnStatus.FAILED, "")
+
+    async def capture_session(self):
+        return {"items": [], "events": []}
+
+
+async def test_outcomes_distinguish_no_start_from_no_deliverable(tmp_path):
+    """AC7: a flow that never started outranks the deliverable it never wrote."""
+    flows = [
+        {"name": "a", "harness": "claude-native", "model": "opus", "skills": "none"},
+        {"name": "b", "harness": "claude-native", "model": "opus", "skills": "none"},
+    ]
+
+    def make_flow_driver(flow, flow_dir):
+        if flow["name"] == "a":
+            return NeverStartsDriver("unused", [], run_dir=flow_dir)
+        return MissingPlanDriver("unused", [], run_dir=flow_dir)
+
+    case = _scored(_case_files(tmp_path / "case", flows=flows, judge=False), _card)
+    result = await run_case(
+        case,
+        run_id="outcome-run",
+        make_flow_driver=make_flow_driver,
+        make_simulator=_sim,
+        run_judge=None,
+        runs_root=tmp_path,
+        artifact_grace_s=0.0,
+    )
+
+    root = Path(result["run_root"])
+    meta = json.loads((root / "run.json").read_text())
+    assert meta["outcomes"] == {"a": "no_start", "b": "no_deliverable"}
+    assert meta["flow_stats"]["a"]["outcome"] == "no_start"
+    assert meta["flow_stats"]["b"]["outcome"] == "no_deliverable"
+    assert sorted(meta["artifact_missing"]) == ["a", "b"]
+
+
+async def test_a_degenerate_card_is_a_degenerate_outcome(tmp_path):
+    """AC9: a card that declares itself unrankable makes the flow degenerate."""
+    flows = [
+        {"name": "x", "harness": "claude-native", "model": "opus", "skills": "none"},
+        {"name": "y", "harness": "claude-native", "model": "opus", "skills": "none"},
+    ]
+
+    async def score(flow, flow_dir, session):
+        return {"flow": flow["name"], "degenerate": flow["name"] == "x"}
+
+    case = _scored(_case_files(tmp_path / "case", flows=flows, judge=False), score)
+    result = await run_case(
+        case,
+        run_id="degenerate-run",
+        make_flow_driver=lambda flow, flow_dir: FakeDriver("# p", [], run_dir=flow_dir),
+        make_simulator=_sim,
+        run_judge=None,
+        runs_root=tmp_path,
+    )
+
+    meta = json.loads((Path(result["run_root"]) / "run.json").read_text())
+    assert meta["outcomes"] == {"x": "degenerate", "y": "ok"}
 
 
 def test_no_score_override_writes_no_scorecard_and_still_judges(tmp_path):
@@ -1553,7 +1674,10 @@ async def test_no_deliverable_omits_the_artifact_keys(tmp_path):
     for name in ("superpowers", "plain"):
         assert (root / name / "session.json").is_file()
         assert (root / name / "transcript.md").is_file()
-        assert json.loads((root / name / "scorecard.json").read_text()) == {"flow": name}
+        assert json.loads((root / name / "scorecard.json").read_text()) == {
+            "schema_version": 1,
+            "flow": name,
+        }
 
 
 async def test_no_deliverable_with_judge_reports_null_and_no_missing_key(tmp_path):

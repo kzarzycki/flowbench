@@ -168,6 +168,8 @@ class RunWatch:
                 line = f"TRIAL DONE: {trial} winner={meta.get('winner_flow')}"
                 if "artifact_missing" in meta:
                     line += f" missing={meta['artifact_missing']}"
+                if meta.get("outcomes"):
+                    line += f" outcomes={meta['outcomes']}"
                 events.append(line)
         return events
 

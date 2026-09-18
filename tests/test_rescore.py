@@ -28,7 +28,7 @@ def _write_flow(run_root: Path, name: str, *, with_session: bool = True) -> None
     (flow_dir / "transcript.md").write_text(f"# Transcript {name}\n")
     if with_session:
         (flow_dir / "session.json").write_text(
-            json.dumps({"exit_status": "idle", "turns": 1, "items": []})
+            json.dumps({"exit_status": "idle", "turns": 1, "items": [], "artifact_exists": True})
         )
     (flow_dir / "scorecard.json").write_text(json.dumps({"stale": True}))
 
@@ -62,7 +62,7 @@ def test_rescore_run_success_clears_stale_error_and_rewrites_scorecards(tmp_path
     assert result == {"superpowers": "ok", "plain": "ok"}
     for name in ("superpowers", "plain"):
         card = json.loads((run_root / name / "scorecard.json").read_text())
-        assert card == {"flow": name, "objective": {"acceptance": 1.0}}
+        assert card == {"schema_version": 1, "flow": name, "objective": {"acceptance": 1.0}}
     meta = json.loads((run_root / "run.json").read_text())
     assert "score_error" not in meta["flow_stats"]["superpowers"]
     # rescore never touches transcripts or session.json
@@ -86,9 +86,9 @@ def test_rescore_run_isolates_one_flows_failure(tmp_path):
     assert result["superpowers"] == "RuntimeError: boom"
     assert result["plain"] == "ok"
     sp_card = json.loads((run_root / "superpowers" / "scorecard.json").read_text())
-    assert sp_card == {"error": "RuntimeError: boom"}
+    assert sp_card == {"schema_version": 1, "error": "RuntimeError: boom"}
     plain_card = json.loads((run_root / "plain" / "scorecard.json").read_text())
-    assert plain_card == {"flow": "plain"}
+    assert plain_card == {"schema_version": 1, "flow": "plain"}
     meta = json.loads((run_root / "run.json").read_text())
     assert meta["flow_stats"]["superpowers"]["score_error"] == "RuntimeError: boom"
 
@@ -158,7 +158,7 @@ def test_rescore_run_flow_absent_from_flows_yaml_is_keyerror(tmp_path):
     assert result["plain"] == "ok"
     assert result["ghost"].startswith("KeyError")
     ghost_card = json.loads((run_root / "ghost" / "scorecard.json").read_text())
-    assert ghost_card == {"error": result["ghost"]}
+    assert ghost_card == {"schema_version": 1, "error": result["ghost"]}
     meta = json.loads((run_root / "run.json").read_text())
     assert meta["flow_stats"]["ghost"]["score_error"] == result["ghost"]
 
@@ -217,7 +217,7 @@ async def test_rescore_rewrites_from_disk_without_touching_sessions(tmp_path):
     assert result == {"superpowers": "ok", "plain": "ok"}
     for name in ("superpowers", "plain"):
         card = json.loads((run_root / name / "scorecard.json").read_text())
-        assert card == {"flow": name, "pass": 2, "turns": 0}
+        assert card == {"schema_version": 1, "flow": name, "pass": 2, "turns": 0}
         assert (run_root / name / "session.json").read_bytes() == before[name]
     assert json.loads((run_root / "run.json").read_text())["flow_stats"]["plain"]
 
@@ -231,3 +231,96 @@ async def test_rescore_deletes_a_stale_scorecard_when_score_returns_none(tmp_pat
     assert result == {"superpowers": "ok", "plain": "ok"}
     for name in ("superpowers", "plain"):
         assert not (run_root / name / "scorecard.json").exists()
+
+
+# --- schema v1: the manifest it rewrites, and the card it stamps --------------
+
+
+def _write_v1_run_json(run_root: Path, flows: list[str], flow_stats: dict) -> None:
+    """A trial manifest as `run_case` writes it today: versioned, discriminated,
+    and carrying the `outcomes` mirror of `flow_stats[*].outcome`."""
+    meta = {
+        "schema_version": 1,
+        "kind": "trial",
+        "run_id": run_root.name,
+        "flows": flows,
+        "flow_stats": flow_stats,
+        "outcomes": {n: s.get("outcome") for n, s in flow_stats.items()},
+    }
+    (run_root / "run.json").write_text(json.dumps(meta, indent=2))
+
+
+def test_rescore_recomputes_the_outcome_and_its_mirror(tmp_path):
+    run_root = tmp_path / "run-v1"
+    _write_flow(run_root, "superpowers")
+    _write_flow(run_root, "plain")
+    _write_v1_run_json(
+        run_root,
+        ["superpowers", "plain"],
+        {
+            "superpowers": {
+                "turns": 1,
+                "score_error": "OldError: boom",
+                "outcome": "scorer_failed",
+            },
+            "plain": {"turns": 1, "outcome": "ok"},
+        },
+    )
+
+    async def score_flow(flow, flow_dir, session):
+        return {"flow": flow["name"]}
+
+    result = asyncio.run(rescore_run(_case(score_flow), run_root))
+
+    assert result == {"superpowers": "ok", "plain": "ok"}
+    meta = json.loads((run_root / "run.json").read_text())
+    assert "score_error" not in meta["flow_stats"]["superpowers"]
+    assert meta["flow_stats"]["superpowers"]["outcome"] == "ok"
+    assert meta["outcomes"] == {"superpowers": "ok", "plain": "ok"}
+
+
+def test_rescore_leaves_a_v1_aggregate_run_json_untouched(tmp_path):
+    run_root = tmp_path / "run-v1-agg"
+    trial_dir = run_root / "trial-01"
+    _write_flow(trial_dir, "plain")
+    _write_v1_run_json(trial_dir, ["plain"], {"plain": {"turns": 1, "outcome": "ok"}})
+    aggregate = {
+        "schema_version": 1,
+        "kind": "aggregate",
+        "run_id": "run-v1-agg",
+        "n": 1,
+        "flows": ["plain"],
+    }
+    (run_root / "run.json").write_text(json.dumps(aggregate, indent=2))
+    before = (run_root / "run.json").read_bytes()
+
+    async def score_flow(flow, flow_dir, session):
+        return {"flow": flow["name"]}
+
+    result = asyncio.run(rescore_run(_case(score_flow), run_root))
+
+    assert result == {"trial-01/plain": "ok"}
+    assert (run_root / "run.json").read_bytes() == before
+
+
+def test_rescore_stamps_the_card_it_writes(tmp_path):
+    run_root = tmp_path / "run-stamp"
+    _write_flow(run_root, "superpowers")
+    _write_flow(run_root, "plain")
+    _write_v1_run_json(
+        run_root,
+        ["superpowers", "plain"],
+        {"superpowers": {"turns": 1, "outcome": "ok"}, "plain": {"turns": 1, "outcome": "ok"}},
+    )
+
+    async def score_flow(flow, flow_dir, session):
+        if flow["name"] == "superpowers":
+            return {"schema_version": 99, "flow": flow["name"]}
+        return {"flow": flow["name"]}
+
+    asyncio.run(rescore_run(_case(score_flow), run_root))
+
+    own = json.loads((run_root / "superpowers" / "scorecard.json").read_text())
+    assert own["schema_version"] == 99
+    stamped = json.loads((run_root / "plain" / "scorecard.json").read_text())
+    assert stamped["schema_version"] == 1

@@ -51,6 +51,9 @@ uv run flowbench run scenarios/swe_e2e/cases/todo_app --rescore <id>
 
 - `src/flowbench/types.py` — the engine's vocabulary of turn outcomes: `TurnStatus` (a `StrEnum`),
   `TurnResult`, and the `UserModel`/`Completion` protocols `run_agent_session` drives.
+- `src/flowbench/schema.py` — the on-disk run schema: `SCHEMA_VERSION`, `RunKind`,
+  `FlowOutcome`, `validate_run_meta`; the format and its reader rules are
+  `docs/design/run-schema.md`.
 - `src/flowbench/driver/` — the agent-eval runtime's spawning half: `base.py` (`AgentDriver` ABC),
   `omnigent.py` (`OmnigentDriver`: session lifecycle, send/settle, capture, subscription guard),
   `bundle.py` (`render_config`/`build_bundle`/`session_metadata` — the per-flow skills/MCP bundle,
