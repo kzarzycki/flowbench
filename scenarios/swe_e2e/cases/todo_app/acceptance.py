@@ -36,7 +36,7 @@ class AcceptanceResult:
         return round(self.passed / self.total, 3) if self.total else 0.0
 
 
-_SKIP_PARTS = (".git", ".venv", "__pycache__", ".pytest_cache", ".memsearch")
+_SKIP_PARTS = (".git", ".venv", "__pycache__", ".pytest_cache")
 
 
 def resolve_app_dir(workspace: Path) -> Path:

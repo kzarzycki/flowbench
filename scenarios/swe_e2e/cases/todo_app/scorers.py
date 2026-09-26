@@ -212,10 +212,7 @@ def collect_code(workspace: Path, *, cap: int = 9000) -> str:
     files = sorted(
         p
         for p in ws.rglob("*.py")
-        if ".git" not in p.parts
-        and "__pycache__" not in p.parts
-        and ".pytest_cache" not in p.parts
-        and ".memsearch" not in p.parts
+        if ".git" not in p.parts and "__pycache__" not in p.parts and ".pytest_cache" not in p.parts
     )
     out, used = [], 0
     for p in files:
@@ -242,7 +239,7 @@ def detect_phases(
     specs_dir, plans_dir = ws / "docs/superpowers/specs", ws / "docs/superpowers/plans"
     specs = list(specs_dir.glob("*.md")) if specs_dir.exists() else []
     plans = list(plans_dir.glob("*.md")) if plans_dir.exists() else []
-    _skip = (".git", ".venv", "__pycache__", ".pytest_cache", ".memsearch")
+    _skip = (".git", ".venv", "__pycache__", ".pytest_cache")
     tests_present = any(
         p
         for p in (*ws.rglob("test_*.py"), *ws.rglob("*_test.py"))
