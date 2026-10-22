@@ -7,8 +7,5 @@
     "research@dev": false,
     "xebia-personal@dev": false,
     "playwright@dev": false
-  },
-  "env": {
-    "CLAUDE_CODE_ENABLE_TELEMETRY": "1"
   }
 }
