@@ -19,7 +19,14 @@ from flowbench.testing import FakeDriver, StubSim
 from flowbench.types import TurnResult, TurnStatus
 
 CASE_DIR = Path(__file__).parents[3] / "scenarios" / "smoke" / "hello"
-FILES = ("task.md", "simulator.md", "knowledge.md", "flows.yaml", "case.py")
+FILES = (
+    "task.md",
+    "simulator.md",
+    "knowledge.md",
+    "flows.yaml",
+    "case.py",
+    "skills/greeting-file/SKILL.md",
+)
 FLOW = {"name": "claude"}
 
 ASKED = "Which file do you want, and what should the line say?"
@@ -176,3 +183,56 @@ async def test_score_reports_a_missing_or_wrong_file(session):
     assert card["objective"]["acceptance"] == 0.0
     assert card["deliverable"]["greets"] is False
     assert card["deliverable"]["exists"] is session["artifact_exists"]
+
+
+def _skill_call(name: str) -> dict:
+    """A `Skill` tool call as omnigent captures it in the session items."""
+    return {"type": "function_call", "name": "Skill", "arguments": json.dumps({"skill": name})}
+
+
+def test_flow_declares_the_seeded_skill():
+    """A11: the flow names the `project` setting source and exactly one skill dir,
+    which the seeding step places at `<flow_dir>/.claude/skills/greeting-file/`."""
+    (flow,) = load_flows(CASE_DIR / "flows.yaml")
+
+    assert flow["skills"] == ["project"]
+    assert [Path(d).name for d in flow["skill_dirs"]] == ["greeting-file"]
+    assert (CASE_DIR / "skills" / "greeting-file" / "SKILL.md").is_file()
+
+    # the skill is under the same withholding rule as task.md: it says to ASK
+    skill = (CASE_DIR / "skills" / "greeting-file" / "SKILL.md").read_text().lower()
+    assert "hello" not in skill and ".txt" not in skill
+
+
+@pytest.mark.parametrize(
+    "items, fired",
+    [
+        ([_skill_call("greeting-file")], True),
+        # the bundle path exposed a namespaced name; the workspace path a bare one
+        ([_skill_call("claude_code:greeting-file")], True),
+        ([_skill_call("writing-plans")], False),
+        ([{"type": "function_call", "name": "Write", "arguments": "{}"}], False),
+        ([{"type": "function_call", "name": "Skill", "arguments": "not json"}], False),
+        ([{"type": "function_call", "name": "Skill"}], False),
+        # valid JSON that is not an object: `.get` would raise AttributeError
+        ([{"type": "function_call", "name": "Skill", "arguments": "3"}], False),
+        ([{"type": "function_call", "name": "Skill", "arguments": "[1]"}], False),
+        ([{"type": "function_call", "name": "Skill", "arguments": "null"}], False),
+        ([{"type": "function_call", "name": "Skill", "arguments": '"x"'}], False),
+        # an object whose `skill` is not a string
+        ([{"type": "function_call", "name": "Skill", "arguments": '{"skill": 7}'}], False),
+        ([], False),
+    ],
+)
+async def test_score_reports_skill_fired(items, fired):
+    """A11: ground truth that the workspace-seeded skill LOADED — a real tool call,
+    never the agent narrating that it used one. Malformed arguments report False
+    rather than raising: a scorer must not lose the whole run to one bad item."""
+    case = load_case(CASE_DIR)
+    session = {"artifact_exists": True, "artifact_text": "Hello, world!\n", "items": items}
+
+    card = await case.score({"name": "claude"}, CASE_DIR, session)
+
+    assert card["skill_fired"] is fired
+    # reported, not scored: the deliverable still decides acceptance
+    assert card["objective"]["acceptance"] == 1.0

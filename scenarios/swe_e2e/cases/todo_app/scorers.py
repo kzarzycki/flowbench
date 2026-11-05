@@ -185,8 +185,9 @@ def skills_report(session: dict) -> dict:
     headline question (the SUT judged the task too simple and skipped it once);
     `brainstorming_used` is the specific signal that the clarify-first invite took."""
     used = skills_invoked(session)
-    # Namespace-agnostic: the host plugin exposes `superpowers:<name>`, the vendored
-    # bundle (skills: none + skill_dirs) exposes `claude_code:<name>` (#51).
+    # Namespace-agnostic: the host plugin exposes `superpowers:<name>`, the bundle
+    # that preceded #157 exposed `claude_code:<name>` (#51), and the workspace the
+    # vendored set is seeded into now exposes a bare `<name>`.
     superpowers = [s for s in used if s.rsplit(":", 1)[-1] in SUPERPOWERS_SKILLS]
     return {
         "invoked": used,
