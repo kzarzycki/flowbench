@@ -263,3 +263,29 @@ Cross-session memory for both repos — flowbench (engine) and flowbench-scenari
 - agy stalls a review turn the moment it reaches for the test suite (#151): a reviewer brief has to
   forbid running anything, not just writing. Two gate-2 dispatches died that way before the third
   returned a verdict.
+## 2026-09-12 — flowbench#110 run.json / scorecard.json schema v1 (PR #178)
+- Both manifest shapes now declare `schema_version: 1` and `kind`, so the three readers that
+  guessed on key presence (`render_any` on `trials`, `rescore_run` on `flow_stats`, `RunWatch` on
+  the glob path) read the discriminator instead; `docs/design/run-schema.md` states the format and
+  its five reader rules once, `src/flowbench/schema.py` is the executable copy.
+- `FlowOutcome` (`no_start` → `no_deliverable` → `scorer_failed` → `degenerate` → `ok`, first match
+  wins) closes what #162 left open, and every value states what `compare`, the report and gate 5 do
+  with it — a vocabulary whose values no reader acts on is the thing #162 refused to ship.
+  `degenerate` is a one-key contract read off the card: whether a column is rankable is case
+  knowledge (#156), never an engine heuristic.
+- Split that has to hold: `compare` degrades on every version defect (it calls `schema_version_of`,
+  never `require_version`) while the report renderers raise. Gate 3's one advisory was a real hole
+  in it — `schema_version_of` crashed on a `run.json` that parses to `[]` or `null`, which is
+  exactly the malformed file the isolation rule exists for. Fixed on the PR, not deferred.
+- Enumerating assertion sites by line number in a plan produced three misses across two gates
+  (r1 objections 1–2, then task 6's fifth site). The reviewer caught each; the practice is the
+  defect. Name the test function and the class of assertion instead.
+- Gate 2 reached APPROVE on round 4, past the three-attempt cap, by coordinator ruling: objections
+  converged 8 → 5 → 3, all mechanical test-spec defects with no design dispute. Cap amendment is
+  #173's, not litigated here.
+- `antigravity-native` ran gates 2 (×4) and 3 with no stalls, hours after the same harness stalled
+  #110's gate 1 three times on this host — the failure in #174 is intermittent, not total, and the
+  gate-1 stalls sit just before the host's ~14:09 DNS loss. Evidence on #174.
+- Live `smoke_todo_app/i110-6d555ed` (`--n 2`, branch head, `--runs-root ../flowbench-runs`): 4/4
+  sessions idle, `artifact_missing: []`, every outcome `ok`, both trials + the aggregate stamped
+  v1, `<th>outcome</th>` in the trial report, 0 prompts, winner tie.

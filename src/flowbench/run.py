@@ -26,6 +26,7 @@ from flowbench.runner.judge import (
     build_judge_prompt,
     parse_verdict,
 )
+from flowbench.schema import SCHEMA_VERSION, RunKind, flow_outcome, run_kind, validate_run_meta
 from flowbench.transcript import render_transcript
 
 NO_DELIVERABLE = "(no deliverable declared)"
@@ -207,7 +208,17 @@ async def run_case(
                 error = f"{type(e).__name__}: {e}"
                 card = {"error": error}
                 flow_stats[name]["score_error"] = error
+            flow_stats[name]["outcome"] = flow_outcome(
+                session=session,
+                has_deliverable=has_deliverable,
+                score_error=flow_stats[name].get("score_error"),
+                card=card,
+            )
             if card is not None:
+                # The envelope key first, and only when the card does not declare
+                # its own — a case that versions its scorecard keeps that version.
+                if "schema_version" not in card:
+                    card = {"schema_version": SCHEMA_VERSION, **card}
                 (flow_dir / "scorecard.json").write_text(json.dumps(card, indent=2, default=str))
         finally:
             await case.teardown(flow, flow_dir)
@@ -232,6 +243,8 @@ async def run_case(
         winner_flow = None
 
     meta = {
+        "schema_version": SCHEMA_VERSION,
+        "kind": RunKind.TRIAL,
         "run_id": run_id,
         "case": case.name,
         "deliverable": case.deliverable,
@@ -252,9 +265,15 @@ async def run_case(
             else {}
         ),
         "flow_stats": flow_stats,
+        # Built from flow_stats, so the two maps cannot disagree. A flow that
+        # raised before flow_stats[name] was set (case.setup blew up) is absent
+        # from both.
+        "outcomes": {n: s["outcome"] for n, s in flow_stats.items()},
         "models": {f["name"]: f.get("model") for f in flows},
         "reasoning_effort": {f["name"]: f.get("reasoning_effort") for f in flows},
     }
+    # Not caught: it raises only on a manifest this engine built wrong.
+    validate_run_meta(meta)
     (run_root / "run.json").write_text(json.dumps(meta, indent=2, default=str))
     if has_judge:
         render_report(run_root)  # pure reader over the files just written
@@ -330,6 +349,8 @@ async def run_case_n(
     root = Path(runs_root if runs_root is not None else case.settings.runs_root).resolve()
     run_root = root / case.name / run_id
     aggregate_meta = {
+        "schema_version": SCHEMA_VERSION,
+        "kind": RunKind.AGGREGATE,
         "run_id": run_id,
         "case": case.name,
         "deliverable": case.deliverable,
@@ -343,6 +364,8 @@ async def run_case_n(
         "winner": winner,
         "score_means": score_means,  # per flow name, mean per criterion
     }
+    # Not caught: it raises only on a manifest this engine built wrong.
+    validate_run_meta(aggregate_meta)
     (run_root / "run.json").write_text(json.dumps(aggregate_meta, indent=2, default=str))
     render_aggregate_report(run_root)  # pure reader over the files just written
     return {
@@ -381,7 +404,7 @@ async def rescore_run(case, run_root) -> dict[str, str]:
         if not run_json_path.is_file():
             continue
         meta = json.loads(run_json_path.read_text())
-        if not isinstance(meta, dict) or "flow_stats" not in meta:
+        if not isinstance(meta, dict) or run_kind(meta) is not RunKind.TRIAL:
             continue
 
         is_trial = target != run_root
@@ -411,7 +434,18 @@ async def rescore_run(case, run_root) -> dict[str, str]:
                 # read as a fresh verdict by `compare`.
                 card_path.unlink(missing_ok=True)
             else:
+                if "schema_version" not in card:
+                    card = {"schema_version": SCHEMA_VERSION, **card}
                 card_path.write_text(json.dumps(card, indent=2, default=str))
+            # A rescore can turn `scorer_failed` into `ok` or `degenerate`, so the
+            # outcome is recomputed from the fresh card, mirror included.
+            stats["outcome"] = flow_outcome(
+                session=session,
+                has_deliverable=case.deliverable is not None,
+                score_error=stats.get("score_error"),
+                card=card,
+            )
+            meta.setdefault("outcomes", {})[name] = stats["outcome"]
             changed = True
 
         if changed:

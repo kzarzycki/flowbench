@@ -68,3 +68,62 @@ def test_score_flow_error_card_is_a_failed_column(tmp_path):
     md = compare.render_compare(tmp_path, "r")
     assert "| _status_ | ok | FAILED (RuntimeError: boom) |" in md
     assert "| acceptance | 0.7 | — |" in md
+
+
+# --- the schema version the comparison reads ---------------------------------
+
+
+def test_v0_cards_are_noted_and_still_render_their_metrics(tmp_path):
+    _write(tmp_path, "r", "baseline", _card(True, 0.7, {"shape_fit": 0.6}))
+    _write(tmp_path, "r", "superpowers", _card(True, 0.9, {"shape_fit": 0.85}))
+    md = compare.render_compare(tmp_path, "r")
+    assert "schema v0" in md
+    assert "| acceptance | 0.7 | 0.9 |" in md
+    assert "| judge.shape_fit | 0.6 | 0.85 |" in md
+
+
+def test_a_card_from_a_newer_flowbench_is_a_failed_column(tmp_path):
+    _write(tmp_path, "r", "baseline", _card(True, 0.7, {"shape_fit": 0.6}) | {"schema_version": 1})
+    _write(
+        tmp_path, "r", "superpowers", _card(True, 0.9, {"shape_fit": 0.85}) | {"schema_version": 2}
+    )
+    md = compare.render_compare(tmp_path, "r")
+    assert "unsupported schema_version 2" in md
+    assert "| _status_ | ok | FAILED |" in md
+    assert "| acceptance | 0.7 | FAILED |" in md
+
+
+def _v1_cards(tmp_path):
+    _write(tmp_path, "r", "a", _card(True, 0.7, {"shape_fit": 0.6}) | {"schema_version": 1})
+    _write(tmp_path, "r", "b", _card(True, 0.9, {"shape_fit": 0.85}) | {"schema_version": 1})
+
+
+def test_degenerate_outcomes_make_the_comparison_unrankable(tmp_path):
+    _v1_cards(tmp_path)
+    (tmp_path / "r" / "run.json").write_text(
+        json.dumps({"schema_version": 1, "outcomes": {"a": "degenerate", "b": "ok"}})
+    )
+    md = compare.render_compare(tmp_path, "r")
+    assert "| _outcome_ | degenerate | ok |" in md
+    not_rankable = [ln for ln in md.splitlines() if "not rankable" in ln]
+    assert len(not_rankable) == 1 and "a" in not_rankable[0]
+    assert "| acceptance | 0.7 | 0.9 |" in md
+
+
+def test_a_run_dir_without_a_manifest_renders_todays_table(tmp_path):
+    _v1_cards(tmp_path)
+    md = compare.render_compare(tmp_path, "r")
+    assert "_outcome_" not in md
+    assert "not rankable" not in md
+    assert "unsupported schema_version" not in md
+    assert "| acceptance | 0.7 | 0.9 |" in md
+
+
+def test_a_manifest_from_a_newer_flowbench_is_a_note_not_an_abort(tmp_path):
+    _v1_cards(tmp_path)
+    (tmp_path / "r" / "run.json").write_text(json.dumps({"schema_version": 2}))
+    md = compare.render_compare(tmp_path, "r")
+    assert "unsupported schema_version 2" in md
+    assert "_outcome_" not in md
+    assert "| acceptance | 0.7 | 0.9 |" in md
+    assert "| judge.shape_fit | 0.6 | 0.85 |" in md
