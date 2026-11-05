@@ -6,8 +6,6 @@
 # Coding-agent generated/cache state
 apm_modules/
 fnox.local.toml
-# Local session memory — holds a pid and a write lock, not shared state.
-.memsearch/
 
 # OS / editor
 .DS_Store
@@ -30,8 +28,7 @@ build/
 coverage.xml
 htmlcov/
 
-# cross-session memory + logs (local only)
-.memsearch/
+# logs (local only)
 /logs/
 /reports/
 flowbench-runs/  # a run root someone pointed at the checkout by hand
